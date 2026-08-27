@@ -1,0 +1,299 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ballpark Weather Lab daily slate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "product",
+    "date",
+    "generated_at",
+    "status",
+    "no_slate_reason",
+    "model",
+    "health",
+    "games"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "product": { "const": "ballpark-weather-lab" },
+    "date": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "status": { "enum": ["ready", "degraded", "no_slate"] },
+    "no_slate_reason": { "type": ["string", "null"] },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "artifact_version", "evidence_games", "split", "held_out_rmse", "statement", "approach_c"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "artifact_version": { "type": "string", "minLength": 1 },
+        "evidence_games": { "const": 21608 },
+        "split": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["train", "validation_2024", "test_2025"],
+          "properties": {
+            "train": { "const": 17075 },
+            "validation_2024": { "const": 2302 },
+            "test_2025": { "const": 2231 }
+          }
+        },
+        "held_out_rmse": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["runs", "home_runs"],
+          "properties": {
+            "runs": { "type": "number", "minimum": 0 },
+            "home_runs": { "type": "number", "minimum": 0 }
+          }
+        },
+        "statement": { "type": "string", "minLength": 1 },
+        "approach_c": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "used_in_headline", "batter_profiles", "trajectory_entries", "stadium_geometries"],
+          "properties": {
+            "state": { "const": "experimental_optional" },
+            "used_in_headline": { "const": false },
+            "batter_profiles": { "const": 839 },
+            "trajectory_entries": { "const": 3018625 },
+            "stadium_geometries": { "const": 30 }
+          }
+        }
+      }
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schedule", "weather", "lineups", "artifacts"],
+      "properties": {
+        "schedule": { "$ref": "#/$defs/scheduleHealth" },
+        "weather": { "$ref": "#/$defs/weatherHealth" },
+        "lineups": { "$ref": "#/$defs/lineupHealth" },
+        "artifacts": { "$ref": "#/$defs/artifactHealth" }
+      }
+    },
+    "games": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/game" }
+    }
+  },
+  "$defs": {
+    "scheduleHealth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "source", "game_count"],
+      "properties": {
+        "state": { "const": "available" },
+        "source": { "type": "string", "minLength": 1 },
+        "game_count": { "type": "integer", "minimum": 0, "maximum": 30 }
+      }
+    },
+    "weatherHealth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "source", "verified_games", "held_games"],
+      "properties": {
+        "state": { "enum": ["available", "partial", "unavailable", "not_applicable"] },
+        "source": { "type": "string", "minLength": 1 },
+        "verified_games": { "type": "integer", "minimum": 0, "maximum": 30 },
+        "held_games": { "type": "integer", "minimum": 0, "maximum": 30 }
+      }
+    },
+    "lineupHealth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "source", "confirmed_games", "optional"],
+      "properties": {
+        "state": { "enum": ["available", "partial", "unavailable", "not_yet_available", "not_applicable"] },
+        "source": { "type": "string", "minLength": 1 },
+        "confirmed_games": { "type": "integer", "minimum": 0, "maximum": 30 },
+        "optional": { "const": true }
+      }
+    },
+    "artifactHealth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state", "approach_c_state", "optional_errors", "manifest_sha256", "files_checked",
+        "evidence_games", "batter_profiles", "trajectory_entries", "stadium_geometries"
+      ],
+      "properties": {
+        "state": { "enum": ["verified", "partial"] },
+        "approach_c_state": { "enum": ["verified", "unavailable"] },
+        "optional_errors": { "type": "array", "items": { "type": "string" } },
+        "manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "files_checked": { "type": "integer", "minimum": 5, "maximum": 100 },
+        "evidence_games": { "const": 21608 },
+        "batter_profiles": { "const": 839 },
+        "trajectory_entries": { "const": 3018625 },
+        "stadium_geometries": { "const": 30 }
+      }
+    },
+    "nullableNumber": { "type": ["number", "null"] },
+    "weather": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "game_pk", "state", "source", "basis", "reason", "valid_at", "fetched_at",
+        "temperature_f", "humidity_pct", "wind_speed_mph", "wind_direction_deg",
+        "wind_carry_mph", "wind_cross_mph", "air_density_index", "pressure_hpa",
+        "dome_active", "roof_state"
+      ],
+      "properties": {
+        "game_pk": { "type": "integer", "minimum": 1 },
+        "state": { "enum": ["verified", "degraded"] },
+        "source": { "type": "string", "minLength": 1 },
+        "basis": { "enum": ["forecast", "observation", "indoor", "neutral"] },
+        "reason": { "type": ["string", "null"] },
+        "valid_at": { "type": ["string", "null"], "format": "date-time" },
+        "fetched_at": { "type": ["string", "null"], "format": "date-time" },
+        "temperature_f": { "type": "number", "minimum": -80, "maximum": 150 },
+        "humidity_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "wind_speed_mph": { "type": "number", "minimum": 0, "maximum": 250 },
+        "wind_direction_deg": { "type": ["number", "null"], "minimum": 0, "maximum": 360 },
+        "wind_carry_mph": { "type": "number", "minimum": -250, "maximum": 250 },
+        "wind_cross_mph": { "type": "number", "minimum": -250, "maximum": 250 },
+        "air_density_index": { "type": "number", "minimum": 0, "maximum": 200 },
+        "pressure_hpa": { "type": "number", "minimum": 500, "maximum": 1200 },
+        "dome_active": { "type": "boolean" },
+        "roof_state": { "enum": ["open-air", "fixed-roof", "unconfirmed", "unknown"] }
+      }
+    },
+    "factors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state", "reason", "seasonal_pf_runs", "seasonal_pf_hr",
+        "weather_multiplier_runs", "weather_multiplier_hr", "game_pf_runs", "game_pf_hr",
+        "weather_delta_runs", "weather_delta_hr", "hr_baseline_as_of"
+      ],
+      "properties": {
+        "state": { "enum": ["modeled", "held"] },
+        "reason": { "type": ["string", "null"] },
+        "seasonal_pf_runs": { "type": "number", "minimum": 0.1, "maximum": 5 },
+        "seasonal_pf_hr": { "type": "number", "minimum": 0.1, "maximum": 5 },
+        "weather_multiplier_runs": { "type": "number", "minimum": 0.7, "maximum": 1.4 },
+        "weather_multiplier_hr": { "type": "number", "minimum": 0.7, "maximum": 1.4 },
+        "game_pf_runs": { "type": "number", "minimum": 0.1, "maximum": 5 },
+        "game_pf_hr": { "type": "number", "minimum": 0.1, "maximum": 5 },
+        "weather_delta_runs": { "type": "number", "minimum": -5, "maximum": 5 },
+        "weather_delta_hr": { "type": "number", "minimum": -5, "maximum": 5 },
+        "hr_baseline_as_of": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+      }
+    },
+    "lineup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reason", "observed_at", "home_count", "away_count"],
+      "properties": {
+        "state": { "enum": ["confirmed", "partial", "not_yet_available", "unavailable"] },
+        "reason": { "type": ["string", "null"] },
+        "observed_at": { "type": ["string", "null"], "format": "date-time" },
+        "home_count": { "type": "integer", "minimum": 0, "maximum": 9 },
+        "away_count": { "type": "integer", "minimum": 0, "maximum": 9 }
+      }
+    },
+    "game": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "game_pk", "game_date", "game_time", "game_status", "game_number", "doubleheader",
+        "home_team", "away_team", "venue", "home_pitcher", "away_pitcher",
+        "weather", "factors", "lineup", "approach_c", "trajectory"
+      ],
+      "properties": {
+        "game_pk": { "type": "integer", "minimum": 1 },
+        "game_date": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "game_time": {
+          "oneOf": [
+            { "const": "" },
+            { "type": "string", "format": "date-time" }
+          ]
+        },
+        "game_status": { "type": "string", "minLength": 1 },
+        "game_number": { "type": "integer", "minimum": 1 },
+        "doubleheader": { "type": "string", "minLength": 1 },
+        "home_team": { "type": "string", "pattern": "^[A-Z]{2,3}$" },
+        "away_team": { "type": "string", "pattern": "^[A-Z]{2,3}$" },
+        "venue": { "type": "string", "minLength": 1 },
+        "home_pitcher": { "type": ["string", "null"] },
+        "away_pitcher": { "type": ["string", "null"] },
+        "weather": { "$ref": "#/$defs/weather" },
+        "factors": { "$ref": "#/$defs/factors" },
+        "lineup": { "$ref": "#/$defs/lineup" },
+        "approach_c": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "reason", "used_in_headline", "method"],
+          "properties": {
+            "state": { "enum": ["experimental", "not_available"] },
+            "reason": { "type": ["string", "null"] },
+            "used_in_headline": { "const": false },
+            "method": { "type": "string", "minLength": 1 },
+            "home_hr_index": { "type": "number", "minimum": 0.3, "maximum": 3 },
+            "away_hr_index": { "type": "number", "minimum": 0.3, "maximum": 3 },
+            "home_minus_away": { "type": "number", "minimum": -2.7, "maximum": 2.7 },
+            "home_profile_coverage": { "type": "integer", "minimum": 0, "maximum": 9 },
+            "away_profile_coverage": { "type": "integer", "minimum": 0, "maximum": 9 }
+          }
+        },
+        "trajectory": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "reason", "integration", "arcs"],
+          "properties": {
+            "state": { "enum": ["available", "held"] },
+            "reason": { "type": ["string", "null"] },
+            "integration": { "const": "bounded Euler approximation" },
+            "arcs": {
+              "type": "array",
+              "maxItems": 3,
+              "items": { "$ref": "#/$defs/trajectoryArc" }
+            }
+          }
+        }
+      }
+    },
+    "trajectoryPoint": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "number", "minimum": 0, "maximum": 1000 },
+        { "type": "number", "minimum": 0, "maximum": 1000 }
+      ],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "trajectoryArc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "archetype", "exit_velocity_mph", "launch_angle_deg", "spray_angle_deg",
+        "weather_distance_ft", "neutral_distance_ft", "carry_delta_ft",
+        "weather_points_ft", "neutral_points_ft"
+      ],
+      "properties": {
+        "archetype": { "type": "string", "minLength": 1 },
+        "exit_velocity_mph": { "type": "number", "minimum": 0, "maximum": 150 },
+        "launch_angle_deg": { "type": "number", "minimum": -90, "maximum": 90 },
+        "spray_angle_deg": { "type": "number", "minimum": -90, "maximum": 90 },
+        "weather_distance_ft": { "type": "number", "minimum": 0, "maximum": 1000 },
+        "neutral_distance_ft": { "type": "number", "minimum": 0, "maximum": 1000 },
+        "carry_delta_ft": { "type": "number", "minimum": -1000, "maximum": 1000 },
+        "weather_points_ft": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/trajectoryPoint" }
+        },
+        "neutral_points_ft": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/trajectoryPoint" }
+        }
+      }
+    }
+  }
+}

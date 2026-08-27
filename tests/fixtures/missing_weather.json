@@ -1,0 +1,20 @@
+{
+  "date": "2026-08-26",
+  "schedule": [
+    {
+      "game_pk": 810001,
+      "game_date": "2026-08-26",
+      "game_time": "2026-08-26T23:10:00Z",
+      "game_status": "Scheduled",
+      "game_number": 1,
+      "doubleheader": "N",
+      "home_team": "BOS",
+      "away_team": "NYY",
+      "venue": "Fenway Park",
+      "home_pitcher": null,
+      "away_pitcher": null
+    }
+  ],
+  "weather_by_game": {},
+  "lineups_by_game": {}
+}

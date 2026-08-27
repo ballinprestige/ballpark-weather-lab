@@ -1,0 +1,29 @@
+{
+  "date": "2026-08-26",
+  "schedule": [
+    {
+      "game_pk": 810001,
+      "game_date": "2026-08-26",
+      "game_time": "2026-08-26T18:10:00Z",
+      "game_status": "Scheduled",
+      "game_number": 1,
+      "doubleheader": "Y",
+      "home_team": "BOS",
+      "away_team": "NYY",
+      "venue": "Fenway Park"
+    },
+    {
+      "game_pk": 810001,
+      "game_date": "2026-08-26",
+      "game_time": "2026-08-26T23:10:00Z",
+      "game_status": "Scheduled",
+      "game_number": 2,
+      "doubleheader": "Y",
+      "home_team": "BOS",
+      "away_team": "NYY",
+      "venue": "Fenway Park"
+    }
+  ],
+  "weather_by_game": {},
+  "lineups_by_game": {}
+}

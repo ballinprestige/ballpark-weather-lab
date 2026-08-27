@@ -1,0 +1,40 @@
+{
+  "date": "2026-08-26",
+  "schedule": [
+    {
+      "game_pk": 810001,
+      "game_date": "2026-08-26",
+      "game_time": "2026-08-26T23:10:00Z",
+      "game_status": "Scheduled",
+      "game_number": 1,
+      "doubleheader": "N",
+      "home_team": "BOS",
+      "away_team": "NYY",
+      "venue": "Fenway Park",
+      "home_pitcher": null,
+      "away_pitcher": null
+    }
+  ],
+  "weather_by_game": {
+    "810001": {
+      "game_pk": 810001,
+      "state": "verified",
+      "source": "fixture",
+      "basis": "forecast",
+      "reason": null,
+      "valid_at": "2026-08-26T23:00:00Z",
+      "fetched_at": "2026-08-26T16:00:00Z",
+      "temperature_f": 78.0,
+      "humidity_pct": 54.0,
+      "wind_speed_mph": 8.0,
+      "wind_direction_deg": 225.0,
+      "wind_carry_mph": 4.2,
+      "wind_cross_mph": -6.8,
+      "air_density_index": 95.7,
+      "pressure_hpa": 1008.4,
+      "dome_active": false,
+      "roof_state": "open-air"
+    }
+  },
+  "lineups_by_game": {}
+}

@@ -1,0 +1,252 @@
+{
+  "schema_version": 1,
+  "source": "mlb_statcast_park_factors_hr",
+  "source_url": "https://baseballsavant.mlb.com/leaderboard/statcast-park-factors?rolling=1&year=2026&stat=index_HR&type=venue",
+  "metric": "index_HR",
+  "season": 2026,
+  "baseline_as_of": "2026-08-27",
+  "fetched_at": "2026-08-27T01:19:10.678519-07:00",
+  "raw_sha256": "f5b3b5d195d66b0d568406a990d7deedd09962266534a86cd2a0cb151410be9b",
+  "venues": {
+    "LAA": {
+      "main_team_id": 108,
+      "venue_name": "Angel Stadium",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 72.0,
+      "seasonal_pf_hr": 0.72
+    },
+    "BAL": {
+      "main_team_id": 110,
+      "venue_name": "Oriole Park at Camden Yards",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 106.0,
+      "seasonal_pf_hr": 1.06
+    },
+    "PHI": {
+      "main_team_id": 143,
+      "venue_name": "Citizens Bank Park",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 108.0,
+      "seasonal_pf_hr": 1.08
+    },
+    "BOS": {
+      "main_team_id": 111,
+      "venue_name": "Fenway Park",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 85.0,
+      "seasonal_pf_hr": 0.85
+    },
+    "CWS": {
+      "main_team_id": 145,
+      "venue_name": "Rate Field",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 97.0,
+      "seasonal_pf_hr": 0.97
+    },
+    "CLE": {
+      "main_team_id": 114,
+      "venue_name": "Progressive Field",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 88.0,
+      "seasonal_pf_hr": 0.88
+    },
+    "KC": {
+      "main_team_id": 118,
+      "venue_name": "Kauffman Stadium",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 100.0,
+      "seasonal_pf_hr": 1.0
+    },
+    "TB": {
+      "main_team_id": 139,
+      "venue_name": "Tropicana Field",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 116.0,
+      "seasonal_pf_hr": 1.16
+    },
+    "TOR": {
+      "main_team_id": 141,
+      "venue_name": "Rogers Centre",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 97.0,
+      "seasonal_pf_hr": 0.97
+    },
+    "ARI": {
+      "main_team_id": 109,
+      "venue_name": "Chase Field",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 93.0,
+      "seasonal_pf_hr": 0.93
+    },
+    "CHC": {
+      "main_team_id": 112,
+      "venue_name": "Wrigley Field",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 112.0,
+      "seasonal_pf_hr": 1.12
+    },
+    "COL": {
+      "main_team_id": 115,
+      "venue_name": "Coors Field",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 109.0,
+      "seasonal_pf_hr": 1.09
+    },
+    "LAD": {
+      "main_team_id": 119,
+      "venue_name": "UNIQLO Field at Dodger Stadium",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 107.0,
+      "seasonal_pf_hr": 1.07
+    },
+    "PIT": {
+      "main_team_id": 134,
+      "venue_name": "PNC Park",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 93.0,
+      "seasonal_pf_hr": 0.93
+    },
+    "MIL": {
+      "main_team_id": 158,
+      "venue_name": "American Family Field",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 96.0,
+      "seasonal_pf_hr": 0.96
+    },
+    "SEA": {
+      "main_team_id": 136,
+      "venue_name": "T-Mobile Park",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 111.0,
+      "seasonal_pf_hr": 1.11
+    },
+    "HOU": {
+      "main_team_id": 117,
+      "venue_name": "Daikin Park",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 115.0,
+      "seasonal_pf_hr": 1.15
+    },
+    "DET": {
+      "main_team_id": 116,
+      "venue_name": "Comerica Park",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 95.0,
+      "seasonal_pf_hr": 0.95
+    },
+    "SF": {
+      "main_team_id": 137,
+      "venue_name": "Oracle Park",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 74.0,
+      "seasonal_pf_hr": 0.74
+    },
+    "OAK": {
+      "main_team_id": 133,
+      "venue_name": "Sutter Health Park",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 129.0,
+      "seasonal_pf_hr": 1.29
+    },
+    "CIN": {
+      "main_team_id": 113,
+      "venue_name": "Great American Ball Park",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 110.0,
+      "seasonal_pf_hr": 1.1
+    },
+    "SD": {
+      "main_team_id": 135,
+      "venue_name": "Petco Park",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 92.0,
+      "seasonal_pf_hr": 0.92
+    },
+    "STL": {
+      "main_team_id": 138,
+      "venue_name": "Busch Stadium",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 66.0,
+      "seasonal_pf_hr": 0.66
+    },
+    "NYM": {
+      "main_team_id": 121,
+      "venue_name": "Citi Field",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 90.0,
+      "seasonal_pf_hr": 0.9
+    },
+    "WSH": {
+      "main_team_id": 120,
+      "venue_name": "Nationals Park",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 129.0,
+      "seasonal_pf_hr": 1.29
+    },
+    "MIN": {
+      "main_team_id": 142,
+      "venue_name": "Target Field",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 83.0,
+      "seasonal_pf_hr": 0.83
+    },
+    "NYY": {
+      "main_team_id": 147,
+      "venue_name": "Yankee Stadium",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 122.0,
+      "seasonal_pf_hr": 1.22
+    },
+    "MIA": {
+      "main_team_id": 146,
+      "venue_name": "loanDepot park",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 76.0,
+      "seasonal_pf_hr": 0.76
+    },
+    "ATL": {
+      "main_team_id": 144,
+      "venue_name": "Truist Park",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 110.0,
+      "seasonal_pf_hr": 1.1
+    },
+    "TEX": {
+      "main_team_id": 140,
+      "venue_name": "Globe Life Field",
+      "metric": "index_HR",
+      "season": 2026,
+      "index_value": 101.0,
+      "seasonal_pf_hr": 1.01
+    }
+  }
+}

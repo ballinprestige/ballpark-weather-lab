@@ -1,0 +1,76 @@
+{
+  "artifacts": {
+    "assets/data/batter_profiles.parquet": {
+      "bytes": 81554,
+      "critical": false,
+      "lane": "approach_c",
+      "rows": 839,
+      "sha256": "80b66ab835d2aeb9bb90d46dd93d3f4554b475208d5c7a9b9759cdc62571e469"
+    },
+    "assets/data/hr_baselines_2026.json": {
+      "bytes": 6436,
+      "critical": true,
+      "sha256": "026c768dfc1ca9a3da96545a227ef9fe4c6e6025c30555a41fe7990161816aa5"
+    },
+    "assets/data/park_geometry.parquet": {
+      "bytes": 11608,
+      "critical": false,
+      "lane": "approach_c",
+      "rows": 2730,
+      "sha256": "88ee535e0428bd2665daee67d21c88e702e63db012909d6a1022d623052526b6"
+    },
+    "assets/data/trajectory_lookup.parquet": {
+      "bytes": 5402732,
+      "critical": false,
+      "lane": "approach_c",
+      "rows": 3018625,
+      "sha256": "cfd1f4602896381297e95c3f33ed8dfd7024f010f5fb09d2fb57e4d3b6004451"
+    },
+    "assets/models/feature_importance.json": {
+      "bytes": 1000,
+      "critical": false,
+      "lane": "model_evidence",
+      "sha256": "09ce40f60d2462f9ec10695c8ab7892de1369a05b46f7eeea672a6583bf4cd4f"
+    },
+    "assets/models/hr_weather_model.json": {
+      "bytes": 223635,
+      "critical": true,
+      "sha256": "88676c40be24273e4618ca88a06e1f6ba873510cc560035b18f29229e31e8bc1"
+    },
+    "assets/models/runs_weather_model.json": {
+      "bytes": 144856,
+      "critical": true,
+      "sha256": "33719b6c821b6c819b6a7bfdf2ca6c02e5b060d17084721ce7069abf77718058"
+    },
+    "assets/models/training_manifest.json": {
+      "bytes": 773,
+      "critical": true,
+      "sha256": "3df383f1f1b3b74611c607d87e7e27e7b29e71a7d5dfd99b59a955c37f223cf9"
+    },
+    "web/public/park_geometry.json": {
+      "bytes": 25575,
+      "critical": true,
+      "sha256": "49966b4c072d0d41c972a7b6fcea7b44a08d3f3bc0131e2e55f4dead9364ac46"
+    }
+  },
+  "evidence_counts": {
+    "batter_profiles": 839,
+    "evidence_games": 21608,
+    "stadium_geometries": 30,
+    "trajectory_entries": 3018625
+  },
+  "schema_version": 1,
+  "source_commit": "d08dee3b70cf4ca7534fa143144751f6de5f6e79",
+  "source_evidence_not_redistributed": {
+    "historical_weather.parquet": {
+      "bytes": 297585,
+      "reason": "The compact training receipt and split metrics are published; row-level source data is withheld pending a separate redistribution review.",
+      "sha256": "e22de5a5d65972de6932c03033ec8a60c9c48dc8248c978db2a845eae2c4db6a"
+    },
+    "training_data.parquet": {
+      "bytes": 813334,
+      "reason": "The compact training receipt and split metrics are published; row-level source data is withheld pending a separate redistribution review.",
+      "sha256": "3b8acc072e79f16d3dacf25b5c6406ef8f20504c552af8a4e56c9059290d85ac"
+    }
+  }
+}

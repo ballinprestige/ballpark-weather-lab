@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ballpark-weather-lab"
+version = "1.0.0"
+description = "A standalone, evidence-first MLB game-hour weather and park-factor instrument."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "jsonschema>=4.23,<5",
+  "numpy>=1.26,<3",
+  "pandas>=2.2,<4",
+  "pyarrow>=17,<26",
+  "requests>=2.32,<3",
+  "xgboost-cpu>=3.4,<4",
+  "tzdata>=2026.1; platform_system == 'Windows'",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<10",
+  "pytest-cov>=6,<8",
+  "ruff>=0.9,<1",
+]
+
+[project.scripts]
+ballpark = "ballpark.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

@@ -1,0 +1,39 @@
+{
+  "trained_at": "2026-04-10T22:03:09.999417",
+  "training_rows": 17075,
+  "val_year": 2024,
+  "test_year": 2025,
+  "features": [
+    "temperature_f",
+    "humidity_pct",
+    "wind_speed_mph",
+    "wind_carry_mph",
+    "wind_cross_mph",
+    "air_density_index",
+    "pressure_hpa",
+    "altitude_ft",
+    "dome_type",
+    "dome_active",
+    "month",
+    "temp_x_wind_carry",
+    "temp_x_altitude"
+  ],
+  "models": {
+    "runs": {
+      "val_rmse": 0.4816,
+      "train_rows": 17075,
+      "val_rows": 2302,
+      "best_iteration": 28,
+      "test_rmse": 0.5102,
+      "test_rows": 2231
+    },
+    "hr": {
+      "val_rmse": 0.6833,
+      "train_rows": 17075,
+      "val_rows": 2302,
+      "best_iteration": 71,
+      "test_rmse": 0.7173,
+      "test_rows": 2231
+    }
+  }
+}

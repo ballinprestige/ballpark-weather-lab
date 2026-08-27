@@ -1,0 +1,30 @@
+{
+  "runs": {
+    "temperature_f": 2.3154001235961914,
+    "humidity_pct": 1.5725903511047363,
+    "wind_speed_mph": 1.4274547100067139,
+    "wind_carry_mph": 1.4263297319412231,
+    "wind_cross_mph": 1.4751996994018555,
+    "air_density_index": 2.2925398349761963,
+    "pressure_hpa": 1.4942790269851685,
+    "altitude_ft": 1.5417289733886719,
+    "dome_type": 1.7382551431655884,
+    "month": 1.3534255027770996,
+    "temp_x_wind_carry": 1.551774501800537,
+    "temp_x_altitude": 1.5956848859786987
+  },
+  "hr": {
+    "temperature_f": 6.1946702003479,
+    "humidity_pct": 2.895197629928589,
+    "wind_speed_mph": 2.609203815460205,
+    "wind_carry_mph": 3.0796239376068115,
+    "wind_cross_mph": 2.910430431365967,
+    "air_density_index": 3.112337350845337,
+    "pressure_hpa": 2.9612934589385986,
+    "altitude_ft": 3.6515989303588867,
+    "dome_type": 4.184996604919434,
+    "month": 2.1409645080566406,
+    "temp_x_wind_carry": 3.4284322261810303,
+    "temp_x_altitude": 3.444751739501953
+  }
+}
