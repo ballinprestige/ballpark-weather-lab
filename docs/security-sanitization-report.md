@@ -8,7 +8,7 @@ material without reproducing private identifiers or credential-like values.
 
 **Source evidence commit:** `d08dee3b70cf4ca7534fa143144751f6de5f6e79`  
 **Audit date:** 2026-08-27  
-**Public repository history:** fresh-history export required; local candidate verification complete
+**Public repository history:** fresh root commit `4e9f6d8`; no inherited history or remote
 
 ## Threat model
 
@@ -110,7 +110,7 @@ prediction, or financial performance. Approach C must remain experimental and ne
 
 The following must be verified against the final repository and built site:
 
-- [ ] Fresh root commit with no inherited history or private remote.
+- [x] Fresh root commit with no inherited history or private remote.
 - [x] Secret scan has no unresolved findings in the sanitized local candidate.
 - [x] Private-identifier scan has no account names, email addresses, absolute workstation paths,
       internal hostnames, private project IDs, or retired product/repository names.

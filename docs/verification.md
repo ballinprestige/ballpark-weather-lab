@@ -70,6 +70,11 @@ only the hosted values with durable evidence from the final public repository an
 | GitHub Pages deployment | PENDING | Workflow run URL pending |
 | Public date/hash readback | PENDING | Demo URL, date, and SHA-256 pending |
 
+A non-publishing live-source run from the clean repository at `2026-08-27T11:27:07Z` returned all
+seven scheduled games, verified game-hour weather for all seven, reported official lineups as not
+yet available, kept Approach C out of the headline, and produced local payload SHA-256
+`75d7504248847cc3f753e99cbacafa102b56e06219d4b0c0c6905a914af0ab5c`.
+
 ### Publication placeholders
 
 - Public repository URL: **PENDING PUBLICATION**
