@@ -1,10 +1,11 @@
 # Three-Minute Employer Walkthrough
 
-**Repository:** PENDING PUBLICATION  
-**Live demo:** PENDING PUBLICATION
+**Repository:** [github.com/ballinprestige/ballpark-weather-lab](https://github.com/ballinprestige/ballpark-weather-lab)
 
-Use the live demo only after [verification.md](verification.md) records a successful Pages deploy
-and public date/hash readback.
+**Live demo:** [ballinprestige.github.io/ballpark-weather-lab](https://ballinprestige.github.io/ballpark-weather-lab/)
+
+The current `2026-08-27` release and exact public payload hash are recorded in
+[verification.md](verification.md).
 
 ## 0:00–0:20 — Frame the problem
 

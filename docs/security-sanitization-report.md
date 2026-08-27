@@ -112,8 +112,9 @@ The following must be verified against the final repository and built site:
 
 - [x] Fresh root commit with no inherited history or private remote.
 - [x] Secret scan has no unresolved findings in the sanitized local candidate.
-- [x] Private-identifier scan has no account names, email addresses, absolute workstation paths,
-      internal hostnames, private project IDs, or retired product/repository names.
+- [x] Private-identifier scan has no local/private account names, email addresses, absolute
+      workstation paths, internal hostnames, private project IDs, or retired product/repository
+      names. The public GitHub owner `ballinprestige` appears only in publication receipts.
 - [x] `web/dist` passes the same scans.
 - [x] No raw or archived third-party provider payload is selected for the fresh-history export.
 - [x] Dependency vulnerability and license review is recorded.
@@ -122,9 +123,9 @@ The following must be verified against the final repository and built site:
       distribution excludes unused GPU runtime packages.
 - [x] Open-Meteo attribution is visible in the rendered interface.
 - [x] Python, frontend, schema, artifact, and desktop/mobile tests pass locally.
-- [ ] Pages deploys through OIDC without a personal token.
-- [ ] The public date and payload SHA-256 match the local release receipt.
-- [ ] Repository and demo URLs replace the pending placeholders.
+- [x] Pages deploys through OIDC without a personal token.
+- [x] The public date and payload SHA-256 match the hosted release receipt.
+- [x] Repository and demo URLs replace the publication placeholders.
 
 Current completion evidence belongs in [verification.md](verification.md); this report does not
 invent it.
@@ -141,7 +142,7 @@ separate, narrow scan:
 - Every relative Markdown link resolved inside the staged repository.
 - Comparison, certainty, accuracy, outcome, and financial language was reviewed. Remaining uses
   are limitations, prohibited-claim rules, or explicit denials rather than affirmative claims.
-- Repository, demo, workflow, date, hash, and timestamp placeholders remain visibly pending.
+- Repository, demo, workflow, date, hash, and timestamp fields contain durable public receipts.
 
-This check covers the documentation files, not the final repository history or `web/dist`. The
-whole-repository and built-site scans remain publication gates above.
+The narrow documentation check is distinct from the whole-repository and built-site scans; those
+separate gates were also completed before publication and remain repeatable release controls.

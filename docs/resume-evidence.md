@@ -1,7 +1,7 @@
 # Resume-Ready Evidence
 
-Use only bullets whose linked evidence is present in the published repository and whose pending
-verification fields have been completed.
+The bullets below are backed by linked code, tests, hosted workflow output, and the public receipt
+recorded in [verification.md](verification.md).
 
 ## Concise bullets
 
@@ -46,9 +46,10 @@ schema/semantic validation, deterministic edge-case fixtures, atomic file replac
 Health, model/rights documentation, clean-history sanitization, and desktop/mobile tests.
 
 **Result:** Historical isolated live smoke runs completed all 15 games on August 26, 2026 with
-confirmed lineups and all seven games on August 27 with valid weather before lineups. Record the
-new repository's actual test, Pages, and public hash results from [verification.md](verification.md)
-before presenting them as current completion evidence.
+confirmed lineups and all seven games on August 27 with valid weather before lineups. The new
+repository then passed 51 hosted Python tests, six hosted browser paths, Pages deployment, and a
+byte-for-byte public readback for the seven-game `2026-08-27` release. See
+[verification.md](verification.md) for the workflow and SHA-256 receipt.
 
 ## Evidence map
 
@@ -60,13 +61,12 @@ before presenting them as current completion evidence.
 | Artifact integrity | `assets/manifest.json`, `src/ballpark/artifacts.py`, artifact tests |
 | Model counts and RMSE | `assets/models/training_manifest.json`, `MODEL_CARD.md` |
 | Public byte verification | `src/ballpark/publication.py`, `.github/workflows/pages.yml`, publication tests |
-| Desktop/mobile interaction | `web/tests/e2e/app.spec.ts` and its eventual Playwright receipt |
+| Desktop/mobile interaction | `web/tests/e2e/app.spec.ts` and the hosted Playwright receipt in `docs/verification.md` |
 | Sanitization and rights boundary | `docs/security-sanitization-report.md`, `DATA_SOURCES.md`, `THIRD_PARTY_NOTICES.md` |
 | Historical repair evidence | `docs/incident-repair-case-study.md`, `docs/verification.md` |
 
 ## Evidence rule
 
-Code, tests, and historical observations can be discussed now. Do not claim a repository URL, live
-demo, passing hosted workflow, passing browser matrix, or verified public hash until the
-corresponding `PENDING` entry in [verification.md](verification.md) is replaced with a durable
-receipt.
+Current repository, demo, hosted workflow, browser matrix, and public-hash claims must stay tied to
+the durable receipt in [verification.md](verification.md). Historical isolated smoke runs remain
+clearly labeled as incident evidence rather than current hosted proof.

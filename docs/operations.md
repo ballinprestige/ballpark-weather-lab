@@ -62,7 +62,8 @@ evidence class separately in [verification.md](verification.md).
 3. Keep Actions enabled and retain the workflow's least-privilege permissions.
 4. Do not create a personal access token for Pages.
 5. Run the workflow manually once before relying on the schedule.
-6. Replace the repository/demo placeholders only after the workflow's public readback succeeds.
+6. Record the repository, demo, workflow, date, and hash receipt only after public readback
+   succeeds.
 
 `.github/workflows/pages.yml` runs daily at `15:17 UTC`, on pushes to `main`, and through manual
 dispatch. Manual dispatch accepts an optional canonical `YYYY-MM-DD` date.
@@ -97,15 +98,16 @@ A valid public proof must include:
 - Successful public readback result with the same date and SHA-256.
 - Desktop and mobile browser-test receipts.
 
-Those fields remain pending in [verification.md](verification.md) until the public repository
-exists.
+The current hosted and public receipts are recorded in [verification.md](verification.md).
 
 ## Manual public readback
 
-Given a real deployed URL and the local release receipt:
+Given the deployed URL and a local release receipt:
 
 ```bash
-python -m ballpark verify-public --url "PUBLIC_DEMO_URL" --receipt web/dist/data/release.json
+python -m ballpark verify-public \
+  --url "https://ballinprestige.github.io/ballpark-weather-lab/" \
+  --receipt web/dist/data/release.json
 ```
 
 The command is intentionally bounded. It fails if the public date is stale, the public receipt

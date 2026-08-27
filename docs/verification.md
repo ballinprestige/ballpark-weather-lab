@@ -4,11 +4,11 @@ This page separates three evidence classes:
 
 1. **Implemented proof:** tests and controls present in this repository.
 2. **Historical repair evidence:** isolated live observations made before publication.
-3. **Current release proof:** results tied to the eventual public repository, workflow, demo URL,
+3. **Current release proof:** results tied to the public repository, workflow, demo URL,
    date, and payload hash.
 
-The first two classes and the clean local release gates are populated below. Hosted Pages proof
-remains intentionally pending until it is read back from the public URL.
+All three classes are populated below. Hosted Pages proof is tied to the successful workflow and
+an independent byte-for-byte public readback rather than inferred from deployment status.
 
 ## Required behavior matrix
 
@@ -37,9 +37,9 @@ The Playwright suite defines:
 - Desktop error/empty paths for no slate, missing weather, malformed public payload, and duplicate
   game IDs.
 
-The local Playwright receipt on 2026-08-27 was six passed and six intentionally skipped: five
-desktop-scoped checks and one mobile-scoped check passed, while each inverse project was skipped by
-design. Hosted workflow and public-URL receipts remain separate gates.
+The local and hosted Playwright receipts on 2026-08-27 were six passed and six intentionally
+skipped: five desktop-scoped checks and one mobile-scoped check passed, while each inverse project
+was skipped by design. The public-URL receipt remains a separate post-deployment gate.
 
 ## Historical repair evidence
 
@@ -52,37 +52,37 @@ These are incident-repair observations, not model-quality results.
 
 ## Current clean-repository verification
 
-Local receipts below were recorded from the sanitized release candidate on 2026-08-27. Replace
-only the hosted values with durable evidence from the final public repository and demo.
+Local receipts below were recorded from the sanitized release candidate on 2026-08-27. Hosted
+values link to the final public repository, Pages workflow, and public readback.
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Python tests | PASS (local) | 51 tests passed; Ruff reported no findings |
-| Artifact inventory verification | PASS (local + hosted) | 9 files; manifest `bbf71642ab0e1ab4ecc2283f9d93ce646b064bebd50618130433787ff224c720`; 21,608 evidence games; 839 profiles; 3,018,625 trajectory rows; 30 stadiums |
-| Svelte type/accessibility checks | PASS (local) | `svelte-check` reported 0 errors and 0 warnings |
-| Frontend unit tests | PASS (local) | 6 Vitest tests passed |
+| Python tests | PASS (local + hosted) | 51 tests passed; Ruff reported no findings |
+| Artifact inventory verification | PASS (local + hosted) | 9 files; manifest `c0b501f9290d2e80f041a0dc689e61036b4b5acec9df60e4ff88949ce3027b78`; 21,608 evidence games; 839 profiles; 3,018,625 trajectory rows; 30 stadiums |
+| Svelte type/accessibility checks | PASS (local + hosted) | `svelte-check` reported 0 errors and 0 warnings |
+| Frontend unit tests | PASS (local + hosted) | 6 Vitest tests passed |
 | Production frontend build and budget | PASS (local) | Vite build passed; initial JS + CSS measured 39.2 KiB gzip against a 112 KiB budget |
-| Desktop Playwright path | PASS (local) | 5 desktop-scoped checks passed, including the complete employer path and four degraded/error states |
-| Mobile Playwright path | PASS (local) | Compact/expandable slate, no horizontal overflow, and 44 × 44 CSS-pixel targets passed |
+| Desktop Playwright path | PASS (local + hosted) | 5 desktop-scoped checks passed, including the complete employer path and four degraded/error states |
+| Mobile Playwright path | PASS (local + hosted) | Compact/expandable slate, no horizontal overflow, and 44 × 44 CSS-pixel targets passed |
 | Secret/private-identifier scan of repository | PASS (local candidate) | High-confidence secret, private-key, account, email, absolute-path, and retired-scope signatures returned no unresolved finding |
 | Secret/private-identifier scan of `web/dist` | PASS (local build) | The same binary-aware signatures returned no finding in the production build |
 | Dependency vulnerability/license review | PASS (local) | `pip-audit` and `npm audit --audit-level=low` found no known vulnerabilities; dependency licenses reviewed against both locked inventories |
-| GitHub Pages deployment | PENDING | Workflow run URL pending |
-| Public date/hash readback | PENDING | Demo URL, date, and SHA-256 pending |
+| GitHub Pages deployment | PASS | [Workflow run 33084179383](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33084179383) deployed one verified Pages artifact through OIDC |
+| Public date/hash readback | PASS | `2026-08-27`; 7 games; `5937eeb47c29a0425471553240edf2ed441ae7ea82b3fd6dad78411240e6a0b2`; verified at `2026-08-27T14:48:54Z` |
 
 A non-publishing live-source run from the clean repository at `2026-08-27T11:27:07Z` returned all
 seven scheduled games, verified game-hour weather for all seven, reported official lineups as not
 yet available, kept Approach C out of the headline, and produced local payload SHA-256
 `75d7504248847cc3f753e99cbacafa102b56e06219d4b0c0c6905a914af0ab5c`.
 
-### Publication placeholders
+### Publication receipt
 
-- Public repository URL: **PENDING PUBLICATION**
-- Live demo URL: **PENDING PUBLICATION**
-- Workflow run URL: **PENDING PUBLICATION**
-- Verified slate date: **PENDING PUBLICATION**
-- Verified payload SHA-256: **PENDING PUBLICATION**
-- Verification timestamp: **PENDING PUBLICATION**
+- Public repository URL: <https://github.com/ballinprestige/ballpark-weather-lab>
+- Live demo URL: <https://ballinprestige.github.io/ballpark-weather-lab/>
+- Workflow run URL: <https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33084179383>
+- Verified slate date: `2026-08-27`
+- Verified payload SHA-256: `5937eeb47c29a0425471553240edf2ed441ae7ea82b3fd6dad78411240e6a0b2`
+- Verification timestamp: `2026-08-27T14:48:54Z`
 
 ## Reproduction commands
 
@@ -95,8 +95,11 @@ npm run verify --prefix web
 npm run test:e2e --prefix web
 ```
 
-After deployment:
+Verify the recorded public release directly:
 
 ```bash
-python -m ballpark verify-public --url "PUBLIC_DEMO_URL" --receipt web/dist/data/release.json
+python -m ballpark verify-public \
+  --url "https://ballinprestige.github.io/ballpark-weather-lab/" \
+  --expected-date "2026-08-27" \
+  --expected-sha "5937eeb47c29a0425471553240edf2ed441ae7ea82b3fd6dad78411240e6a0b2"
 ```

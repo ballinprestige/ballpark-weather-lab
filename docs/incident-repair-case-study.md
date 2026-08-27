@@ -104,8 +104,9 @@ The authorized action is a separate sanitized preview repository and Pages proof
 Any later cutover of an existing production URL requires a separate operator decision with a
 fresh action, downside, rollback, and scope analysis.
 
-## Evidence still required
+## Publication evidence
 
-The repair is not complete merely because the architecture is cleaner. Publication must still
-produce the pending clean-repository test receipts, desktop/mobile browser receipts, Pages workflow
-URL, live demo URL, and public date/hash proof listed in [verification.md](verification.md).
+The standalone preview repair is complete because the architecture change is backed by clean-
+repository test receipts, hosted desktop/mobile browser receipts, a successful Pages workflow,
+the live demo, and exact public date/hash proof listed in [verification.md](verification.md).
+No existing production URL, task, runtime, or repository was cut over.

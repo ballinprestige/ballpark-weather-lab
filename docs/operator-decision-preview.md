@@ -2,7 +2,7 @@
 
 ## Status
 
-Authorized for a new sanitized repository and a separate GitHub Pages preview. This decision does
+Completed for the new sanitized repository and separate GitHub Pages preview. This decision does
 not authorize modification or cutover of any older production URL, scheduled task, or runtime.
 
 ## Action
@@ -52,14 +52,15 @@ If a preview release is unsafe or incorrect:
 Because the older production system is outside this action, preview rollback does not require
 deleting or changing its tasks, runtimes, repository, or URL.
 
-## Evidence required to close this decision
+## Evidence recorded to close this decision
 
-- Fresh repository URL and root-history review.
-- Passing clean-repository tests and scans.
-- Passing desktop and mobile employer-demo paths.
-- Pages workflow run and demo URL.
-- Successful public date and exact payload SHA-256 readback.
-- Replacement of all pending fields in [verification.md](verification.md).
+- Fresh repository and root-history review: <https://github.com/ballinprestige/ballpark-weather-lab>
+- Passing clean-repository tests and scans: [verification.md](verification.md)
+- Passing desktop and mobile employer-demo paths: [workflow run 33084179383](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33084179383)
+- Pages demo: <https://ballinprestige.github.io/ballpark-weather-lab/>
+- Public readback: `2026-08-27` and SHA-256
+  `5937eeb47c29a0425471553240edf2ed441ae7ea82b3fd6dad78411240e6a0b2`
+- All current publication fields are populated in [verification.md](verification.md).
 
 A future production cutover is a different action and requires a new operator decision with its
 own downside, rollback, and scope.

@@ -6,9 +6,11 @@ is deliberately narrow: it explains how venue and weather context move runs and 
 factors around a neutral value of `1.000`. It does not forecast winners, scores, or financial
 outcomes.
 
-**Repository:** pending publication  
-**Live demo:** pending publication  
-**Current public date/hash verification:** pending publication
+**Repository:** [github.com/ballinprestige/ballpark-weather-lab](https://github.com/ballinprestige/ballpark-weather-lab)
+
+**Live demo:** [ballinprestige.github.io/ballpark-weather-lab](https://ballinprestige.github.io/ballpark-weather-lab/)
+
+**Current public proof:** `2026-08-27` · 7 games · SHA-256 `5937eeb47c29a0425471553240edf2ed441ae7ea82b3fd6dad78411240e6a0b2` · [workflow receipt](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33084179383)
 
 The public interface is designed as an evidence trail rather than a black box. Each release shows
 its generation time, data-health state, payload hash, source timestamps, weather decomposition,
@@ -134,9 +136,9 @@ uses GitHub's Pages deployment identity with only `contents: read`, `pages: writ
 Concurrency prevents overlapping deployments, source requests use bounded retries and timeouts,
 and the final job reads back the public date and exact payload hash.
 
-Publication of this repository and its first successful public readback remain pending until the
-placeholders at the top of this README and in [verification](docs/verification.md) are replaced by
-real evidence.
+The first hosted release completed its code, artifact, unit, desktop/mobile browser, Pages, and
+public readback gates. The deployed `2026-08-27` payload was fetched independently and matched its
+release receipt byte-for-byte; durable details are recorded in [verification](docs/verification.md).
 
 ## Documentation
 
