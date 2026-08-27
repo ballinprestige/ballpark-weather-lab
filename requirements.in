@@ -9,4 +9,4 @@ requests==2.34.2
 ruff==0.16.4
 setuptools==84.0.0
 tzdata==2026.3; platform_system == "Windows"
-xgboost-cpu==3.4.0
+xgboost-cpu==3.4.1
