@@ -8,9 +8,9 @@
       "sha256": "80b66ab835d2aeb9bb90d46dd93d3f4554b475208d5c7a9b9759cdc62571e469"
     },
     "assets/data/hr_baselines_2026.json": {
-      "bytes": 6436,
+      "bytes": 6215,
       "critical": true,
-      "sha256": "026c768dfc1ca9a3da96545a227ef9fe4c6e6025c30555a41fe7990161816aa5"
+      "sha256": "dcddb20531385fa7cf48c3dbf309ac0cf76c15f4a87e6bb318f5ef6463191409"
     },
     "assets/data/park_geometry.parquet": {
       "bytes": 11608,

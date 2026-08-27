@@ -1,5 +1,6 @@
 {
   "schema_version": 1,
+  "serialization": "utf-8-lf",
   "source": "mlb_statcast_park_factors_hr",
   "source_url": "https://baseballsavant.mlb.com/leaderboard/statcast-park-factors?rolling=1&year=2026&stat=index_HR&type=venue",
   "metric": "index_HR",

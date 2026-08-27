@@ -58,7 +58,7 @@ only the hosted values with durable evidence from the final public repository an
 | Check | Status | Evidence |
 | --- | --- | --- |
 | Python tests | PASS (local) | 51 tests passed; Ruff reported no findings |
-| Artifact inventory verification | PASS (local) | 9 files; manifest `0cb85fac92da56ca60f7ada60fb0d30b51781f7dd28810d6209df0e1974c6f68`; 21,608 evidence games; 839 profiles; 3,018,625 trajectory rows; 30 stadiums |
+| Artifact inventory verification | PASS (local + hosted) | 9 files; manifest `bbf71642ab0e1ab4ecc2283f9d93ce646b064bebd50618130433787ff224c720`; 21,608 evidence games; 839 profiles; 3,018,625 trajectory rows; 30 stadiums |
 | Svelte type/accessibility checks | PASS (local) | `svelte-check` reported 0 errors and 0 warnings |
 | Frontend unit tests | PASS (local) | 6 Vitest tests passed |
 | Production frontend build and budget | PASS (local) | Vite build passed; initial JS + CSS measured 39.2 KiB gzip against a 112 KiB budget |
