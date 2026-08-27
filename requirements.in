@@ -1,7 +1,7 @@
 # Direct Python 3.12 inputs for the hosted build and verification job.
 # Regenerate requirements.lock with the documented pip-compile --allow-unsafe command after review.
 jsonschema==4.26.0
-numpy==2.5.1
+numpy==2.5.2
 pandas==3.0.5
 pyarrow==25.0.0
 pytest==9.0.3
