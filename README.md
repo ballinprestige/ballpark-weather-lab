@@ -10,7 +10,7 @@ outcomes.
 
 **Live demo:** [ballinprestige.github.io/ballpark-weather-lab](https://ballinprestige.github.io/ballpark-weather-lab/)
 
-**Recorded August 28 reliability-repair proof:** `2026-08-28` · 15 games · SHA-256 `f96bf07b8f033227a4226519830cd391760e1782a59328c7fe79b59299b33f62` · [workflow receipt](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33223744721)
+**Recorded August 28 restored-frontend proof:** `2026-08-28` · 15 games · SHA-256 `a2627ecaf592ba640349acbf63a53432df3208a1f05f11317ed20e605b0af7e8` · [workflow receipt](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33227585556)
 
 **Daily reliability status:** **PROVISIONAL — 2/7.** The first two scheduled events were
 delivered by GitHub roughly nine hours late. Both eventually passed, but a successful recovery is
