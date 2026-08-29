@@ -36,18 +36,9 @@ if (totalGzip > totalLimit) {
   failed = true;
 }
 
-const legacyFonts = readdirSync(assetsRoot).filter((file) => extname(file) === '.woff');
-if (legacyFonts.length) {
-  console.error(`Unexpected legacy font assets: ${legacyFonts.join(', ')}`);
-  failed = true;
-}
-
-const fontFiles = readdirSync(assetsRoot).filter((file) => extname(file) === '.woff2');
-const fontBytes = fontFiles.reduce((total, name) => total + readFileSync(join(assetsRoot, name)).byteLength, 0);
-const fontLimit = 75 * 1024;
-console.log(`Self-hosted WOFF2 fonts: ${(fontBytes / 1024).toFixed(1)} KiB / ${(fontLimit / 1024).toFixed(0)} KiB`);
-if (fontBytes > fontLimit) {
-  console.error('Self-hosted font budget exceeded.');
+const fontFiles = readdirSync(assetsRoot).filter((file) => ['.woff', '.woff2'].includes(extname(file)));
+if (fontFiles.length) {
+  console.error(`Unexpected bundled font assets: ${fontFiles.join(', ')}`);
   failed = true;
 }
 process.exit(failed ? 1 : 0);

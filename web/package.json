@@ -17,9 +17,6 @@
     "verify": "npm run check && npm run test && npm run build && npm run budget"
   },
   "dependencies": {
-    "@fontsource/dm-serif-display": "5.2.8",
-    "@fontsource/ibm-plex-sans": "5.2.8",
-    "@fontsource/jetbrains-mono": "5.2.8",
     "svelte": "5.56.10"
   },
   "devDependencies": {

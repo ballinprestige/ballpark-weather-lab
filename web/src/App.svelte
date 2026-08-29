@@ -53,7 +53,7 @@
 
   function applyTheme(): void {
     document.documentElement.dataset.theme = theme;
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'day' ? '#faf8f5' : '#0e1215');
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'day' ? '#f5f7fa' : '#0e141b');
   }
 
   function toggleTheme(): void {
@@ -174,7 +174,7 @@
 </script>
 
 <svelte:head>
-  <title>{publicationIsStale ? 'Stale release · ' : ''}{route === 'slate' ? 'Slate' : route === 'game' ? (routedGame ? `${routedGame.away_team} at ${routedGame.home_team}` : 'Game station') : route === 'health' ? 'Data Health' : route === 'history' ? 'History' : 'Method'} · Ballpark Weather Lab</title>
+  <title>{publicationIsStale ? 'Stale release · ' : ''}{route === 'slate' ? 'Slate' : route === 'game' ? (routedGame ? `${routedGame.away_team} at ${routedGame.home_team}` : 'Game details') : route === 'health' ? 'Data Health' : route === 'history' ? 'History' : 'Method'} · Ballpark Weather Lab</title>
 </svelte:head>
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -206,13 +206,13 @@
   {#if loading}
     <section class="loading-sheet" aria-live="polite" aria-busy="true">
       <div class="loading-field" aria-hidden="true"></div>
-      <p class="eyebrow">Reading public release</p>
-      <h1>Checking date, schema, and payload hash…</h1>
+      <p class="eyebrow">Loading public release</p>
+      <h1>Verifying date, schema, and payload hash…</h1>
     </section>
   {:else if error}
     <StatePanel
       eyebrow="Publication unavailable"
-      title="The field sheet did not pass readback"
+      title="Release verification failed"
       message={`${error} No unverified values are shown.`}
       actionLabel="Check the release again"
       onAction={loadPublication}
@@ -222,7 +222,7 @@
       {#if payload.status === 'no_slate'}
         <StatePanel
           eyebrow="Schedule confirmed"
-          title="No games on the slate"
+          title="No games scheduled"
           message={`${payload.no_slate_reason ?? `The schedule source reports no games for ${formatDate(payload.date)}.`} This is a valid publication, not a loading error.`}
           actionLabel="Review Data Health"
           onAction={showHealth}
@@ -233,15 +233,15 @@
     {:else if route === 'game'}
       {#if routedGame}
         <section class="game-route">
-          <a class="station-back" href="#slate">← Back to The Slate</a>
+          <a class="station-back" href="#slate">← Back to daily park factors</a>
           <GameDetail game={routedGame} geometry={bundle.geometry} headingLevel={1} />
         </section>
       {:else}
         <StatePanel
-          eyebrow="Station unavailable"
+          eyebrow="Details unavailable"
           title="That game is not in this release"
           message="The requested game ID does not appear in the validated slate. No substitute data is shown."
-          actionLabel="Return to The Slate"
+          actionLabel="Return to daily park factors"
           onAction={showSlate}
         />
       {/if}
@@ -267,15 +267,15 @@
   <div class="footer-station">
     <span class="brand-mark mini" aria-hidden="true"><i></i><i></i><i></i></span>
     <div>
-      <strong>BALLPARK WEATHER LAB</strong>
-      <small>Weather physics, with its uncertainty left on.</small>
+      <strong>Ballpark Weather Lab</strong>
+      <small>MLB park and weather context.</small>
     </div>
   </div>
   <p class="legal">Factors describe venue and weather conditions around a neutral value of 1.000. They are not game-outcome forecasts.</p>
   <div class="footer-links">
     <a href="#history">Release archive</a>
-    <a href="#method">Honesty doctrine</a>
+    <a href="#method">Method and limitations</a>
     <span>Weather data: <a href="https://open-meteo.com/" rel="noopener noreferrer">Open-Meteo</a></span>
-    <span>Standalone public instrument</span>
+    <span>Standalone public application</span>
   </div>
 </footer>

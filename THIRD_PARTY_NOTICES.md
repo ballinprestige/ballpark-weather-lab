@@ -56,17 +56,6 @@ Major runtime and interface dependencies include:
 - [Vite](https://github.com/vitejs/vite) — MIT License.
 - [Playwright](https://github.com/microsoft/playwright) — Apache License 2.0.
 
-The interface self-hosts three Latin-subset fonts through Fontsource packages. The font files
-remain under the SIL Open Font License 1.1; copyright notices and the complete license text ship
-with the public bundle in `web/public/font-licenses.txt`.
-
-- [DM Serif Display](https://fontsource.org/fonts/dm-serif-display) — Copyright 2014–2017 Adobe
-  Systems Incorporated and Copyright 2019 Google LLC; SIL Open Font License 1.1.
-- [IBM Plex Sans](https://fontsource.org/fonts/ibm-plex-sans) — Copyright 2019 IBM Corp.; SIL Open
-  Font License 1.1.
-- [JetBrains Mono](https://fontsource.org/fonts/jetbrains-mono) — Copyright 2020 The JetBrains Mono
-  Project Authors; SIL Open Font License 1.1.
-
 This summary may not enumerate every transitive package. `requirements.lock` and
 `web/package-lock.json` are the machine-readable dependency inventories. Each dependency remains
 subject to the license distributed by its project. A dependency-license scan is a publication

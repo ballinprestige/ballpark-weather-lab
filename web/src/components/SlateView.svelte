@@ -15,7 +15,7 @@
   let desktop = false;
   let filter: SlateFilter = 'all';
   let sort: SlateSort = 'movement';
-  let ledger = false;
+  let ledger = true;
 
   const movementPercent = (game: BallparkGame): number | null => {
     if (isGameHeld(game)) return null;
@@ -62,9 +62,9 @@
   };
 
   const statusLabel = (game: BallparkGame): string => {
-    if (isGameHeld(game)) return 'INCOMPLETE';
-    if (game.weather.dome_active) return 'ROOF';
-    return game.weather.basis === 'observation' ? 'OBSERVED' : 'VERIFIED';
+    if (isGameHeld(game)) return 'Incomplete';
+    if (game.weather.dome_active) return 'Roof';
+    return game.weather.basis === 'observation' ? 'Observed' : 'Verified';
   };
 
   onMount(() => {
@@ -83,11 +83,11 @@
 </script>
 
 <section class="view slate-view" aria-labelledby="slate-title">
-  <section class="heritage-slate-intro">
+  <section class="slate-intro">
     <div>
-      <p class="eyebrow">Station report · {formatDate(payload.date)} · {payload.games.length} {payload.games.length === 1 ? 'game' : 'games'}</p>
-      <h1 id="slate-title" aria-label={`${formatDate(payload.date)} slate — The Slate`}>The Slate</h1>
-      <p class="lede">Today’s air against each park’s own baseline. The movement—not the reputation—is the signal.</p>
+      <p class="eyebrow">{formatDate(payload.date)} · {payload.games.length} {payload.games.length === 1 ? 'game' : 'games'}</p>
+      <h1 id="slate-title">Daily park factors</h1>
+      <p class="lede">Game-hour weather compared with each venue’s seasonal baseline.</p>
     </div>
     <div class="slate-station">
       <dl class="slate-counts" aria-label="Slate summary">
@@ -96,8 +96,8 @@
         <div><dt>drag</dt><dd>{drag}</dd></div>
       </dl>
       <div class="slate-synopsis">
-        <div><span>Slate conditions</span><strong>{firstPitchRange(payload.games)} · {temperatureRange(payload.games)}</strong></div>
-        <div><span>Instrument</span><strong>{verified}/{payload.games.length} weather · {confirmed}/{payload.games.length} lineups</strong></div>
+        <div><span>Game window</span><strong>{firstPitchRange(payload.games)} · {temperatureRange(payload.games)}</strong></div>
+        <div><span>Data coverage</span><strong>{verified}/{payload.games.length} weather · {confirmed}/{payload.games.length} lineups</strong></div>
       </div>
     </div>
   </section>
@@ -121,7 +121,7 @@
       </select>
     </label>
     <button class="view-toggle" class:active={ledger} type="button" on:click={() => ledger = !ledger} aria-pressed={ledger}>
-      <span aria-hidden="true">{ledger ? '▦' : '☷'}</span>{ledger ? 'Card mode' : 'Ledger mode'}
+      {ledger ? 'Card view' : 'Table view'}
     </button>
   </section>
 
@@ -154,17 +154,17 @@
               <td class="num">{isGameHeld(game) ? '—' : `${Math.round(game.weather.temperature_f)}°`}</td>
               <td class="num">{isGameHeld(game) ? '—' : game.weather.air_density_index.toFixed(1)}</td>
               <td><span class="ledger-state" data-tone={isGameHeld(game) ? 'hold' : 'good'}>{statusLabel(game)}</span></td>
-              <td><button class="inspect-button" data-game-key={game.game_pk} type="button" aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} station`} on:click={() => onOpenGame(key)}>Inspect</button></td>
+              <td><button class="inspect-button" data-game-key={game.game_pk} type="button" aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} details`} on:click={() => onOpenGame(key)}>Inspect</button></td>
             </tr>
           {/each}
         </tbody>
       </table>
     </div>
   {:else}
-    <div class="heritage-game-grid">
+    <div class="game-grid">
       {#each games as game, index (game.game_pk)}
         {@const key = String(game.game_pk)}
-        <div class="heritage-game-cell">
+        <div class="game-cell">
           <GameListItem
             {game}
             {geometry}

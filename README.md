@@ -26,15 +26,15 @@ park wind diagram, trajectory illustration, and historical snapshots.
 ## Employer demo preview
 
 The screenshots below come from the deterministic, schema-valid normal-slate fixture and the same
-production build used by the browser tests. The interface preserves the original editorial field-
-instrument language: warm paper, burnt-orange signal, wind-only cyan, park cards, Ledger mode,
-Wind Field Strip, and dedicated game stations.
+production build used by the browser tests. The interface uses a compact system-font product
+layout: a table-first desktop slate, touch-safe mobile cards, neutral surfaces, semantic status
+colors, a slate wind comparison, and dedicated game details.
 
 ![Desktop slate with park-factor evidence](docs/screenshots/desktop-slate.png)
 
 ![Mobile slate with responsive evidence panels](docs/screenshots/mobile-slate.png)
 
-![Night-theme game station with park wind and evidence](docs/screenshots/game-night.png)
+![Night-theme game details with park wind and evidence](docs/screenshots/game-night.png)
 
 ## The daily critical path
 

@@ -92,7 +92,7 @@
 
   <section class="limitations" aria-labelledby="limitations-title">
     <p class="eyebrow">Boundaries</p>
-    <h2 id="limitations-title">What this instrument does not claim</h2>
+    <h2 id="limitations-title">What this application does not claim</h2>
     <ul>
       {#each limitations as limitation}<li>{limitation}</li>{/each}
     </ul>

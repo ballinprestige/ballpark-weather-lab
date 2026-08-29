@@ -15,24 +15,24 @@
   $: venueGeometry = findVenueGeometry(geometry, game.home_team);
   $: glyphPath = venueGeometry && geometry ? wallPath(geometry.angles_deg, venueGeometry.wall_distance_ft) : '';
   $: direction = movement == null
-    ? 'MODEL READING HELD'
+    ? 'Model reading unavailable'
     : movement >= 3
-      ? 'INCREASE VS PARK BASELINE'
+      ? 'Above park baseline'
       : movement <= -3
-        ? 'DECREASE VS PARK BASELINE'
-        : 'NEAR PARK BASELINE';
+        ? 'Below park baseline'
+        : 'Near park baseline';
   $: consequence = movement == null
     ? gameHoldReason(game)
     : `Game-hour conditions move this park’s run factor about ${Math.abs(Math.round(movement))}% ${movement > 0 ? 'above' : movement < 0 ? 'below' : 'along'} its seasonal baseline.`;
 
-  function openStation(event: MouseEvent): void {
+  function openDetails(event: MouseEvent): void {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     onOpen();
   }
 </script>
 
-<article class="heritage-game-card" data-tone={held ? 'hold' : movement != null && movement >= 3 ? 'lift' : movement != null && movement <= -3 ? 'drag' : 'neutral'}>
+<article class="game-card" data-tone={held ? 'hold' : movement != null && movement >= 3 ? 'lift' : movement != null && movement <= -3 ? 'drag' : 'neutral'}>
   <header class="game-card__header">
     <div class="venue-cell">
       {#if glyphPath}
@@ -43,7 +43,7 @@
         <p class="game-time">{formatTime(game.game_time)}</p>
       </div>
     </div>
-    {#if game.weather.dome_active}<span class="roof-badge">ROOF ACTIVE</span>{/if}
+    {#if game.weather.dome_active}<span class="roof-badge">Roof active</span>{/if}
   </header>
 
   {#if rank !== null && movement !== null}
@@ -58,15 +58,15 @@
     <a
       href={`#game/${game.game_pk}`}
       data-game-key={game.game_pk}
-      aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} station, ${formatTime(game.game_time)}`}
-      on:click={openStation}
+      aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} details, ${formatTime(game.game_time)}`}
+      on:click={openDetails}
     >
       <span class="matchup"><strong>{game.away_team}</strong><span>at</span><strong>{game.home_team}</strong></span>
       <span class="inspect-cue" aria-hidden="true">↗</span>
     </a>
   </h3>
 
-  <div class="heritage-card-body">
+  <div class="game-card-body">
     <div class="card-verdict" data-tone={held ? 'hold' : movement != null && movement >= 3 ? 'lift' : movement != null && movement <= -3 ? 'drag' : 'neutral'}>
       <span class="verdict-dot" aria-hidden="true"></span>
       <strong>{direction}</strong>
@@ -102,9 +102,9 @@
     </dl>
 
     <footer class="card-evidence">
-      <span class="ledger-state" data-tone={held ? 'hold' : 'good'}>{held ? 'WEATHER HOLD' : 'VERIFIED'}</span>
+      <span class="ledger-state" data-tone={held ? 'hold' : 'good'}>{held ? 'Weather hold' : 'Verified'}</span>
       <span>{held ? 'weather values withheld' : `${Math.round(game.weather.temperature_f)}°F · ${Math.round(game.weather.humidity_pct)}%`}</span>
-      <span class="lineup-glyph" class:confirmed={game.lineup.state === 'confirmed'}><i></i><i></i><i></i>{game.lineup.state === 'confirmed' ? 'CONFIRMED' : 'PENDING'}</span>
+      <span class="lineup-glyph" class:confirmed={game.lineup.state === 'confirmed'}><i></i><i></i><i></i>{game.lineup.state === 'confirmed' ? 'Confirmed' : 'Pending'}</span>
       <span class="compact-factor"><small>RUNS PF</small> {held ? '—' : formatFactor(game.factors.game_pf_runs)}</span>
     </footer>
   </div>

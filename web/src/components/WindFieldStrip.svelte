@@ -31,7 +31,7 @@
     return 'neutral';
   };
 
-  function openStation(event: MouseEvent, key: string): void {
+  function openDetails(event: MouseEvent, key: string): void {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     onOpen(key);
@@ -41,16 +41,17 @@
 <section class="wind-field" class:single-game={games.length === 1} aria-labelledby="wind-field-title">
   <header class="wind-field-heading">
     <div>
-      <p class="eyebrow">Whole-slate view · each park’s baseline</p>
-      <h2 id="wind-field-title">Wind Field Strip</h2>
+      <p class="eyebrow">Weather effect compared with each park baseline</p>
+      <h2 id="wind-field-title">Slate wind comparison</h2>
     </div>
     <div class="wind-key" aria-label="Chart legend">
       <span><i class="key-line"></i>carry wind</span>
       <span><i class="key-zero"></i>park baseline</span>
     </div>
   </header>
+  {#if games.length > 1}<p class="mobile-scroll-cue">Scroll horizontally to compare every game.</p>{/if}
   <!-- svelte-ignore a11y_no_noninteractive_tabindex (the overflowing chart is keyboard-scrollable) -->
-  <div class="wind-field__scroller" role="region" tabindex="0" aria-label="Scrollable whole-slate wind field">
+  <div class="wind-field__scroller" role="region" tabindex="0" aria-label="Scrollable slate wind comparison">
     <svg viewBox={`0 0 ${width} 210`} aria-labelledby="wind-field-title wind-field-description">
       <desc id="wind-field-description">Every game positioned above or below its own park baseline, with verified carry wind shown in blue.</desc>
       <line x1="38" x2={width - 38} y1={baselineY} y2={baselineY} class="strip-baseline"></line>
@@ -71,8 +72,8 @@
         <a
           href={`#game/${game.game_pk}`}
           class="station-link"
-          aria-label={`${game.away_team} at ${game.home_team}, open game station`}
-          on:click={(event) => openStation(event, String(game.game_pk))}
+          aria-label={`${game.away_team} at ${game.home_team}, open game details`}
+          on:click={(event) => openDetails(event, String(game.game_pk))}
         >
           <g transform={`translate(${x} 0)`} class:dome={game.weather.dome_active} data-tone={state}>
             <rect x="-39" y="35" width="78" height="125" class="station-band"></rect>

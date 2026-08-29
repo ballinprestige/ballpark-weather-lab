@@ -29,7 +29,7 @@ recorded in [verification.md](verification.md).
 
 ## Short project description
 
-Ballpark Weather Lab is an evidence-first MLB park-factor instrument. A bounded daily Python
+Ballpark Weather Lab is an evidence-first MLB park-factor application. A bounded daily Python
 pipeline validates model artifacts, fetches the slate and game-hour weather, produces honest
 per-game ready/hold states, validates one JSON contract, and builds a responsive Svelte interface.
 GitHub Pages deployment uses OIDC and verifies the public payload's exact date and SHA-256.

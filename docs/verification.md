@@ -23,7 +23,7 @@ an independent byte-for-byte public readback rather than inferred from deploymen
 | Duplicate game ID | Duplicate appears in source or final payload | Reject before publication; browser also rejects duplicate public payload | `tests/fixtures/duplicate_game_ids.json`, source/contract/pipeline/browser tests |
 | Stale public date | Valid prior payload remains live after the New York date advances | Replace normal release state with an accessible `STALE` warning that names both dates and says not to treat the slate as current | Freshness unit tests and desktop browser state test |
 | Release hash mismatch | Release pointer and downloaded payload bytes disagree | Fail closed before any slate values render | Desktop browser readback test |
-| Full 15-game slate | Complete daily slate | Three-column desktop card grid, Ledger path, and no root overflow | Deterministic 15-game browser layout test |
+| Full 15-game slate | Complete daily slate | Desktop table by default, optional three-column card view, and no root overflow | Deterministic 15-game browser layout test |
 
 Additional implemented controls cover cross-date games, malformed timestamps, weather receipts
 attached to the wrong game, stable canonical JSON, atomic replacement failure, sorted/deduplicated
@@ -33,10 +33,10 @@ history, bounded public readback, and hash-checked history restoration.
 
 The Playwright suite defines:
 
-- A desktop path through the card-first Slate, Ledger mode, dedicated game station, park wind
+- A desktop path through the table-first slate, optional card view, dedicated game detail, park wind
   diagram, decomposition ladder, trajectory theater, payload SHA-256, Data Health, Method, and
   History.
-- A mobile path that opens a dedicated station at the top, restores the originating card's exact
+- A mobile path that opens dedicated game details at the top, restores the originating card's exact
   scroll/focus position on return, checks for horizontal overflow, and requires primary controls
   to be at least 44 × 44 CSS pixels.
 - Desktop error/empty paths for no slate, missing weather, malformed public payload, and duplicate
@@ -66,9 +66,9 @@ release values link to the public repository, Pages workflow, and public readbac
 | Artifact inventory verification | PASS (local + hosted) | 9 files; manifest `c0b501f9290d2e80f041a0dc689e61036b4b5acec9df60e4ff88949ce3027b78`; 21,608 evidence games; 839 profiles; 3,018,625 trajectory rows; 30 stadiums |
 | Svelte type/accessibility checks | PASS (local + hosted) | `svelte-check` reported 0 errors and 0 warnings |
 | Frontend unit tests | PASS (local + hosted) | 11 Vitest tests passed locally and in the restored-frontend workflow |
-| Production frontend build and budget | PASS (local + hosted) | Current Vite build: 49.8 KiB initial JS + CSS gzip against 112 KiB; 67.5 KiB self-hosted WOFF2 fonts against 75 KiB, with legacy WOFF rejected |
-| Desktop Playwright path | PASS (local + hosted) | 8 desktop-scoped checks passed, including full evidence, 15-game grid/Ledger, stale, degraded/error, and hash-mismatch states |
-| Mobile Playwright path | PASS (local + hosted) | 2 mobile checks passed: dedicated-station scroll/focus restoration, no root overflow, 44 × 44 primary targets, and a visible one-game Wind Field |
+| Production frontend build and budget | PASS (local candidate) | Current Vite build: 48.5 KiB initial JS + CSS gzip against 112 KiB; no custom font assets are bundled |
+| Desktop Playwright path | PASS (local candidate) | 8 desktop-scoped checks cover full evidence, 15-game table/card layouts, stale, degraded/error, and hash-mismatch states |
+| Mobile Playwright path | PASS (local candidate) | 2 mobile checks cover detail scroll/focus restoration, no root overflow, 44 × 44 primary targets, and a visible one-game wind comparison |
 | Secret/private-identifier scan of repository | PASS (local candidate) | High-confidence secret, private-key, account, email, absolute-path, and retired-scope signatures returned no unresolved finding |
 | Secret/private-identifier scan of `web/dist` | PASS (local build) | The same binary-aware signatures returned no finding in the production build |
 | Dependency vulnerability/license review | PASS (local) | `pip-audit` and `npm audit --audit-level=low` found no known vulnerabilities; dependency licenses reviewed against both locked inventories |

@@ -103,8 +103,8 @@ the actual public payload bytes to agree within bounded attempts.
 
 The browser validates release and payload shape before display. It provides four primary views:
 
-- **Slate:** card-first matchups, optional desktop Ledger mode, whole-slate Wind Field Strip, and
-  links to dedicated game stations.
+- **Slate:** table-first desktop matchups, touch-safe mobile cards, a whole-slate wind comparison,
+  and links to dedicated game details.
 - **Data Health:** generation time, payload hash, schedule/weather/lineup/artifact lanes, and
   per-game coverage.
 - **History:** hash-checked archived payloads and a return-to-current path.

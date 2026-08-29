@@ -20,8 +20,8 @@
     <a class="brand" href="#slate" aria-label="Ballpark Weather Lab, Slate">
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>
-        <strong>BALLPARK</strong>
-        <small>WEATHER LAB</small>
+        <strong>Ballpark</strong>
+        <small>Weather Lab</small>
       </span>
     </a>
 
@@ -33,7 +33,7 @@
 
     <button class="theme-toggle" type="button" aria-label={`Use ${theme === 'day' ? 'night' : 'day'} theme`} on:click={onThemeToggle}>
       <span class="theme-icon" aria-hidden="true">{theme === 'day' ? '◐' : '◑'}</span>
-      <span class="theme-label">{theme === 'day' ? 'Night game' : 'Day game'}</span>
+      <span class="theme-label">{theme === 'day' ? 'Dark mode' : 'Light mode'}</span>
     </button>
   </div>
 </header>

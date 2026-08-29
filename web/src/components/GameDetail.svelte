@@ -41,7 +41,7 @@
     <div class="game-hold" role="status" data-testid="weather-hold">
       <span class="hold-hatch" aria-hidden="true"></span>
       <div>
-        <p class="eyebrow">Honest hold</p>
+        <p class="eyebrow">Data unavailable</p>
         <h3>Weather-adjusted headline withheld</h3>
         <p>{gameHoldReason(game)} The rest of the slate remains available.</p>
       </div>
@@ -87,8 +87,8 @@
   <section class="evidence-section evidence-receipt" aria-labelledby={`receipt-${game.game_pk}`}>
     <div class="section-heading">
       <div>
-        <p class="eyebrow">Evidence receipt</p>
-        <h3 id={`receipt-${game.game_pk}`}>What supports this reading</h3>
+        <p class="eyebrow">Release inputs</p>
+        <h3 id={`receipt-${game.game_pk}`}>Data behind this reading</h3>
       </div>
       <span class="section-note">Inspectable inputs</span>
     </div>
