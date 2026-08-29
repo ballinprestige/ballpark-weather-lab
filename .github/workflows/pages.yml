@@ -3,6 +3,9 @@ name: Build, verify, and publish Ballpark
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   schedule:
     # Morning baseline publication (11:17 EDT / 10:17 EST).
     - cron: "17 15 * * *"
