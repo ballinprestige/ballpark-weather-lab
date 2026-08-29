@@ -10,7 +10,7 @@ outcomes.
 
 **Live demo:** [ballinprestige.github.io/ballpark-weather-lab](https://ballinprestige.github.io/ballpark-weather-lab/)
 
-**Recorded August 28 restored-frontend proof:** `2026-08-28` · 15 games · SHA-256 `a2627ecaf592ba640349acbf63a53432df3208a1f05f11317ed20e605b0af7e8` · [workflow receipt](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33227585556)
+**Recorded August 28 neutral-interface proof:** `2026-08-28` · 15 games · SHA-256 `9d2a1ed389e38e9ab188d0f2e64ec71d265131da2ef3e094de898fecddbc76d3` · [workflow receipt](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33230839442)
 
 **Daily reliability status:** **PROVISIONAL — 2/7.** The first two scheduled events were
 delivered by GitHub roughly nine hours late. Both eventually passed, but a successful recovery is
@@ -150,7 +150,7 @@ GitHub's Pages deployment identity with only `contents: read`, `pages: write`, a
 Concurrency prevents overlapping deployments, and source requests use bounded retries and
 timeouts.
 
-The restored-frontend release completed its code, artifact, unit, desktop/mobile browser, Pages,
+The neutral-interface release completed its code, artifact, unit, desktop/mobile browser, Pages,
 and public-readback gates. The deployed `2026-08-28` payload was fetched independently and matched
 its release receipt byte-for-byte; durable details are recorded in
 [verification](docs/verification.md).

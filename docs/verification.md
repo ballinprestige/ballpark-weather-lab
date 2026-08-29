@@ -62,18 +62,19 @@ release values link to the public repository, Pages workflow, and public readbac
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Python tests | PASS (local + hosted) | 70 tests passed locally and in the restored-frontend workflow; Ruff reported no findings |
+| Python tests | PASS (local + hosted) | 70 tests passed locally and in the neutral-interface workflow; Ruff reported no findings |
 | Artifact inventory verification | PASS (local + hosted) | 9 files; manifest `c0b501f9290d2e80f041a0dc689e61036b4b5acec9df60e4ff88949ce3027b78`; 21,608 evidence games; 839 profiles; 3,018,625 trajectory rows; 30 stadiums |
 | Svelte type/accessibility checks | PASS (local + hosted) | `svelte-check` reported 0 errors and 0 warnings |
-| Frontend unit tests | PASS (local + hosted) | 11 Vitest tests passed locally and in the restored-frontend workflow |
-| Production frontend build and budget | PASS (local candidate) | Current Vite build: 48.5 KiB initial JS + CSS gzip against 112 KiB; no custom font assets are bundled |
-| Desktop Playwright path | PASS (local candidate) | 8 desktop-scoped checks cover full evidence, 15-game table/card layouts, stale, degraded/error, and hash-mismatch states |
-| Mobile Playwright path | PASS (local candidate) | 2 mobile checks cover detail scroll/focus restoration, no root overflow, 44 × 44 primary targets, and a visible one-game wind comparison |
+| Frontend unit tests | PASS (local + hosted) | 11 Vitest tests passed locally and in the neutral-interface workflow |
+| Production frontend build and budget | PASS (local + hosted) | Current Vite build: 48.5 KiB initial JS + CSS gzip against 112 KiB; no custom font assets are bundled |
+| Desktop Playwright path | PASS (local + hosted) | 8 desktop-scoped checks cover full evidence, 15-game table/card layouts, stale, degraded/error, and hash-mismatch states |
+| Mobile Playwright path | PASS (local + hosted) | 2 mobile checks cover detail scroll/focus restoration, no root overflow, 44 × 44 primary targets, and a visible one-game wind comparison |
 | Secret/private-identifier scan of repository | PASS (local candidate) | High-confidence secret, private-key, account, email, absolute-path, and retired-scope signatures returned no unresolved finding |
 | Secret/private-identifier scan of `web/dist` | PASS (local build) | The same binary-aware signatures returned no finding in the production build |
 | Dependency vulnerability/license review | PASS (local) | `pip-audit` and `npm audit --audit-level=low` found no known vulnerabilities; dependency licenses reviewed against both locked inventories |
-| Restored-frontend GitHub Pages deployment | PASS | [Workflow run 33227585556](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33227585556) passed the complete code, artifact, desktop/mobile, OIDC Pages, public readback, and rolling-evidence gates |
-| Restored-frontend public date/hash readback | PASS | `2026-08-28`; 15 games; `a2627ecaf592ba640349acbf63a53432df3208a1f05f11317ed20e605b0af7e8`; verified byte-for-byte by the deployment job at `2026-08-29T01:55:43Z` |
+| Neutral-interface GitHub Pages deployment | PASS | [Workflow run 33230839442](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33230839442) passed the complete code, artifact, desktop/mobile, OIDC Pages, public readback, and rolling-evidence gates |
+| Neutral-interface public date/hash readback | PASS | `2026-08-28`; 15 games; `9d2a1ed389e38e9ab188d0f2e64ec71d265131da2ef3e094de898fecddbc76d3`; verified byte-for-byte by the deployment job at `2026-08-29T03:15:12Z` |
+| Live Google Chrome desktop/mobile inspection | PASS | System UI font resolved for body and headings; no custom font faces loaded; neutral `#f5f7fa` canvas and `#1769aa` interaction token; no document overflow; 15 compact mobile cards and the full game-detail evidence path rendered |
 
 ### Seven-day archive gate and daily-reliability claim
 
@@ -82,12 +83,12 @@ consecutive same-day, contract-valid, hash-matched archive-generation receipts e
 
 | Slate | Games | Generated on New York slate date | Payload SHA-256 | Hosted readback |
 | --- | ---: | --- | --- | --- |
-| `2026-08-28` | 15 | PASS | `a2627ecaf592ba640349acbf63a53432df3208a1f05f11317ed20e605b0af7e8` | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33227585556) |
+| `2026-08-28` | 15 | PASS | `9d2a1ed389e38e9ab188d0f2e64ec71d265131da2ef3e094de898fecddbc76d3` | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33230839442) |
 | `2026-08-27` | 7 | PASS | `4b414e95b3b09093dd84e5c042175000cc77e44de72d1dc8958cc1c14234be0a` | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33129685641) |
 
 Both releases contained verified weather, confirmed lineups, optional Approach C context, and
 trajectories for every game. The two original cron events were delivered roughly nine hours late;
-the August 28 archive was then refreshed by the reliability repair and restored-frontend
+the August 28 archive was then refreshed by the reliability repair and neutral-interface
 deployments above. These receipts prove successful same-day publication and repair, not dependable
 schedule delivery. The claim remains provisional until seven consecutive dates pass and retain
 their matching workflow/public-readback receipts.
@@ -97,14 +98,14 @@ seven scheduled games, verified game-hour weather for all seven, reported offici
 yet available, kept Approach C out of the headline, and produced local payload SHA-256
 `75d7504248847cc3f753e99cbacafa102b56e06219d4b0c0c6905a914af0ab5c`.
 
-### August 28 restored-frontend receipt
+### August 28 neutral-interface receipt
 
 - Public repository URL: <https://github.com/ballinprestige/ballpark-weather-lab>
 - Live demo URL: <https://ballinprestige.github.io/ballpark-weather-lab/>
-- Workflow run URL: <https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33227585556>
+- Workflow run URL: <https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33230839442>
 - Verified slate date: `2026-08-28`
-- Verified payload SHA-256: `a2627ecaf592ba640349acbf63a53432df3208a1f05f11317ed20e605b0af7e8`
-- Verification timestamp: `2026-08-29T01:55:43Z`
+- Verified payload SHA-256: `9d2a1ed389e38e9ab188d0f2e64ec71d265131da2ef3e094de898fecddbc76d3`
+- Verification timestamp: `2026-08-29T03:15:12Z`
 
 ## Reproduction commands
 
@@ -123,7 +124,7 @@ Verify the recorded public release directly:
 python -m ballpark verify-public \
   --url "https://ballinprestige.github.io/ballpark-weather-lab/" \
   --expected-date "2026-08-28" \
-  --expected-sha "a2627ecaf592ba640349acbf63a53432df3208a1f05f11317ed20e605b0af7e8"
+  --expected-sha "9d2a1ed389e38e9ab188d0f2e64ec71d265131da2ef3e094de898fecddbc76d3"
 
 python -m ballpark verify-reliability \
   --url "https://ballinprestige.github.io/ballpark-weather-lab/" \
