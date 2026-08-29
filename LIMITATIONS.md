@@ -66,6 +66,9 @@ property is that it shows what it knows, what it is holding, and why.
   It is not an independent backup.
 - GitHub Actions scheduling is best effort and can be delayed or disabled by platform or repository
   state.
+- Staggered schedule opportunities reduce exposure to one delayed event but remain inside the same
+  GitHub scheduler failure domain. Daily reliability stays provisional until seven consecutive
+  same-day, hash-matched releases and their hosted readbacks have been recorded.
 
 ## Rights and affiliation
 

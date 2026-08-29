@@ -65,8 +65,22 @@ evidence class separately in [verification.md](verification.md).
 6. Record the repository, demo, workflow, date, and hash receipt only after public readback
    succeeds.
 
-`.github/workflows/pages.yml` runs daily at `15:17 UTC`, on pushes to `main`, and through manual
-dispatch. Manual dispatch accepts an optional canonical `YYYY-MM-DD` date.
+`.github/workflows/pages.yml` has three staggered daily schedule opportunities, also runs on
+pushes to `main`, and retains manual dispatch with an optional canonical `YYYY-MM-DD` date:
+
+| UTC | Purpose |
+| --- | --- |
+| `15:17` | Morning baseline publication |
+| `19:43` | Midday recovery if the baseline event was delayed or dropped |
+| `23:37` | Late refresh for official lineups and optional Approach C/trajectory context |
+
+All three scheduled runs resolve the slate from the current `America/New_York` date when they
+actually execute. The deliberately irregular minutes avoid the start-of-hour load window. GitHub
+documents that scheduled events can be delayed and, under sufficient load, dropped; these
+additional opportunities reduce that risk but do not turn cron delivery into proof of freshness.
+They remain in the same GitHub scheduler failure domain; only a successful public date/hash
+readback proves a publication. See GitHub's
+[scheduled-workflow guidance](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
 
 The workflow:
 
@@ -77,8 +91,35 @@ The workflow:
 5. Uploads `web/dist` as one Pages artifact.
 6. Deploys with GitHub's Pages identity.
 7. Reads back the public date and exact payload SHA-256 with bounded retries.
+8. Reports the seven-day archive-generation evidence gate without promoting a provisional
+   streak into a reliability claim.
 
 Concurrency uses one `pages` group and does not cancel an in-progress deployment.
+
+Each run writes its event type, schedule expression, and UTC runner-acceptance time to the GitHub
+Actions job summary. That receipt distinguishes scheduler-delivery latency from build or deploy
+latency without adding a credential or external service.
+
+### Scheduled-delivery incident and response
+
+The original single `15:17 UTC` trigger was not adequate as a freshness control. Its first two
+scheduled events arrived many hours late even though both workflows succeeded once GitHub created
+the runs:
+
+| Slate | Declared trigger | Run created | Delivery delay | Result |
+| --- | --- | --- | --- | --- |
+| `2026-08-27` | `2026-08-27 15:17 UTC` | `2026-08-28 00:25:41 UTC` | 9h 08m 41s | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33129685641) |
+| `2026-08-28` | `2026-08-28 15:17 UTC` | `2026-08-29 00:01:01 UTC` | 8h 44m 01s | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33222242434) |
+
+The evidence points to delayed schedule-event delivery: each run started as soon as it was
+created, then completed the build, deploy, and exact public readback. It does not support calling
+the live app a dependable daily service. The redundant windows are a mitigation to evaluate over
+seven consecutive current-day releases.
+
+If the public release date is behind the current New York date, treat the app as stale even when
+the last payload's build state was `ready`. From the workflow's **Run workflow** control, dispatch
+the current date (or leave the date blank), then wait for the exact public date/hash readback. Do
+not use an explicit historical date as a recovery action for the live Pages deployment.
 
 ## Release evidence
 
@@ -99,6 +140,21 @@ A valid public proof must include:
 - Desktop and mobile browser-test receipts.
 
 The current hosted and public receipts are recorded in [verification.md](verification.md).
+
+Check the rolling evidence gate directly against the public archive:
+
+```bash
+python -m ballpark verify-reliability \
+  --url "https://ballinprestige.github.io/ballpark-weather-lab/"
+```
+
+The command verifies up to seven consecutive dates ending on the current New York date. A date
+counts only when the index contains one receipt, the archived bytes pass the full publication
+contract and match its lowercase SHA-256, the payload metadata agrees with the receipt, and
+`generated_at` falls on that slate date in `America/New_York`. `ready`, honest `degraded`, and
+valid `no_slate` payloads all count toward the archive-generation gate. The command reports
+`provisional` until all seven dates pass. It does not prove when deployment occurred: retain the
+corresponding successful workflow/public-readback links as the hosted execution evidence.
 
 ## Manual public readback
 
@@ -129,6 +185,14 @@ Data Health and the per-game reason.
 ### `no_slate`
 
 MLB reported no scheduled games. This is a valid release with zero games, not a loading failure.
+
+### `STALE` interface warning
+
+The browser compares the current release date with the `America/New_York` date. When the release
+is behind, the interface replaces `READY`, `DEGRADED`, or `NO SLATE` with a prominent `STALE`
+warning while preserving the dated payload's underlying detail. Treat that warning as an
+operational failure: dispatch the current date, require the exact public date/hash readback, and
+do not describe the live app as current until the warning clears.
 
 ### Command failure before publication
 

@@ -21,6 +21,7 @@ an independent byte-for-byte public readback rather than inferred from deploymen
 | Malformed optional artifact | Approach C parquet cannot be read or match inventory | Approach B publishes; artifact receipt becomes partial; Approach C disabled | Artifact and pipeline tests |
 | Malformed critical artifact | Required model/baseline/display artifact hash or content fails | Stop without overwriting prior valid output | Artifact and pipeline tests |
 | Duplicate game ID | Duplicate appears in source or final payload | Reject before publication; browser also rejects duplicate public payload | `tests/fixtures/duplicate_game_ids.json`, source/contract/pipeline/browser tests |
+| Stale public date | Valid prior payload remains live after the New York date advances | Replace normal release state with an accessible `STALE` warning that names both dates and says not to treat the slate as current | Freshness unit tests and desktop browser state test |
 
 Additional implemented controls cover cross-date games, malformed timestamps, weather receipts
 attached to the wrong game, stable canonical JSON, atomic replacement failure, sorted/deduplicated
@@ -37,9 +38,9 @@ The Playwright suite defines:
 - Desktop error/empty paths for no slate, missing weather, malformed public payload, and duplicate
   game IDs.
 
-The local and hosted Playwright receipts on 2026-08-27 were six passed and six intentionally
-skipped: five desktop-scoped checks and one mobile-scoped check passed, while each inverse project
-was skipped by design. The public-URL receipt remains a separate post-deployment gate.
+The current local Playwright receipt is seven passed and seven intentionally skipped: six
+desktop-scoped checks and one mobile-scoped check passed, while each inverse project was skipped
+by design. The public-URL receipt remains a separate post-deployment gate.
 
 ## Historical repair evidence
 
@@ -57,32 +58,48 @@ values link to the final public repository, Pages workflow, and public readback.
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Python tests | PASS (local + hosted) | 51 tests passed; Ruff reported no findings |
+| Python tests | PASS (local candidate; prior hosted baseline) | 70 tests passed locally; the prior hosted receipt passed 51; Ruff reported no findings |
 | Artifact inventory verification | PASS (local + hosted) | 9 files; manifest `c0b501f9290d2e80f041a0dc689e61036b4b5acec9df60e4ff88949ce3027b78`; 21,608 evidence games; 839 profiles; 3,018,625 trajectory rows; 30 stadiums |
 | Svelte type/accessibility checks | PASS (local + hosted) | `svelte-check` reported 0 errors and 0 warnings |
-| Frontend unit tests | PASS (local + hosted) | 6 Vitest tests passed |
-| Production frontend build and budget | PASS (local) | Vite build passed; initial JS + CSS measured 39.2 KiB gzip against a 112 KiB budget |
-| Desktop Playwright path | PASS (local + hosted) | 5 desktop-scoped checks passed, including the complete employer path and four degraded/error states |
-| Mobile Playwright path | PASS (local + hosted) | Compact/expandable slate, no horizontal overflow, and 44 × 44 CSS-pixel targets passed |
+| Frontend unit tests | PASS (local candidate; prior hosted baseline) | 11 Vitest tests passed locally; the prior hosted receipt passed 6 |
+| Production frontend build and budget | PASS (local) | Vite build passed; initial JS + CSS measured 40.0 KiB gzip against a 112 KiB budget |
+| Desktop Playwright path | PASS (local candidate; prior hosted baseline) | 6 desktop-scoped checks passed, including the complete employer path, stale-date warning, and degraded/error states |
+| Mobile Playwright path | PASS (local candidate; prior hosted baseline) | Compact/expandable slate, no horizontal overflow, and 44 × 44 CSS-pixel targets passed |
 | Secret/private-identifier scan of repository | PASS (local candidate) | High-confidence secret, private-key, account, email, absolute-path, and retired-scope signatures returned no unresolved finding |
 | Secret/private-identifier scan of `web/dist` | PASS (local build) | The same binary-aware signatures returned no finding in the production build |
 | Dependency vulnerability/license review | PASS (local) | `pip-audit` and `npm audit --audit-level=low` found no known vulnerabilities; dependency licenses reviewed against both locked inventories |
-| GitHub Pages deployment | PASS | [Workflow run 33084179383](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33084179383) deployed one verified Pages artifact through OIDC |
-| Public date/hash readback | PASS | `2026-08-27`; 7 games; `5937eeb47c29a0425471553240edf2ed441ae7ea82b3fd6dad78411240e6a0b2`; verified at `2026-08-27T14:48:54Z` |
+| GitHub Pages recovery deployment | PASS | [Workflow run 33222242434](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33222242434) deployed the August 28 Pages artifact through OIDC after GitHub delivered the cron event 8h 44m late |
+| Public recovery date/hash readback | PASS | `2026-08-28`; 15 games; `42a045539ed1b5b8daa5fb2b3693f4a2bcf5520944021fe3f50e173b7021a811`; verified by the deployment job at `2026-08-29T00:02:58Z` |
+
+### Seven-day archive gate and daily-reliability claim
+
+The live app is **not yet proven reliable daily**. `verify-reliability` currently reports `2/7`
+consecutive same-day, contract-valid, hash-matched archive-generation receipts ending August 28:
+
+| Slate | Games | Generated on New York slate date | Payload SHA-256 | Hosted readback |
+| --- | ---: | --- | --- | --- |
+| `2026-08-28` | 15 | PASS | `42a045539ed1b5b8daa5fb2b3693f4a2bcf5520944021fe3f50e173b7021a811` | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33222242434) |
+| `2026-08-27` | 7 | PASS | `4b414e95b3b09093dd84e5c042175000cc77e44de72d1dc8958cc1c14234be0a` | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33129685641) |
+
+Both releases contained verified weather, confirmed lineups, optional Approach C context, and
+trajectories for every game. Both cron events were delivered roughly nine hours late, so these
+receipts prove successful same-day recovery, not dependable schedule delivery. The claim remains
+provisional until seven consecutive dates pass and retain their matching workflow/public-readback
+receipts.
 
 A non-publishing live-source run from the clean repository at `2026-08-27T11:27:07Z` returned all
 seven scheduled games, verified game-hour weather for all seven, reported official lineups as not
 yet available, kept Approach C out of the headline, and produced local payload SHA-256
 `75d7504248847cc3f753e99cbacafa102b56e06219d4b0c0c6905a914af0ab5c`.
 
-### Publication receipt
+### August 28 recovery receipt
 
 - Public repository URL: <https://github.com/ballinprestige/ballpark-weather-lab>
 - Live demo URL: <https://ballinprestige.github.io/ballpark-weather-lab/>
-- Workflow run URL: <https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33084179383>
-- Verified slate date: `2026-08-27`
-- Verified payload SHA-256: `5937eeb47c29a0425471553240edf2ed441ae7ea82b3fd6dad78411240e6a0b2`
-- Verification timestamp: `2026-08-27T14:48:54Z`
+- Workflow run URL: <https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33222242434>
+- Verified slate date: `2026-08-28`
+- Verified payload SHA-256: `42a045539ed1b5b8daa5fb2b3693f4a2bcf5520944021fe3f50e173b7021a811`
+- Verification timestamp: `2026-08-29T00:02:58Z`
 
 ## Reproduction commands
 
@@ -100,6 +117,10 @@ Verify the recorded public release directly:
 ```bash
 python -m ballpark verify-public \
   --url "https://ballinprestige.github.io/ballpark-weather-lab/" \
-  --expected-date "2026-08-27" \
-  --expected-sha "5937eeb47c29a0425471553240edf2ed441ae7ea82b3fd6dad78411240e6a0b2"
+  --expected-date "2026-08-28" \
+  --expected-sha "42a045539ed1b5b8daa5fb2b3693f4a2bcf5520944021fe3f50e173b7021a811"
+
+python -m ballpark verify-reliability \
+  --url "https://ballinprestige.github.io/ballpark-weather-lab/" \
+  --ending-date 2026-08-28
 ```

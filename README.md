@@ -10,7 +10,14 @@ outcomes.
 
 **Live demo:** [ballinprestige.github.io/ballpark-weather-lab](https://ballinprestige.github.io/ballpark-weather-lab/)
 
-**Current public proof:** `2026-08-27` · 7 games · SHA-256 `5937eeb47c29a0425471553240edf2ed441ae7ea82b3fd6dad78411240e6a0b2` · [workflow receipt](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33084179383)
+**Recorded August 28 recovery proof:** `2026-08-28` · 15 games · SHA-256 `42a045539ed1b5b8daa5fb2b3693f4a2bcf5520944021fe3f50e173b7021a811` · [workflow receipt](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33222242434)
+
+**Daily reliability status:** **PROVISIONAL — 2/7.** The first two scheduled events were
+delivered by GitHub roughly nine hours late. Both eventually passed, but a successful recovery is
+not proof of a dependable daily service. The application must accumulate seven consecutive,
+same-day, hash-matched public archive receipts and retain their hosted public-readback evidence
+before that claim is made. If the displayed slate falls behind the current `America/New_York`
+date, the interface replaces `READY` with a visible `STALE` warning.
 
 The public interface is designed as an evidence trail rather than a black box. Each release shows
 its generation time, data-health state, payload hash, source timestamps, weather decomposition,
@@ -130,15 +137,29 @@ builder had previously produced a stale public surface and how the dependency gr
 
 ## Hosted operation
 
-The Pages workflow runs daily at `15:17 UTC` and can also be dispatched for an explicit date. It
-uses GitHub's Pages deployment identity with only `contents: read`, `pages: write`, and
+The Pages workflow has staggered daily opportunities at `15:17`, `19:43`, and `23:37 UTC`; the
+last is a same-day refresh for official lineups and optional Approach C. It can also be dispatched
+for an explicit date. GitHub schedules are best-effort, so a cron entry is not itself freshness
+evidence: the final job must read back the public date and exact payload hash. The workflow uses
+GitHub's Pages deployment identity with only `contents: read`, `pages: write`, and
 `id-token: write` where needed. It does not use a desktop token or repository secret for Pages.
-Concurrency prevents overlapping deployments, source requests use bounded retries and timeouts,
-and the final job reads back the public date and exact payload hash.
+Concurrency prevents overlapping deployments, and source requests use bounded retries and
+timeouts.
 
 The first hosted release completed its code, artifact, unit, desktop/mobile browser, Pages, and
 public readback gates. The deployed `2026-08-27` payload was fetched independently and matched its
 release receipt byte-for-byte; durable details are recorded in [verification](docs/verification.md).
+
+The evidence verifier currently confirms `2/7` consecutive same-day archive-generation receipts
+ending on August 28. It validates each archived payload's full contract, SHA-256, and New York
+generation date. The linked hosted readbacks remain separate evidence, and the service claim stays
+provisional until both evidence sets cover all seven dates:
+
+```bash
+python -m ballpark verify-reliability \
+  --url "https://ballinprestige.github.io/ballpark-weather-lab/" \
+  --ending-date 2026-08-28
+```
 
 ## Documentation
 

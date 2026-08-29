@@ -4,7 +4,12 @@ on:
   push:
     branches: [main]
   schedule:
+    # Morning baseline publication (11:17 EDT / 10:17 EST).
     - cron: "17 15 * * *"
+    # Additional midday recovery opportunity if the first event is delayed or dropped.
+    - cron: "43 19 * * *"
+    # Late refresh to pick up official lineups and Approach C where MLB has published them.
+    - cron: "37 23 * * *"
   workflow_dispatch:
     inputs:
       date:
@@ -32,6 +37,21 @@ jobs:
       slate_date: ${{ steps.receipt.outputs.slate_date }}
       payload_sha: ${{ steps.receipt.outputs.payload_sha }}
     steps:
+      - name: Record trigger delivery
+        shell: bash
+        env:
+          TRIGGER_EVENT: ${{ github.event_name }}
+          SCHEDULE_EXPRESSION: ${{ github.event.schedule }}
+        run: |
+          {
+            echo "### Ballpark trigger delivery"
+            echo "- Event: \`$TRIGGER_EVENT\`"
+            if [[ -n "$SCHEDULE_EXPRESSION" ]]; then
+              echo "- Schedule expression: \`$SCHEDULE_EXPRESSION\`"
+            fi
+            echo "- Runner accepted trigger at: \`$(date -u +'%Y-%m-%dT%H:%M:%SZ')\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Check out the clean publication repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
@@ -124,6 +144,11 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock
+
+      - name: Install the locked contract-verifier dependencies
+        run: python -m pip install --disable-pip-version-check --require-hashes -r requirements.lock
 
       - name: Verify public date and exact payload hash
         env:
@@ -135,3 +160,19 @@ jobs:
           --expected-sha "${{ needs.build.outputs.payload_sha }}"
           --attempts 18
           --delay 10
+
+      - name: Report the seven-day archive-generation gate
+        shell: bash
+        env:
+          PYTHONPATH: src
+        run: |
+          set -o pipefail
+          python -m ballpark verify-reliability \
+            --url "${{ steps.deployment.outputs.page_url }}" \
+            --ending-date "${{ needs.build.outputs.slate_date }}" | tee reliability.json
+          {
+            echo "### Seven-day publication evidence"
+            echo '```json'
+            cat reliability.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

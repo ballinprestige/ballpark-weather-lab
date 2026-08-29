@@ -11,7 +11,13 @@ function digest(text: string): string {
   return createHash('sha256').update(text).digest('hex');
 }
 
-async function mockPublication(page: Page, payload: BallparkPayload, archivePayload?: BallparkPayload): Promise<void> {
+async function mockPublication(
+  page: Page,
+  payload: BallparkPayload,
+  archivePayload?: BallparkPayload,
+  currentDate = payload.date
+): Promise<void> {
+  await page.clock.setFixedTime(new Date(`${currentDate}T16:00:00Z`));
   page.on('pageerror', (error) => console.error(`Browser page error: ${error.stack ?? error.message}`));
   page.on('console', (message) => {
     if (message.type() === 'error') console.error(`Browser console error: ${message.text()}`);
@@ -48,6 +54,8 @@ test('desktop employer path exposes the complete evidence chain', async ({ page 
   await mockPublication(page, readyPayload());
   await page.goto('/#slate');
 
+  await expect(page.getByText('READY', { exact: true })).toBeVisible();
+  await expect(page.getByRole('alert', { name: 'Stale publication warning' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: /Aug 27, 2026 slate/i })).toBeVisible();
   await expect(page.getByRole('button', { name: /Seattle Mariners.*Boston Red Sox/i })).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByRole('heading', { name: 'Park wind diagram' })).toBeVisible();
@@ -63,6 +71,8 @@ test('desktop employer path exposes the complete evidence chain', async ({ page 
   await expect(page.getByRole('link', { name: 'Data Health' })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('heading', { name: 'Four publication lanes' })).toBeVisible();
   await expect(page.getByText('Payload SHA-256')).toBeVisible();
+  await expect(page.getByText('Publication state').locator('..')).toContainText('Ready');
+  await expect(page.getByText('Freshness').locator('..')).toContainText('Current');
 
   await page.getByRole('link', { name: 'Method' }).click();
   await expect(page.getByRole('heading', { name: 'The five-step critical path' })).toBeVisible();
@@ -72,6 +82,8 @@ test('desktop employer path exposes the complete evidence chain', async ({ page 
   await expect(page.getByRole('heading', { name: 'History' })).toBeVisible();
   await page.getByRole('button', { name: /Open Wed, Aug 26, 2026 snapshot/i }).click();
   await expect(page.getByText('Historical snapshot')).toBeVisible();
+  await page.getByRole('link', { name: 'Data Health' }).click();
+  await expect(page.getByText('Freshness').locator('..')).toContainText('Historical snapshot');
 });
 
 test('mobile slate remains compact, expandable, and touch safe', async ({ page }, testInfo) => {
@@ -94,6 +106,32 @@ test('mobile slate remains compact, expandable, and touch safe', async ({ page }
   expect(tooSmall).toEqual([]);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test('an older current release is labeled stale and cannot present as ready', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('desktop'));
+  const payload = readyPayload();
+  payload.date = '2020-08-27';
+  payload.generated_at = '2020-08-27T16:05:00Z';
+  payload.games.forEach((game) => game.game_date = payload.date);
+  const archive = readyPayload();
+  archive.date = '2020-08-26';
+  archive.generated_at = '2020-08-26T16:05:00Z';
+  archive.games.forEach((game) => game.game_date = archive.date);
+  await mockPublication(page, payload, archive, '2020-08-28');
+  await page.goto('/#slate');
+
+  const warning = page.getByRole('alert', { name: 'Stale publication warning' });
+  await expect(warning).toBeVisible();
+  await expect(warning.getByText('STALE', { exact: true })).toBeVisible();
+  await expect(warning).toContainText('Showing Thu, Aug 27, 2020');
+  await expect(warning).toContainText('America/New_York');
+  await expect(warning).toContainText('Do not treat this slate as current.');
+  await expect(warning.getByText('READY', { exact: true })).toHaveCount(0);
+
+  await page.getByRole('link', { name: 'Data Health' }).click();
+  await expect(page.getByText('Publication state').locator('..')).toContainText('Ready');
+  await expect(page.getByText('Freshness').locator('..')).toContainText('Stale');
 });
 
 test('no-slate is a valid publication state', async ({ page }, testInfo) => {

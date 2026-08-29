@@ -16,7 +16,10 @@ recorded in [verification.md](verification.md).
   instead of unsupported performance claims.
 - Converted an overcoupled daily workflow involving 154 disabled legacy tasks into one daily CLI
   command and one least-privilege Pages workflow with bounded networking, concurrency protection,
-  artifact validation, and post-deploy readback.
+  staggered publication opportunities, artifact validation, and post-deploy readback.
+- Added an Eastern-time stale-release alarm and a hash-validating seven-day evidence gate so the
+  interface and project documentation cannot present a delayed `READY` payload as current or
+  promote a recovered run into a reliability claim.
 - Audited an 834-file, approximately 166 MB source tree and designed a clean-history allowlisted
   publication boundary that excluded approximately 135 MB of unlicensed research, private runtime
   metadata, commercial-feed archives, raw source data, and credential machinery.
@@ -46,10 +49,12 @@ schema/semantic validation, deterministic edge-case fixtures, atomic file replac
 Health, model/rights documentation, clean-history sanitization, and desktop/mobile tests.
 
 **Result:** Historical isolated live smoke runs completed all 15 games on August 26, 2026 with
-confirmed lineups and all seven games on August 27 with valid weather before lineups. The new
-repository then passed 51 hosted Python tests, six hosted browser paths, Pages deployment, and a
-byte-for-byte public readback for the seven-game `2026-08-27` release. See
-[verification.md](verification.md) for the workflow and SHA-256 receipt.
+confirmed lineups and all seven games on August 27 with valid weather before lineups. The public
+repository then produced hash-verified same-day releases for August 27 and August 28, including
+verified weather, confirmed lineups, Approach C context, and trajectories for every game. The
+rolling reliability gate remains honestly provisional at `2/7` because GitHub delivered both
+scheduled events roughly nine hours late. See [verification.md](verification.md) for the workflow
+and SHA-256 receipts.
 
 ## Evidence map
 
@@ -61,6 +66,7 @@ byte-for-byte public readback for the seven-game `2026-08-27` release. See
 | Artifact integrity | `assets/manifest.json`, `src/ballpark/artifacts.py`, artifact tests |
 | Model counts and RMSE | `assets/models/training_manifest.json`, `MODEL_CARD.md` |
 | Public byte verification | `src/ballpark/publication.py`, `.github/workflows/pages.yml`, publication tests |
+| Stale-state and seven-day reliability gate | `web/src/lib/freshness.ts`, `src/ballpark/reliability.py`, focused unit/browser tests |
 | Desktop/mobile interaction | `web/tests/e2e/app.spec.ts` and the hosted Playwright receipt in `docs/verification.md` |
 | Sanitization and rights boundary | `docs/security-sanitization-report.md`, `DATA_SOURCES.md`, `THIRD_PARTY_NOTICES.md` |
 | Historical repair evidence | `docs/incident-repair-case-study.md`, `docs/verification.md` |

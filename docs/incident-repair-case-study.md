@@ -89,6 +89,26 @@ The application now fails according to the evidence boundary:
 This makes the failure visible at the layer that caused it and prevents optional work from
 masquerading as core unavailability.
 
+## Reliability follow-up: the builder was fixed before the schedule was proven
+
+The first two unattended GitHub schedule events both completed successfully, but GitHub did not
+create either run until roughly nine hours after its declared cron time. On August 28 the prior
+day still appeared as `READY` until the delayed run finally published 15 current games. That
+exposed two separate control gaps: one scheduler opportunity was not enough, and a payload's build
+state was being confused with its current-date freshness.
+
+The follow-up repair therefore:
+
+- Adds staggered morning, midday-recovery, and late-lineup schedule opportunities.
+- Records trigger delivery metadata separately from build/deploy duration.
+- Replaces the live release state with `STALE` whenever the payload date trails the current New
+  York date, while preserving the underlying payload detail.
+- Verifies a rolling seven-date ledger from public, hash-matched archive bytes and keeps the daily
+  service claim `provisional` until all seven dates pass with corresponding hosted readbacks.
+
+These controls mitigate and expose scheduler delay; they do not eliminate GitHub's documented
+best-effort schedule behavior or establish a new independent scheduler failure domain.
+
 ## Scope and cutover decision
 
 The authorized action is a separate sanitized preview repository and Pages proof.
@@ -106,7 +126,8 @@ fresh action, downside, rollback, and scope analysis.
 
 ## Publication evidence
 
-The standalone preview repair is complete because the architecture change is backed by clean-
-repository test receipts, hosted desktop/mobile browser receipts, a successful Pages workflow,
-the live demo, and exact public date/hash proof listed in [verification.md](verification.md).
-No existing production URL, task, runtime, or repository was cut over.
+The standalone architecture repair is demonstrated by clean-repository tests, hosted
+desktop/mobile browser receipts, successful Pages workflows, the live demo, and exact public
+date/hash proofs listed in [verification.md](verification.md). Its unattended daily reliability is
+not yet proven: the rolling gate is `2/7` as of August 28. No existing production URL, task,
+runtime, or repository was cut over.

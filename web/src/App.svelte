@@ -3,6 +3,7 @@
   import type { ArchiveEntry, BallparkPayload, PublicationBundle } from './lib/types';
   import { loadArchivePublication, loadCurrentPublication } from './lib/data';
   import { formatDate, formatTimestamp, shortHash } from './lib/format';
+  import { assessPublicationFreshness } from './lib/freshness';
   import AppHeader, { type ViewName } from './components/AppHeader.svelte';
   import DataHealth from './components/DataHealth.svelte';
   import HistoryView from './components/HistoryView.svelte';
@@ -23,6 +24,10 @@
   let loadingArchiveDate: string | null = null;
   let isArchive = false;
   let loadSequence = 0;
+  let currentInstant = new Date();
+
+  $: freshness = payload ? assessPublicationFreshness(payload.date, currentInstant) : null;
+  $: publicationIsStale = Boolean(freshness?.isStale && !isArchive);
 
   onMount(() => {
     const storedTheme = localStorage.getItem('ballpark-theme');
@@ -31,8 +36,12 @@
     applyTheme();
     routeFromHash(false);
     window.addEventListener('hashchange', handleHashChange);
+    const freshnessTimer = window.setInterval(() => currentInstant = new Date(), 60_000);
     void loadPublication();
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+      window.clearInterval(freshnessTimer);
+    };
   });
 
   function applyTheme(): void {
@@ -115,19 +124,26 @@
 </script>
 
 <svelte:head>
-  <title>{route === 'slate' ? 'Slate' : route === 'health' ? 'Data Health' : route === 'history' ? 'History' : 'Method'} · Ballpark Weather Lab</title>
+  <title>{publicationIsStale ? 'Stale release · ' : ''}{route === 'slate' ? 'Slate' : route === 'health' ? 'Data Health' : route === 'history' ? 'History' : 'Method'} · Ballpark Weather Lab</title>
 </svelte:head>
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
 <AppHeader current={route} {theme} onThemeToggle={toggleTheme} />
 
 {#if payload}
-  <aside class="publication-ribbon" data-status={payload.status} aria-label="Publication status">
+  <aside
+    class="publication-ribbon"
+    data-status={isArchive ? 'archive' : publicationIsStale ? 'stale' : payload.status}
+    aria-label={publicationIsStale ? 'Stale publication warning' : 'Publication status'}
+    aria-live={publicationIsStale ? 'assertive' : 'off'}
+    aria-atomic="true"
+    role={publicationIsStale ? 'alert' : undefined}
+  >
     <div>
-      <strong>{isArchive ? 'ARCHIVE' : payload.status === 'ready' ? 'READY' : payload.status === 'degraded' ? 'DEGRADED' : 'NO SLATE'}</strong>
+      <strong>{isArchive ? 'ARCHIVE' : publicationIsStale ? 'STALE' : payload.status === 'ready' ? 'READY' : payload.status === 'degraded' ? 'DEGRADED' : 'NO SLATE'}</strong>
       <span>{formatDate(payload.date)}</span>
     </div>
-    <p>{isArchive ? 'Historical snapshot' : payload.status === 'degraded' ? 'Some games or optional context are held; ready games remain visible.' : payload.status === 'no_slate' ? (payload.no_slate_reason ?? 'No games are scheduled for this date.') : 'Validated daily park-weather slate.'}</p>
+    <p>{isArchive ? 'Historical snapshot' : publicationIsStale && freshness ? `Showing ${formatDate(payload.date)} while the current MLB date is ${formatDate(freshness.currentDate)} (America/New_York). Do not treat this slate as current.${payload.status === 'degraded' ? ' The dated release also contains held data.' : payload.status === 'no_slate' ? ' The no-slate result applies only to the displayed date.' : ''}` : payload.status === 'degraded' ? 'Some games or optional context are held; ready games remain visible.' : payload.status === 'no_slate' ? (payload.no_slate_reason ?? 'No games are scheduled for this date.') : 'Validated daily park-weather slate.'}</p>
     <div class="ribbon-receipt">
       <span>Updated {formatTimestamp(payload.generated_at)}</span>
       <code title={payloadHash}>SHA {shortHash(payloadHash)}</code>
@@ -165,7 +181,7 @@
         <SlateView {payload} geometry={bundle.geometry} />
       {/if}
     {:else if route === 'health'}
-      <DataHealth {payload} {payloadHash} geometry={bundle.geometry} warnings={bundle.warnings} {isArchive} />
+      <DataHealth {payload} {payloadHash} geometry={bundle.geometry} warnings={bundle.warnings} {isArchive} isStale={publicationIsStale} />
     {:else if route === 'history'}
       <HistoryView
         archive={bundle.archive}

@@ -53,6 +53,12 @@ def _build_parser() -> argparse.ArgumentParser:
     restore.add_argument("--output", type=Path)
     restore.add_argument("--maximum-dates", type=int, default=120)
 
+    reliability = commands.add_parser("verify-reliability")
+    reliability.add_argument("--url", required=True)
+    reliability.add_argument("--ending-date", type=_date, default=_default_date())
+    reliability.add_argument("--attempts", type=int, default=3)
+    reliability.add_argument("--delay", type=float, default=1.0)
+
     commands.add_parser("verify-artifacts")
     return parser
 
@@ -149,6 +155,22 @@ def main(argv: list[str] | None = None) -> int:
                     output,
                     client=HttpClient(),
                     maximum_dates=args.maximum_dates,
+                )
+            )
+            return 0
+
+        if args.command == "verify-reliability":
+            from ballpark.reliability import verify_publication_streak
+            from ballpark.stdlib_http import StdlibBytesClient
+
+            _print(
+                verify_publication_streak(
+                    args.url,
+                    args.ending_date,
+                    client=StdlibBytesClient(),
+                    schema_path=paths.schemas / "slate.schema.json",
+                    attempts=args.attempts,
+                    delay_seconds=args.delay,
                 )
             )
             return 0

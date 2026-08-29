@@ -4,8 +4,9 @@
 
 **Live demo:** [ballinprestige.github.io/ballpark-weather-lab](https://ballinprestige.github.io/ballpark-weather-lab/)
 
-The current `2026-08-27` release and exact public payload hash are recorded in
-[verification.md](verification.md).
+The recorded `2026-08-28` recovery release and exact public payload hash are in
+[verification.md](verification.md). Daily reliability is deliberately labeled provisional at
+`2/7`; this walkthrough does not present the demo as a dependable unattended service yet.
 
 ## 0:00–0:20 — Frame the problem
 
@@ -14,7 +15,9 @@ The current `2026-08-27` release and exact public payload hash are recorded in
 > and proves the exact bytes that reached GitHub Pages. The product is intentionally transparent
 > about missing evidence.
 
-Point out the release ribbon: slate state, updated timestamp, and short SHA-256.
+Point out the release ribbon: slate state, updated timestamp, and short SHA-256. Explain that if
+the payload date falls behind the New York calendar date, the ribbon changes to `STALE`, names both
+dates, and says not to treat the slate as current even when the underlying payload was `ready`.
 
 ## 0:20–1:05 — Follow one game through the Slate
 
@@ -42,6 +45,9 @@ Open **Data Health**.
 
 Point to the per-game weather and trajectory coverage counts. Explain `ready`, `degraded`, and
 `no_slate` as valid, distinguishable publication states.
+
+Also show the daily evidence rule: the product remains `provisional` until seven consecutive
+same-day archive hashes and their hosted public-readback receipts have passed.
 
 ## 1:35–2:10 — Inspect the model evidence
 
@@ -73,7 +79,10 @@ Return to the current release to show that archive inspection does not blur curr
 > proofs, sanitized the publication boundary, and used GitHub's Pages identity rather than a
 > workstation token. The historical isolated smoke runs completed a 15-game slate with lineups and
 > a seven-game slate before lineups; the current repository and live demo have their own separate
-> verification receipts.
+> verification receipts. When GitHub then delivered two cron events roughly nine hours late, I
+> treated that as a reliability incident: added visible stale-state semantics, staggered recovery
+> windows, a late lineup refresh, and a seven-day evidence gate instead of declaring success from
+> one recovered run.
 
 Finish in the repository at:
 

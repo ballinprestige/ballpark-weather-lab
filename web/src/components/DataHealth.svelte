@@ -9,6 +9,7 @@
   export let geometry: GeometryArtifact | null;
   export let warnings: string[] = [];
   export let isArchive = false;
+  export let isStale = false;
 
   $: lanes = Object.entries(payload.health) as Array<[keyof BallparkPayload['health'], BallparkPayload['health'][keyof BallparkPayload['health']]]>;
   $: weatherReady = payload.games.filter((game) => isReadyState(game.weather.state)).length;
@@ -37,6 +38,7 @@
       <div><dt>Payload SHA-256</dt><dd><code title={payloadHash}>{shortHash(payloadHash)}</code></dd></div>
       <div><dt>Schema</dt><dd>{payload.schema_version}</dd></div>
       <div><dt>Publication state</dt><dd><StateBadge state={payload.status} /></dd></div>
+      <div><dt>Freshness</dt><dd><StateBadge state={isArchive ? 'archive' : isStale ? 'stale' : 'ready'} label={isArchive ? 'Historical snapshot' : isStale ? 'Stale' : 'Current'} /></dd></div>
       <div><dt>Geometry artifact</dt><dd>{geometry ? `${Object.keys(geometry.venues).length} parks` : 'Unavailable'}</dd></div>
     </dl>
   </section>

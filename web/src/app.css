@@ -332,6 +332,22 @@ dd {
   background: var(--amber);
 }
 
+.publication-ribbon[data-status="stale"] {
+  border-block-end-color: var(--danger);
+  box-shadow: inset 0 3px 0 var(--danger);
+  background: color-mix(in oklch, var(--danger) 10%, var(--paper-raised));
+}
+
+.publication-ribbon[data-status="stale"] > div:first-child strong {
+  color: var(--paper-raised);
+  background: var(--danger);
+}
+
+.publication-ribbon[data-status="stale"] p {
+  color: var(--danger);
+  font-weight: 700;
+}
+
 .publication-ribbon p {
   color: var(--ink-soft);
 }
