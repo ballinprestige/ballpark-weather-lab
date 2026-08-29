@@ -6,14 +6,17 @@
   import { assessPublicationFreshness } from './lib/freshness';
   import AppHeader, { type ViewName } from './components/AppHeader.svelte';
   import DataHealth from './components/DataHealth.svelte';
+  import GameDetail from './components/GameDetail.svelte';
   import HistoryView from './components/HistoryView.svelte';
   import MethodView from './components/MethodView.svelte';
   import SlateView from './components/SlateView.svelte';
   import StatePanel from './components/StatePanel.svelte';
 
   const views = new Set<ViewName>(['slate', 'health', 'history', 'method']);
+  type RouteName = ViewName | 'game';
 
-  let route: ViewName = 'slate';
+  let route: RouteName = 'slate';
+  let routedGameKey = '';
   let theme: 'day' | 'night' = 'day';
   let bundle: PublicationBundle | null = null;
   let payload: BallparkPayload | null = null;
@@ -25,9 +28,13 @@
   let isArchive = false;
   let loadSequence = 0;
   let currentInstant = new Date();
+  let slateReturn: { gameKey: string; scrollY: number } | null = null;
 
   $: freshness = payload ? assessPublicationFreshness(payload.date, currentInstant) : null;
   $: publicationIsStale = Boolean(freshness?.isStale && !isArchive);
+  $: routedGame = route === 'game' && payload
+    ? payload.games.find((game) => String(game.game_pk) === routedGameKey) ?? null
+    : null;
 
   onMount(() => {
     const storedTheme = localStorage.getItem('ballpark-theme');
@@ -46,7 +53,7 @@
 
   function applyTheme(): void {
     document.documentElement.dataset.theme = theme;
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'day' ? '#f0eadb' : '#171b18');
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'day' ? '#faf8f5' : '#0e1215');
   }
 
   function toggleTheme(): void {
@@ -56,23 +63,53 @@
   }
 
   function routeFromHash(moveFocus = true): void {
-    const candidate = window.location.hash.replace('#', '') as ViewName;
-    route = views.has(candidate) ? candidate : 'slate';
-    if (!views.has(candidate) && window.location.hash) history.replaceState(null, '', '#slate');
-    if (moveFocus) void focusViewHeading();
+    const previousRoute = route;
+    const candidate = window.location.hash.replace(/^#/, '');
+    const gameMatch = /^game\/(\d+)$/.exec(candidate);
+    if (gameMatch) {
+      route = 'game';
+      routedGameKey = gameMatch[1];
+    } else if (views.has(candidate as ViewName)) {
+      route = candidate as ViewName;
+      routedGameKey = '';
+    } else {
+      route = 'slate';
+      routedGameKey = '';
+      if (window.location.hash) history.replaceState(null, '', '#slate');
+    }
+    if (moveFocus) void settleRoute(previousRoute);
   }
 
   function handleHashChange(): void {
     routeFromHash(true);
   }
 
-  async function focusViewHeading(): Promise<void> {
+  function jumpTo(scrollY: number): void {
+    const root = document.documentElement;
+    const previousBehavior = root.style.scrollBehavior;
+    root.style.scrollBehavior = 'auto';
+    void root.offsetHeight;
+    window.scrollTo(0, scrollY);
+    window.requestAnimationFrame(() => root.style.scrollBehavior = previousBehavior);
+  }
+
+  async function settleRoute(previousRoute: RouteName): Promise<void> {
+    if (route === 'game') jumpTo(0);
     await tick();
-    const heading = document.querySelector<HTMLElement>('#main-content h1');
+    if (route === 'slate' && previousRoute === 'game' && slateReturn) {
+      const target = document.querySelector<HTMLElement>(`[data-game-key="${slateReturn.gameKey}"]`);
+      jumpTo(slateReturn.scrollY);
+      target?.focus({ preventScroll: true });
+      slateReturn = null;
+      return;
+    }
+    if (route !== 'game') jumpTo(0);
+    const heading = document.querySelector<HTMLElement>('#main-content h1, #main-content h2');
     if (heading) {
       heading.tabIndex = -1;
       heading.focus({ preventScroll: true });
     }
+    if (route !== 'game') slateReturn = null;
   }
 
   async function loadPublication(): Promise<void> {
@@ -121,14 +158,27 @@
   function showHealth(): void {
     window.location.hash = 'health';
   }
+
+  function showSlate(): void {
+    window.location.hash = 'slate';
+  }
+
+  function openGame(key: string): void {
+    slateReturn = { gameKey: key, scrollY: window.scrollY };
+    const previousRoute = route;
+    history.pushState(null, '', `#game/${key}`);
+    route = 'game';
+    routedGameKey = key;
+    void settleRoute(previousRoute);
+  }
 </script>
 
 <svelte:head>
-  <title>{publicationIsStale ? 'Stale release · ' : ''}{route === 'slate' ? 'Slate' : route === 'health' ? 'Data Health' : route === 'history' ? 'History' : 'Method'} · Ballpark Weather Lab</title>
+  <title>{publicationIsStale ? 'Stale release · ' : ''}{route === 'slate' ? 'Slate' : route === 'game' ? (routedGame ? `${routedGame.away_team} at ${routedGame.home_team}` : 'Game station') : route === 'health' ? 'Data Health' : route === 'history' ? 'History' : 'Method'} · Ballpark Weather Lab</title>
 </svelte:head>
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
-<AppHeader current={route} {theme} onThemeToggle={toggleTheme} />
+<AppHeader current={route === 'game' ? 'slate' : route} {theme} onThemeToggle={toggleTheme} />
 
 {#if payload}
   <aside
@@ -178,7 +228,22 @@
           onAction={showHealth}
         />
       {:else}
-        <SlateView {payload} geometry={bundle.geometry} />
+        <SlateView {payload} geometry={bundle.geometry} onOpenGame={openGame} />
+      {/if}
+    {:else if route === 'game'}
+      {#if routedGame}
+        <section class="game-route">
+          <a class="station-back" href="#slate">← Back to The Slate</a>
+          <GameDetail game={routedGame} geometry={bundle.geometry} headingLevel={1} />
+        </section>
+      {:else}
+        <StatePanel
+          eyebrow="Station unavailable"
+          title="That game is not in this release"
+          message="The requested game ID does not appear in the validated slate. No substitute data is shown."
+          actionLabel="Return to The Slate"
+          onAction={showSlate}
+        />
       {/if}
     {:else if route === 'health'}
       <DataHealth {payload} {payloadHash} geometry={bundle.geometry} warnings={bundle.warnings} {isArchive} isStale={publicationIsStale} />
@@ -199,10 +264,18 @@
 </main>
 
 <footer class="site-footer">
-  <div>
-    <strong>Ballpark Weather Lab</strong>
-    <span>Open, inspectable park context for every game on the slate.</span>
-    <span>Weather data by <a href="https://open-meteo.com/" rel="noopener noreferrer">Open-Meteo</a>.</span>
+  <div class="footer-station">
+    <span class="brand-mark mini" aria-hidden="true"><i></i><i></i><i></i></span>
+    <div>
+      <strong>BALLPARK WEATHER LAB</strong>
+      <small>Weather physics, with its uncertainty left on.</small>
+    </div>
   </div>
-  <p>Factors describe venue and weather conditions around a neutral value of 1.000. They are not outcome forecasts.</p>
+  <p class="legal">Factors describe venue and weather conditions around a neutral value of 1.000. They are not game-outcome forecasts.</p>
+  <div class="footer-links">
+    <a href="#history">Release archive</a>
+    <a href="#method">Honesty doctrine</a>
+    <span>Weather data: <a href="https://open-meteo.com/" rel="noopener noreferrer">Open-Meteo</a></span>
+    <span>Standalone public instrument</span>
+  </div>
 </footer>

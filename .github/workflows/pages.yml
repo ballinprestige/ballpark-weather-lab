@@ -80,8 +80,7 @@ jobs:
           python -m ruff check src tests scripts
           python -m pytest
           python -m ballpark verify-artifacts
-          npm run check --prefix web
-          npm run test --prefix web
+          npm run verify --prefix web
 
       - name: Install the bounded browser-test runtime
         run: npx --prefix web playwright install --with-deps chromium

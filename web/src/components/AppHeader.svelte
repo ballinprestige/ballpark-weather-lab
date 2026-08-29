@@ -18,14 +18,10 @@
 <header class="site-header">
   <div class="header-inner">
     <a class="brand" href="#slate" aria-label="Ballpark Weather Lab, Slate">
-      <svg viewBox="0 0 46 46" aria-hidden="true">
-        <path d="M7 39V17L23 6l16 11v22" class="brand-field"></path>
-        <path d="M11 35l12-9 12 9M23 26V10" class="brand-seams"></path>
-        <circle cx="23" cy="26" r="3" class="brand-mound"></circle>
-      </svg>
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>
-        <strong>Ballpark</strong>
-        <small>Weather Lab</small>
+        <strong>BALLPARK</strong>
+        <small>WEATHER LAB</small>
       </span>
     </a>
 
@@ -36,8 +32,8 @@
     </nav>
 
     <button class="theme-toggle" type="button" aria-label={`Use ${theme === 'day' ? 'night' : 'day'} theme`} on:click={onThemeToggle}>
-      <span aria-hidden="true">{theme === 'day' ? '◐' : '◑'}</span>
-      <span class="theme-label">{theme === 'day' ? 'Night' : 'Day'}</span>
+      <span class="theme-icon" aria-hidden="true">{theme === 'day' ? '◐' : '◑'}</span>
+      <span class="theme-label">{theme === 'day' ? 'Night game' : 'Day game'}</span>
     </button>
   </div>
 </header>

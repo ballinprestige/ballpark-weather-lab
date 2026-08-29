@@ -29,7 +29,8 @@ export function formatFactor(value: number | null | undefined): string {
 
 export function formatDelta(value: number | null | undefined, digits = 3): string {
   if (value === null || value === undefined) return '—';
-  return `${value > 0 ? '+' : ''}${value.toFixed(digits)}`;
+  const rounded = Math.abs(value) < 0.5 * 10 ** -digits ? 0 : value;
+  return `${rounded > 0 ? '+' : ''}${rounded.toFixed(digits)}`;
 }
 
 export function formatNumber(value: unknown): string {

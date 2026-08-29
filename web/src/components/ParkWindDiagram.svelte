@@ -27,7 +27,7 @@
       <p class="eyebrow">Field orientation</p>
       <h3 id={titleId}>Park wind diagram</h3>
     </div>
-    <span class="figure-reading">{windLabel(game.weather)}</span>
+    <span class="figure-reading">{isReadyState(game.weather.state) ? windLabel(game.weather) : 'weather held'}</span>
   </div>
 
   {#if available && venueGeometry}

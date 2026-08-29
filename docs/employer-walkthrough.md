@@ -21,7 +21,8 @@ dates, and says not to treat the slate as current even when the underlying paylo
 
 ## 0:20–1:05 — Follow one game through the Slate
 
-Open **Slate**, expand a matchup, and narrate the evidence chain:
+Open **Slate**, point out card/Ledger modes and the whole-slate Wind Field Strip, then open one
+matchup's dedicated station and narrate the evidence chain:
 
 1. The headline is a runs park factor around neutral `1.000`, not a score forecast.
 2. **Game-hour weather** shows provider, basis, valid time, and fetch time.
