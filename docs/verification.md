@@ -58,18 +58,18 @@ values link to the final public repository, Pages workflow, and public readback.
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Python tests | PASS (local candidate; prior hosted baseline) | 70 tests passed locally; the prior hosted receipt passed 51; Ruff reported no findings |
+| Python tests | PASS (local + hosted) | 70 tests passed locally and in the reliability-repair workflow; Ruff reported no findings |
 | Artifact inventory verification | PASS (local + hosted) | 9 files; manifest `c0b501f9290d2e80f041a0dc689e61036b4b5acec9df60e4ff88949ce3027b78`; 21,608 evidence games; 839 profiles; 3,018,625 trajectory rows; 30 stadiums |
 | Svelte type/accessibility checks | PASS (local + hosted) | `svelte-check` reported 0 errors and 0 warnings |
-| Frontend unit tests | PASS (local candidate; prior hosted baseline) | 11 Vitest tests passed locally; the prior hosted receipt passed 6 |
-| Production frontend build and budget | PASS (local) | Vite build passed; initial JS + CSS measured 40.0 KiB gzip against a 112 KiB budget |
-| Desktop Playwright path | PASS (local candidate; prior hosted baseline) | 6 desktop-scoped checks passed, including the complete employer path, stale-date warning, and degraded/error states |
-| Mobile Playwright path | PASS (local candidate; prior hosted baseline) | Compact/expandable slate, no horizontal overflow, and 44 × 44 CSS-pixel targets passed |
+| Frontend unit tests | PASS (local + hosted) | 11 Vitest tests passed locally and in the reliability-repair workflow |
+| Production frontend build and budget | PASS (local + hosted) | Vite build passed against the 112 KiB gzip budget; the hosted CSS + JS output measured 41.37 KiB gzip |
+| Desktop Playwright path | PASS (local + hosted) | 6 desktop-scoped checks passed, including the complete employer path, stale-date warning, and degraded/error states |
+| Mobile Playwright path | PASS (local + hosted) | Compact/expandable slate, no horizontal overflow, and 44 × 44 CSS-pixel targets passed |
 | Secret/private-identifier scan of repository | PASS (local candidate) | High-confidence secret, private-key, account, email, absolute-path, and retired-scope signatures returned no unresolved finding |
 | Secret/private-identifier scan of `web/dist` | PASS (local build) | The same binary-aware signatures returned no finding in the production build |
 | Dependency vulnerability/license review | PASS (local) | `pip-audit` and `npm audit --audit-level=low` found no known vulnerabilities; dependency licenses reviewed against both locked inventories |
-| GitHub Pages recovery deployment | PASS | [Workflow run 33222242434](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33222242434) deployed the August 28 Pages artifact through OIDC after GitHub delivered the cron event 8h 44m late |
-| Public recovery date/hash readback | PASS | `2026-08-28`; 15 games; `42a045539ed1b5b8daa5fb2b3693f4a2bcf5520944021fe3f50e173b7021a811`; verified by the deployment job at `2026-08-29T00:02:58Z` |
+| GitHub Pages reliability-repair deployment | PASS | [Workflow run 33223744721](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33223744721) passed the complete code, artifact, desktop/mobile, OIDC Pages, public readback, and rolling-evidence gates |
+| Public reliability-repair date/hash readback | PASS | `2026-08-28`; 15 games; `f96bf07b8f033227a4226519830cd391760e1782a59328c7fe79b59299b33f62`; verified by the deployment job at `2026-08-29T00:33:06Z` |
 
 ### Seven-day archive gate and daily-reliability claim
 
@@ -78,28 +78,29 @@ consecutive same-day, contract-valid, hash-matched archive-generation receipts e
 
 | Slate | Games | Generated on New York slate date | Payload SHA-256 | Hosted readback |
 | --- | ---: | --- | --- | --- |
-| `2026-08-28` | 15 | PASS | `42a045539ed1b5b8daa5fb2b3693f4a2bcf5520944021fe3f50e173b7021a811` | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33222242434) |
+| `2026-08-28` | 15 | PASS | `f96bf07b8f033227a4226519830cd391760e1782a59328c7fe79b59299b33f62` | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33223744721) |
 | `2026-08-27` | 7 | PASS | `4b414e95b3b09093dd84e5c042175000cc77e44de72d1dc8958cc1c14234be0a` | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33129685641) |
 
 Both releases contained verified weather, confirmed lineups, optional Approach C context, and
-trajectories for every game. Both cron events were delivered roughly nine hours late, so these
-receipts prove successful same-day recovery, not dependable schedule delivery. The claim remains
-provisional until seven consecutive dates pass and retain their matching workflow/public-readback
-receipts.
+trajectories for every game. The two original cron events were delivered roughly nine hours late;
+the August 28 archive was then refreshed by the reliability-repair deployment above. These
+receipts prove successful same-day publication and repair, not dependable schedule delivery. The
+claim remains provisional until seven consecutive dates pass and retain their matching
+workflow/public-readback receipts.
 
 A non-publishing live-source run from the clean repository at `2026-08-27T11:27:07Z` returned all
 seven scheduled games, verified game-hour weather for all seven, reported official lineups as not
 yet available, kept Approach C out of the headline, and produced local payload SHA-256
 `75d7504248847cc3f753e99cbacafa102b56e06219d4b0c0c6905a914af0ab5c`.
 
-### August 28 recovery receipt
+### August 28 reliability-repair receipt
 
 - Public repository URL: <https://github.com/ballinprestige/ballpark-weather-lab>
 - Live demo URL: <https://ballinprestige.github.io/ballpark-weather-lab/>
-- Workflow run URL: <https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33222242434>
+- Workflow run URL: <https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33223744721>
 - Verified slate date: `2026-08-28`
-- Verified payload SHA-256: `42a045539ed1b5b8daa5fb2b3693f4a2bcf5520944021fe3f50e173b7021a811`
-- Verification timestamp: `2026-08-29T00:02:58Z`
+- Verified payload SHA-256: `f96bf07b8f033227a4226519830cd391760e1782a59328c7fe79b59299b33f62`
+- Verification timestamp: `2026-08-29T00:33:06Z`
 
 ## Reproduction commands
 
@@ -118,7 +119,7 @@ Verify the recorded public release directly:
 python -m ballpark verify-public \
   --url "https://ballinprestige.github.io/ballpark-weather-lab/" \
   --expected-date "2026-08-28" \
-  --expected-sha "42a045539ed1b5b8daa5fb2b3693f4a2bcf5520944021fe3f50e173b7021a811"
+  --expected-sha "f96bf07b8f033227a4226519830cd391760e1782a59328c7fe79b59299b33f62"
 
 python -m ballpark verify-reliability \
   --url "https://ballinprestige.github.io/ballpark-weather-lab/" \
