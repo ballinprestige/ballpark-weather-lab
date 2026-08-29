@@ -150,9 +150,10 @@ GitHub's Pages deployment identity with only `contents: read`, `pages: write`, a
 Concurrency prevents overlapping deployments, and source requests use bounded retries and
 timeouts.
 
-The first hosted release completed its code, artifact, unit, desktop/mobile browser, Pages, and
-public readback gates. The deployed `2026-08-27` payload was fetched independently and matched its
-release receipt byte-for-byte; durable details are recorded in [verification](docs/verification.md).
+The restored-frontend release completed its code, artifact, unit, desktop/mobile browser, Pages,
+and public-readback gates. The deployed `2026-08-28` payload was fetched independently and matched
+its release receipt byte-for-byte; durable details are recorded in
+[verification](docs/verification.md).
 
 The evidence verifier currently confirms `2/7` consecutive same-day archive-generation receipts
 ending on August 28. It validates each archived payload's full contract, SHA-256, and New York
