@@ -50,11 +50,11 @@ Health, model/rights documentation, clean-history sanitization, and desktop/mobi
 
 **Result:** Historical isolated live smoke runs completed all 15 games on August 26, 2026 with
 confirmed lineups and all seven games on August 27 with valid weather before lineups. The public
-repository then produced hash-verified same-day releases for August 27 and August 28, including
-verified weather, confirmed lineups, Approach C context, and trajectories for every game. The
-rolling reliability gate remains honestly provisional at `2/7` because GitHub delivered both
-scheduled events roughly nine hours late. See [verification.md](verification.md) for the workflow
-and SHA-256 receipts.
+repository then produced seven consecutive same-day, contract-valid, SHA-256-matched archive
+releases from August 27 through September 2, each paired with a successful hosted exact public
+readback. The resulting `7/7` gate is bounded operational evidence; the stale-state control remains
+because GitHub schedule delivery is best effort. See [verification.md](verification.md) for every
+workflow and SHA-256 receipt.
 
 ## Evidence map
 

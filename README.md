@@ -10,14 +10,13 @@ outcomes.
 
 **Live demo:** [ballinprestige.github.io/ballpark-weather-lab](https://ballinprestige.github.io/ballpark-weather-lab/)
 
-**Recorded August 28 neutral-interface proof:** `2026-08-28` · 15 games · SHA-256 `9d2a1ed389e38e9ab188d0f2e64ec71d265131da2ef3e094de898fecddbc76d3` · [workflow receipt](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33230839442)
+**Latest verified release:** `2026-09-02` · 15 games · SHA-256 `e5337af2e4567890597b537f4c4a9614270beef876457429f2d6b11c0d0fe065` · [workflow receipt](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33687993867)
 
-**Daily reliability status:** **PROVISIONAL — 2/7.** The first two scheduled events were
-delivered by GitHub roughly nine hours late. Both eventually passed, but a successful recovery is
-not proof of a dependable daily service. The application must accumulate seven consecutive,
-same-day, hash-matched public archive receipts and retain their hosted public-readback evidence
-before that claim is made. If the displayed slate falls behind the current `America/New_York`
-date, the interface replaces `READY` with a visible `STALE` warning.
+**Daily reliability status:** **VERIFIED — 7/7 for August 27 through September 2, 2026.** Seven
+consecutive releases are same-day, contract-valid, hash-matched in the public archive, and tied to
+successful hosted exact-readback jobs. This is a bounded seven-day operational proof, not a claim
+that GitHub's best-effort scheduler cannot fail later. If the displayed slate falls behind the
+current `America/New_York` date, the interface replaces `READY` with a visible `STALE` warning.
 
 The public interface is designed as an evidence trail rather than a black box. Each release shows
 its generation time, data-health state, payload hash, source timestamps, weather decomposition,
@@ -150,20 +149,16 @@ GitHub's Pages deployment identity with only `contents: read`, `pages: write`, a
 Concurrency prevents overlapping deployments, and source requests use bounded retries and
 timeouts.
 
-The neutral-interface release completed its code, artifact, unit, desktop/mobile browser, Pages,
-and public-readback gates. The deployed `2026-08-28` payload was fetched independently and matched
-its release receipt byte-for-byte; durable details are recorded in
-[verification](docs/verification.md).
-
-The evidence verifier currently confirms `2/7` consecutive same-day archive-generation receipts
-ending on August 28. It validates each archived payload's full contract, SHA-256, and New York
-generation date. The linked hosted readbacks remain separate evidence, and the service claim stays
-provisional until both evidence sets cover all seven dates:
+The hosted workflow has now completed a seven-date reliability window from August 27 through
+September 2. Each final archived payload passes the full publication contract, matches its
+SHA-256 receipt, was generated on its New York slate date, and has a corresponding successful
+hosted public-readback log. The exact seven receipts and workflow links are recorded in
+[verification](docs/verification.md):
 
 ```bash
 python -m ballpark verify-reliability \
   --url "https://ballinprestige.github.io/ballpark-weather-lab/" \
-  --ending-date 2026-08-28
+  --ending-date 2026-09-02
 ```
 
 ## Documentation

@@ -4,9 +4,10 @@
 
 **Live demo:** [ballinprestige.github.io/ballpark-weather-lab](https://ballinprestige.github.io/ballpark-weather-lab/)
 
-The recorded `2026-08-28` recovery release and exact public payload hash are in
-[verification.md](verification.md). Daily reliability is deliberately labeled provisional at
-`2/7`; this walkthrough does not present the demo as a dependable unattended service yet.
+The complete August 27 through September 2 reliability ledger is in
+[verification.md](verification.md). The defined daily evidence gate is `7/7`: every archived
+payload is same-day, contract-valid, hash-matched, and paired with a successful hosted exact
+public-readback. Present that as a bounded seven-day operating result, not a perpetual uptime claim.
 
 ## 0:00–0:20 — Frame the problem
 
@@ -47,8 +48,9 @@ Open **Data Health**.
 Point to the per-game weather and trajectory coverage counts. Explain `ready`, `degraded`, and
 `no_slate` as valid, distinguishable publication states.
 
-Also show the daily evidence rule: the product remains `provisional` until seven consecutive
-same-day archive hashes and their hosted public-readback receipts have passed.
+Also show the daily evidence rule and its current `7/7` result: seven consecutive same-day archive
+hashes and their hosted public-readback receipts passed. Point out that the stale-state warning
+still matters because GitHub schedule delivery remains best effort.
 
 ## 1:35–2:10 — Inspect the model evidence
 

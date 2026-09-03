@@ -78,20 +78,26 @@ release values link to the public repository, Pages workflow, and public readbac
 
 ### Seven-day archive gate and daily-reliability claim
 
-The live app is **not yet proven reliable daily**. `verify-reliability` currently reports `2/7`
-consecutive same-day, contract-valid, hash-matched archive-generation receipts ending August 28:
+The live app met its defined seven-day reliability gate. At `2026-09-03T00:17:32Z`, an independent
+cache-busted readback and `verify-reliability --ending-date 2026-09-02` reported `7/7`. Every final
+archive payload is contract-valid, was generated on its `America/New_York` slate date, matches the
+listed SHA-256 byte-for-byte, and appears in a successful hosted run whose deployment job recorded
+the same date, hash, and `verified` public-readback state:
 
-| Slate | Games | Generated on New York slate date | Payload SHA-256 | Hosted readback |
+| Slate | Games | Generated at (UTC) | Payload SHA-256 | Hosted exact readback |
 | --- | ---: | --- | --- | --- |
-| `2026-08-28` | 15 | PASS | `9d2a1ed389e38e9ab188d0f2e64ec71d265131da2ef3e094de898fecddbc76d3` | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33230839442) |
-| `2026-08-27` | 7 | PASS | `4b414e95b3b09093dd84e5c042175000cc77e44de72d1dc8958cc1c14234be0a` | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33129685641) |
+| `2026-09-02` | 15 | `2026-09-02T21:59:46.291676Z` | `e5337af2e4567890597b537f4c4a9614270beef876457429f2d6b11c0d0fe065` | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33687993867) |
+| `2026-09-01` | 15 | `2026-09-02T01:21:07.916357Z` | `4b3b2153cea93152a49d5411bc7989ae6829cd69426d3cc3bb1db8907ff6d52b` | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33578931894) |
+| `2026-08-31` | 12 | `2026-09-01T02:02:08.767263Z` | `daa4e68ff0c8b06e0d545a7cb4262a9196358fef6516f4ecc54960c198cea99d` | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33460936679) |
+| `2026-08-30` | 14 | `2026-08-31T01:35:11.912219Z` | `b57a6b741237f4eb8d90655c06fcf9347f2d065d9508ca3c16606eb1da26ebee` | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33347930619) |
+| `2026-08-29` | 17 | `2026-08-30T01:37:16.440582Z` | `b7ce170dd1f07e3d6b548c62cecb5f8edfdb1eeb18466ad8f0fbcbd394f7564b` | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33286045368) |
+| `2026-08-28` | 15 | `2026-08-29T03:14:25.567252Z` | `9d2a1ed389e38e9ab188d0f2e64ec71d265131da2ef3e094de898fecddbc76d3` | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33230839442) |
+| `2026-08-27` | 7 | `2026-08-28T00:26:55.112901Z` | `4b414e95b3b09093dd84e5c042175000cc77e44de72d1dc8958cc1c14234be0a` | [PASS](https://github.com/ballinprestige/ballpark-weather-lab/actions/runs/33129685641) |
 
-Both releases contained verified weather, confirmed lineups, optional Approach C context, and
-trajectories for every game. The two original cron events were delivered roughly nine hours late;
-the August 28 archive was then refreshed by the reliability repair and neutral-interface
-deployments above. These receipts prove successful same-day publication and repair, not dependable
-schedule delivery. The claim remains provisional until seven consecutive dates pass and retain
-their matching workflow/public-readback receipts.
+The first two original cron events were delivered roughly nine hours late, which prompted the
+staggered schedule windows and explicit stale-state warning. The completed window proves seven
+consecutive same-day hosted publications under the repository's acceptance rule. It does not make
+GitHub schedule delivery a guaranteed service or remove the need for public freshness checks.
 
 A non-publishing live-source run from the clean repository at `2026-08-27T11:27:07Z` returned all
 seven scheduled games, verified game-hour weather for all seven, reported official lineups as not
@@ -118,15 +124,15 @@ npm run verify --prefix web
 npm run test:e2e --prefix web
 ```
 
-Verify the recorded public release directly:
+Verify the latest release and completed seven-day ledger directly:
 
 ```bash
 python -m ballpark verify-public \
   --url "https://ballinprestige.github.io/ballpark-weather-lab/" \
-  --expected-date "2026-08-28" \
-  --expected-sha "9d2a1ed389e38e9ab188d0f2e64ec71d265131da2ef3e094de898fecddbc76d3"
+  --expected-date "2026-09-02" \
+  --expected-sha "e5337af2e4567890597b537f4c4a9614270beef876457429f2d6b11c0d0fe065"
 
 python -m ballpark verify-reliability \
   --url "https://ballinprestige.github.io/ballpark-weather-lab/" \
-  --ending-date 2026-08-28
+  --ending-date 2026-09-02
 ```

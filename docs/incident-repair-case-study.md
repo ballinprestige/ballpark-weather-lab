@@ -106,6 +106,10 @@ The follow-up repair therefore:
 - Verifies a rolling seven-date ledger from public, hash-matched archive bytes and keeps the daily
   service claim `provisional` until all seven dates pass with corresponding hosted readbacks.
 
+That acceptance gate subsequently passed for all seven dates from August 27 through September 2,
+2026. Each final archive receipt has a matching successful hosted public-readback; the exact ledger
+is preserved in [verification.md](verification.md).
+
 These controls mitigate and expose scheduler delay; they do not eliminate GitHub's documented
 best-effort schedule behavior or establish a new independent scheduler failure domain.
 
@@ -128,6 +132,7 @@ fresh action, downside, rollback, and scope analysis.
 
 The standalone architecture repair is demonstrated by clean-repository tests, hosted
 desktop/mobile browser receipts, successful Pages workflows, the live demo, and exact public
-date/hash proofs listed in [verification.md](verification.md). Its unattended daily reliability is
-not yet proven: the rolling gate is `2/7` as of August 28. No existing production URL, task,
-runtime, or repository was cut over.
+date/hash proofs listed in [verification.md](verification.md). The defined unattended reliability
+window reached `7/7` for August 27 through September 2; this is bounded evidence and does not remove
+GitHub's best-effort scheduling limitation. No existing production URL, task, runtime, or
+repository was cut over.

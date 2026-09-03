@@ -67,8 +67,9 @@ property is that it shows what it knows, what it is holding, and why.
 - GitHub Actions scheduling is best effort and can be delayed or disabled by platform or repository
   state.
 - Staggered schedule opportunities reduce exposure to one delayed event but remain inside the same
-  GitHub scheduler failure domain. Daily reliability stays provisional until seven consecutive
-  same-day, hash-matched releases and their hosted readbacks have been recorded.
+  GitHub scheduler failure domain. The defined seven-day gate passed for August 27 through
+  September 2, 2026, with same-day, hash-matched releases and hosted readbacks. That bounded result
+  does not guarantee future delivery or create an independent scheduler failure domain.
 
 ## Rights and affiliation
 
