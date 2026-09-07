@@ -157,6 +157,31 @@ def test_contract_rejects_semantic_bypass_mutations(tmp_path: Path, mutation: ob
     assert errors
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda text: text.replace("fetch-depth: 1", "fetch-depth: true", 1),
+        lambda text: text.replace("persist-credentials: false", "persist-credentials: 0", 1),
+        lambda text: text.replace("cancel-in-progress: true", "cancel-in-progress: 1", 1),
+        lambda text: text.replace("timeout-minutes: 30", "timeout-minutes: 30.0", 1),
+    ],
+    ids=("fetch-depth-bool", "persist-credentials-int", "concurrency-int", "timeout-float"),
+)
+def test_cli_rejects_scalar_type_substitutions(tmp_path: Path, mutation: object) -> None:
+    unsafe = tmp_path / "verify.yml"
+    unsafe.write_text(mutation(WORKFLOW.read_text(encoding="utf-8")), encoding="utf-8")
+
+    completed = subprocess.run(
+        [sys.executable, "scripts/check_verify_workflow.py", str(unsafe)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert "approved semantic verification template" in completed.stderr
+
+
 def test_fail_closed_command_stops_after_an_intentional_failure() -> None:
     command = (
         [

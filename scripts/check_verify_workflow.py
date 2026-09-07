@@ -198,13 +198,39 @@ def _load_single_document(text: str) -> object:
 EXPECTED_WORKFLOW = _load_single_document(EXPECTED_WORKFLOW_TEMPLATE)
 
 
+def _exact_value_equal(expected: object, candidate: object) -> bool:
+    """Compare parsed YAML values without Python's bool/int/float coercion."""
+    if type(expected) is not type(candidate):
+        return False
+    if isinstance(expected, dict):
+        if len(expected) != len(candidate):
+            return False
+        unmatched = list(candidate.items())
+        for expected_key, expected_value in expected.items():
+            for index, (candidate_key, candidate_value) in enumerate(unmatched):
+                if _exact_value_equal(expected_key, candidate_key):
+                    if not _exact_value_equal(expected_value, candidate_value):
+                        return False
+                    unmatched.pop(index)
+                    break
+            else:
+                return False
+        return not unmatched
+    if isinstance(expected, list):
+        return len(expected) == len(candidate) and all(
+            _exact_value_equal(expected_item, candidate_item)
+            for expected_item, candidate_item in zip(expected, candidate, strict=True)
+        )
+    return expected == candidate
+
+
 def validate(workflow_path: Path) -> list[str]:
     """Return fail-closed workflow-template validation errors for ``workflow_path``."""
     try:
         candidate = _load_single_document(workflow_path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as error:
         return [f"cannot securely parse workflow: {error}"]
-    if candidate != EXPECTED_WORKFLOW:
+    if not _exact_value_equal(EXPECTED_WORKFLOW, candidate):
         return ["workflow differs from the approved semantic verification template"]
     return []
 

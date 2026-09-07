@@ -35,6 +35,9 @@ The validator uses PyYAML 6.0.2 from the separate, hash-pinned
 `.github/requirements-verify.txt`; it does not alter application dependencies or
 `requirements.lock`. It safely parses one YAML document, rejects aliases, merge keys, and duplicate
 mapping keys, then compares the parsed document to the complete reviewed workflow template.
+The comparison is recursively type-strict: YAML `true`, `1`, and `1.0` are distinct values even
+where Python's ordinary equality would conflate them. This keeps action inputs such as
+`fetch-depth: 1`, boolean credential/concurrency values, and integer timeout values exact.
 
 ## Literal clean-run validation
 
