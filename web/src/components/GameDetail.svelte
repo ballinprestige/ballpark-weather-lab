@@ -123,8 +123,8 @@
         <div><dt>NO ask</dt><dd>{game.exchange_market?.under_ask_cents}c <small>({game.exchange_market?.under_ask_dollars})</small></dd></div>
         <div><dt>Market phase</dt><dd>{game.exchange_market?.game_phase?.replaceAll('_', ' ')}</dd></div>
       </dl>
-      <p class="market-warning">Contract asks are quoted in cents, not American sportsbook odds. Source update age is unknown; fees are excluded and this does not satisfy sportsbook coverage.</p>
-      <p class="source-line"><span>Kalshi</span><span>Observed {formatTimestamp(game.exchange_market?.observed_at ?? null)}</span><span>{game.exchange_market?.market_ticker}</span></p>
+      <p class="market-warning">Contract asks are quoted in cents, not American sportsbook odds. Source update age is unknown; fees are excluded.</p>
+      <p class="source-line"><span>Kalshi</span><span>Captured/as of {formatTimestamp(game.exchange_market?.observed_at ?? null)}</span><span>{game.exchange_market?.market_ticker}</span></p>
     </section>
   {/if}
 

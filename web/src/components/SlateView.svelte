@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { BallparkGame, BallparkPayload } from '../lib/types';
-  import { formatDate, formatDelta, formatTime, formatTimestamp, gameHoldReason, isGameHeld, teamLabel } from '../lib/format';
+  import { formatContractCents, formatDate, formatDelta, formatTime, formatTimestamp, gameHoldReason, isGameHeld, teamLabel } from '../lib/format';
   import GameListItem from './GameListItem.svelte';
   import WindFieldStrip from './WindFieldStrip.svelte';
   import { assessOddsFreshness } from '../lib/freshness';
@@ -54,10 +54,10 @@
     return `${direction} · ${formatDelta(carry, 1)} carry · ${Math.abs(cross).toFixed(1)} cross`;
   };
 
-  const exchangeAsk = (game: BallparkGame): string | null => {
+  const exchangeAsk = (game: BallparkGame): BallparkGame['exchange_market'] | null => {
     const market = game.exchange_market;
     if (!market || market.state !== 'observed_unknown_age' || market.line === null || market.over_ask_cents === null || market.under_ask_cents === null) return null;
-    return `${market.game_phase.replaceAll('_', ' ')} · source age unknown · O ${market.line} YES ${market.over_ask_cents}c (${market.over_ask_dollars}) · U ${market.line} NO ${market.under_ask_cents}c (${market.under_ask_dollars})`;
+    return market;
   };
 
   function openBoardDetails(event: MouseEvent, key: string): void {
@@ -124,16 +124,17 @@
     <div class="ledger-wrap">
       <table class="ledger">
         <thead>
-          <tr><th>Matchup / first pitch</th><th>Total · Over / Under · book</th><th>Park wind</th><th>Weather adjustment</th></tr>
+          <tr><th>Matchup / first pitch</th><th>Total · Over / Under · source</th><th>Park wind</th><th>Weather adjustment</th></tr>
         </thead>
         <tbody>
           {#each games as game (game.game_pk)}
             {@const key = String(game.game_pk)}
             {@const movement = movementPercent(game)}
             {@const market = assessOddsFreshness(game.odds, now)}
+            {@const exchange = exchangeAsk(game)}
             <tr data-tone={isGameHeld(game) ? 'hold' : 'ready'}>
               <td><a class="board-matchup" href={`#game/${key}`} data-game-key={game.game_pk} aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} details`} on:click={(event) => openBoardDetails(event, key)}><strong>{game.away_team} <i>at</i> {game.home_team}</strong><small>{formatTime(game.game_time)} · {game.venue}</small></a></td>
-              <td>{#if exchangeAsk(game)}<strong>Kalshi contract ask</strong><small class="exchange-ask">{exchangeAsk(game)}</small><small class="market-secondary">Sportsbook unavailable</small>{:else if market.state === 'unavailable'}<strong>Sportsbook unavailable</strong>{:else}<strong>{game.odds.line}</strong> <span>O {american(game.odds.over_price)} · U {american(game.odds.under_price)}</span><br /><small>{game.odds.sportsbook_name} · {market.state === 'observed' ? 'observed, age unverified' : market.state}</small>{/if}</td>
+              <td>{#if exchange}<strong>{exchange.line}</strong> <span>Over {formatContractCents(exchange.over_ask_cents)} · Under {formatContractCents(exchange.under_ask_cents)}</span><small class="exchange-ask">Kalshi contract ask · {exchange.game_phase.replaceAll('_', ' ')} · source age unknown · observed {formatTimestamp(exchange.observed_at)}</small>{:else if market.state === 'unavailable'}<strong>Sportsbook unavailable</strong>{:else}<strong>{game.odds.line}</strong> <span>O {american(game.odds.over_price)} · U {american(game.odds.under_price)}</span><br /><small>{game.odds.sportsbook_name} · {market.state === 'observed' ? 'observed, age unverified' : market.state}</small>{/if}</td>
               <td>{windContext(game)}</td>
               <td>{movement == null ? 'Held' : `${formatDelta(movement, 0)}% runs`}<br /><small>{isGameHeld(game) ? gameHoldReason(game) : `${Math.round(game.weather.temperature_f)}°F · ${Math.round(game.weather.humidity_pct)}%`}</small></td>
             </tr>

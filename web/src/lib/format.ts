@@ -38,6 +38,12 @@ export function formatNumber(value: unknown): string {
   return Number.isInteger(value) ? integerFormatter.format(value) : decimalFormatter.format(value);
 }
 
+export function formatContractCents(value: string | null | undefined): string {
+  if (!value) return '—';
+  const trimmed = value.includes('.') ? value.replace(/0+$/, '').replace(/\.$/, '') : value;
+  return `${trimmed}¢`;
+}
+
 export function humanizeKey(key: string): string {
   const aliases: Record<string, string> = {
     evidence_games: 'Historical evidence games',

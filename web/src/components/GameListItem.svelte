@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { BallparkGame } from '../lib/types';
-  import { formatDelta, formatTime, gameHoldReason, isGameHeld, teamLabel } from '../lib/format';
+  import { formatContractCents, formatDelta, formatTime, gameHoldReason, isGameHeld, teamLabel } from '../lib/format';
   import { assessOddsFreshness } from '../lib/freshness';
 
   export let game: BallparkGame;
@@ -19,7 +19,7 @@
     && game.exchange_market.line !== null
     && game.exchange_market.over_ask_cents !== null
     && game.exchange_market.under_ask_cents !== null
-      ? `${game.exchange_market.game_phase.replaceAll('_', ' ')} · source age unknown · O ${game.exchange_market.line} YES ${game.exchange_market.over_ask_cents}c (${game.exchange_market.over_ask_dollars}) · U ${game.exchange_market.line} NO ${game.exchange_market.under_ask_cents}c (${game.exchange_market.under_ask_dollars})`
+      ? game.exchange_market
       : null;
   const american = (price: number | null): string => price === null ? '—' : `${price > 0 ? '+' : ''}${price}`;
 
@@ -34,7 +34,7 @@
   <a href={`#game/${game.game_pk}`} data-game-key={game.game_pk} aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} details, ${formatTime(game.game_time)}`} on:click={openDetails}>
     <span class="compact-matchup"><strong>{game.away_team}</strong><i>at</i><strong>{game.home_team}</strong><small>{formatTime(game.game_time)} · {game.venue}</small></span>
     <span class="compact-market">
-      {#if exchange}<strong>Kalshi contract ask</strong><small>{exchange}</small><small class="market-secondary">Sportsbook unavailable</small>
+      {#if exchange}<strong>{exchange.line}</strong><small>Over {formatContractCents(exchange.over_ask_cents)} · Under {formatContractCents(exchange.under_ask_cents)}</small><small class="market-secondary">Kalshi contract ask · {exchange.game_phase.replaceAll('_', ' ')} · source age unknown</small>
       {:else if market.state === 'unavailable'}<strong>Sportsbook unavailable</strong>
       {:else}<strong>{game.odds.line}</strong><small>O {american(game.odds.over_price)} · U {american(game.odds.under_price)} · {game.odds.sportsbook_name}{market.state === 'observed' ? ' · observed, age unverified' : ''}</small>{/if}
     </span>
