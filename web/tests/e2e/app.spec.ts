@@ -236,6 +236,7 @@ test('field instrument keeps a real wind vector, roof hold, and missing directio
   await expect(page.getByRole('heading', { name: 'Total, Over & Under' })).toBeVisible();
   const fieldBox = await page.locator('.park-wind svg').boundingBox();
   expect(fieldBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(400);
+  expect((fieldBox?.y ?? 0) + (fieldBox?.height ?? Number.POSITIVE_INFINITY)).toBeLessThan(800);
   const samples = page.getByRole('tab', { name: /center carry|high air/i });
   await expect(samples).toHaveCount(2);
   await samples.first().focus();

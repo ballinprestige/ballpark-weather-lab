@@ -2774,6 +2774,16 @@ body::before {
 .game-detail > .lineup-context { order: 8; }
 .game-detail > .trajectory { order: 9; }
 
+@media (min-width: 44rem) {
+  .station-back { min-height: 2.25rem; margin-block: .2rem; }
+  .game-detail-header h1,
+  .game-detail-header h2,
+  .game-detail-header > h3 { font-size: clamp(2rem, 3.1vw, 2.65rem); }
+  .detail-kicker { margin-block-end: .25rem; }
+  .detail-status-line { margin-block-start: .35rem; }
+  .park-wind { padding-block: 1.5rem; }
+}
+
 .park-wind {
   color: #e8e3d9;
   background: #101619;
