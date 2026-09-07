@@ -12,6 +12,7 @@ Install Python 3.12 or newer and Node.js 22.x, then run from the repository root
 ```bash
 python -m venv .venv
 python -m pip install --require-hashes --requirement requirements.lock
+python -m pip install --only-binary=:all: --require-hashes --requirement .github/requirements-verify.txt
 python -m pip install --no-build-isolation --no-deps --editable .
 npm ci --prefix web
 ```
@@ -223,6 +224,8 @@ Dependabot monitors Python and npm manifests weekly. Review changes rather than 
 `requirements.lock` fixes the transitive Python graph and package hashes; `requirements.in` is the
 reviewable direct-input file. Regenerate it in a reviewed Python 3.12 environment with
 `pip-compile --generate-hashes --allow-unsafe requirements.in`, then verify installation with
-`--require-hashes`.
+`--require-hashes`. `.github/requirements-verify.txt` is a separate, hash-pinned verification-only
+dependency lock for the workflow contract parser. It must be installed before running the default
+pytest suite but is not part of the application runtime dependency graph.
 The official CPU-only XGBoost distribution keeps the hosted runtime small and excludes unused GPU
 libraries. Workflow Actions are pinned to reviewed full commit SHAs.

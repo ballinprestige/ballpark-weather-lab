@@ -77,6 +77,7 @@ Requirements are Python 3.12 or newer and Node.js 22.x.
 ```bash
 python -m venv .venv
 python -m pip install --require-hashes --requirement requirements.lock
+python -m pip install --only-binary=:all: --require-hashes --requirement .github/requirements-verify.txt
 python -m pip install --no-build-isolation --no-deps --editable .
 npm ci --prefix web
 ```
