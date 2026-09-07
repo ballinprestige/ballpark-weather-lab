@@ -60,6 +60,8 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
     if payload.get("status") != "no_slate" and not games:
         raise DataContractError("non-empty status requires at least one game")
     health = payload["health"]
+    if any(isinstance(game, dict) and "odds" in game for game in games) and "odds" not in health:
+        raise DataContractError("market-bearing payload requires a complete odds health lane")
     if health["schedule"].get("game_count") != len(games):
         raise DataContractError("schedule health count does not match the slate")
     if payload.get("status") == "no_slate":

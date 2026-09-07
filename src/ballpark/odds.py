@@ -364,7 +364,7 @@ class TheOddsApiProvider:
                 continue
             if event_date != target_date:
                 continue
-            matches = [g for g in schedule if g.get("home_team") == home and g.get("away_team") == away]
+            matches = [g for g in schedule if g.get("home_team") == home and g.get("away_team") == away and g.get("game_time") and _utc(str(g["game_time"])) == _utc(str(event.get("commence_time")))]
             if len(matches) != 1: continue
             game_pk = int(matches[0]["game_pk"])
             books = [b for b in event.get("bookmakers", []) if isinstance(b, dict) and b.get("key") == self.book_id]
