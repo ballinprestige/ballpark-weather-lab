@@ -4,6 +4,7 @@
   import { formatDate, formatDelta, formatFactor, formatTime, isGameHeld, stateTone, teamLabel } from '../lib/format';
   import GameListItem from './GameListItem.svelte';
   import WindFieldStrip from './WindFieldStrip.svelte';
+  import { assessOddsFreshness } from '../lib/freshness';
 
   type SlateFilter = 'all' | 'open' | 'roof' | 'incomplete';
   type SlateSort = 'movement' | 'time' | 'wind' | 'venue';
@@ -11,6 +12,7 @@
   export let payload: BallparkPayload;
   export let geometry: GeometryArtifact | null;
   export let onOpenGame: (key: string) => void;
+  export let now = new Date();
 
   let desktop = false;
   let filter: SlateFilter = 'all';
@@ -143,6 +145,7 @@
           {#each games as game (game.game_pk)}
             {@const key = String(game.game_pk)}
             {@const movement = movementPercent(game)}
+            {@const market = assessOddsFreshness(game.odds, now)}
             <tr data-tone={stateTone(game.factors.state)}>
               <td><strong>{game.away_team} <i>at</i> {game.home_team}</strong></td>
               <td>{formatTime(game.game_time)}</td>
@@ -151,8 +154,8 @@
               <td class="num">{isGameHeld(game) ? '—' : formatFactor(game.factors.game_pf_runs)}</td>
               <td class="num">{isGameHeld(game) ? '—' : formatFactor(game.factors.game_pf_hr)}</td>
               <td class="num">{game.odds.line ?? '—'}</td>
-              <td>{game.odds.state === 'unavailable' ? 'Unavailable' : `O ${american(game.odds.over_price)} / U ${american(game.odds.under_price)}`}</td>
-              <td><span class="ledger-state" data-tone={game.odds.state === 'current' ? 'good' : 'hold'}>{game.odds.state === 'unavailable' ? 'Unavailable' : `${game.odds.sportsbook_name} · ${game.odds.state}`}</span></td>
+              <td>{market.state === 'unavailable' ? 'Unavailable' : `O ${american(game.odds.over_price)} / U ${american(game.odds.under_price)}`}</td>
+              <td><span class="ledger-state" data-tone={market.state === 'current' ? 'good' : 'hold'}>{market.state === 'unavailable' ? 'Unavailable' : `${game.odds.sportsbook_name} · ${market.state}`}</span></td>
               <td><span class="ledger-state" data-tone={isGameHeld(game) ? 'hold' : 'good'}>{statusLabel(game)}</span></td>
               <td><button class="inspect-button" data-game-key={game.game_pk} type="button" aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} details`} on:click={() => onOpenGame(key)}>Inspect</button></td>
             </tr>
@@ -168,6 +171,7 @@
           <GameListItem
             {game}
             {geometry}
+            {now}
             rank={sort === 'movement' && index < 3 ? index + 1 : null}
             onOpen={() => onOpenGame(key)}
           />

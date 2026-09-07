@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessPublicationFreshness, dateInTimeZone, MLB_TIME_ZONE } from './freshness';
+import { assessOddsFreshness, assessPublicationFreshness, dateInTimeZone, MLB_TIME_ZONE } from './freshness';
 
 describe('publication freshness', () => {
   it('uses the America/New_York calendar date before and after midnight', () => {
@@ -30,5 +30,12 @@ describe('publication freshness', () => {
 
   it('rejects impossible publication dates', () => {
     expect(() => assessPublicationFreshness('2026-02-30', new Date('2026-08-28T20:55:00Z'))).toThrow(/Invalid ISO publication date/);
+  });
+
+  it('ages a current quote at the canonical boundary and rejects future clocks', () => {
+    const now = new Date('2026-09-07T20:00:00Z');
+    expect(assessOddsFreshness({ state: 'current', reason: null, source_updated_at: '2026-09-07T19:45:00Z', observed_at: '2026-09-07T19:45:00Z' }, now).state).toBe('current');
+    expect(assessOddsFreshness({ state: 'current', reason: null, source_updated_at: '2026-09-07T19:44:59Z', observed_at: '2026-09-07T19:44:59Z' }, now).state).toBe('stale');
+    expect(assessOddsFreshness({ state: 'current', reason: null, source_updated_at: '2026-09-07T20:06:00Z', observed_at: '2026-09-07T20:00:00Z' }, now).state).toBe('unavailable');
   });
 });

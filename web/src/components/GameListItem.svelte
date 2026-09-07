@@ -2,11 +2,13 @@
   import type { BallparkGame, GeometryArtifact } from '../lib/types';
   import { findVenueGeometry, wallPath } from '../lib/geometry';
   import { formatDelta, formatFactor, formatTime, gameHoldReason, isGameHeld, teamLabel } from '../lib/format';
+  import { assessOddsFreshness } from '../lib/freshness';
 
   export let game: BallparkGame;
   export let geometry: GeometryArtifact | null = null;
   export let rank: number | null = null;
   export let onOpen: () => void;
+  export let now = new Date();
 
   $: held = isGameHeld(game);
   $: movement = held ? null : (game.factors.weather_multiplier_runs - 1) * 100;
@@ -23,7 +25,8 @@
         : 'Near park baseline';
   $: consequence = movement == null
     ? gameHoldReason(game)
-    : `Game-hour conditions move this park’s run factor about ${Math.abs(Math.round(movement))}% ${movement > 0 ? 'above' : movement < 0 ? 'below' : 'along'} its seasonal baseline.`;
+      : `Game-hour conditions move this park’s run factor about ${Math.abs(Math.round(movement))}% ${movement > 0 ? 'above' : movement < 0 ? 'below' : 'along'} its seasonal baseline.`;
+  $: market = assessOddsFreshness(game.odds, now);
 
   function openDetails(event: MouseEvent): void {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -103,12 +106,12 @@
       </div>
     </dl>
 
-    <div class="market-strip" data-state={game.odds.state} aria-label="Full-game total market">
-      {#if game.odds.state === 'unavailable'}
-        <strong>Full-game total unavailable</strong><span>{game.odds.reason ?? 'No verified quote.'}</span>
+    <div class="market-strip" data-state={market.state} aria-label="Full-game total market">
+      {#if market.state === 'unavailable'}
+        <strong>Full-game total unavailable</strong><span>{market.reason ?? 'No verified quote.'}</span>
       {:else}
         <strong>Total {game.odds.line}</strong><span>O {american(game.odds.over_price)} · U {american(game.odds.under_price)} · {game.odds.sportsbook_name}</span>
-        {#if game.odds.state === 'stale'}<small>Stale — {game.odds.reason}</small>{/if}
+        {#if market.state === 'stale'}<small>Stale — {market.reason}</small>{/if}
       {/if}
     </div>
 

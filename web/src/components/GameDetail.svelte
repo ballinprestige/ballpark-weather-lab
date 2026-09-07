@@ -2,6 +2,7 @@
   import type { BallparkGame, GeometryArtifact } from '../lib/types';
   import { displayValue, formatFactor, formatTime, formatTimestamp, gameHoldReason, isGameHeld, pitcherName, stateTone, teamLabel, windLabel } from '../lib/format';
   import { isReadyState } from '../lib/validate';
+  import { assessOddsFreshness } from '../lib/freshness';
   import StateBadge from './StateBadge.svelte';
   import ParkWindDiagram from './ParkWindDiagram.svelte';
   import DecompositionLadder from './DecompositionLadder.svelte';
@@ -10,11 +11,13 @@
   export let game: BallparkGame;
   export let geometry: GeometryArtifact | null;
   export let headingLevel: 1 | 2 | 3 = 2;
+  export let now = new Date();
 
   $: held = isGameHeld(game);
   $: weatherHeld = !isReadyState(game.weather.state);
   $: titleId = `game-detail-title-${game.game_pk}`;
   $: lineupReady = isReadyState(game.lineup.state);
+  $: marketFreshness = assessOddsFreshness(game.odds, now);
   const american = (price: number | null): string => price === null ? '—' : `${price > 0 ? '+' : ''}${price}`;
 </script>
 
@@ -37,6 +40,8 @@
       <span>{pitcherName(game, 'away')} vs {pitcherName(game, 'home')}</span>
     </div>
   </header>
+
+  <ParkWindDiagram {game} {geometry} />
 
   {#if held}
     <div class="game-hold" role="status" data-testid="weather-hold">
@@ -82,13 +87,13 @@
     </p>
   </section>
 
-  <section class="market-section" aria-labelledby={`market-${game.game_pk}`} data-state={game.odds.state}>
+  <section class="market-section" aria-labelledby={`market-${game.game_pk}`} data-state={marketFreshness.state}>
     <div class="section-heading">
       <div><p class="eyebrow">Quoted sportsbook market</p><h3 id={`market-${game.game_pk}`}>Full-game total</h3></div>
-      <StateBadge state={game.odds.state} />
+      <StateBadge state={marketFreshness.state} />
     </div>
-    {#if game.odds.state === 'unavailable'}
-      <p class="market-unavailable">{game.odds.reason ?? 'No verified full-game total is available. No line or price is substituted.'}</p>
+    {#if marketFreshness.state === 'unavailable'}
+      <p class="market-unavailable">{marketFreshness.reason ?? 'No verified full-game total is available. No line or price is substituted.'}</p>
     {:else}
       <dl class="market-grid">
         <div><dt>Total</dt><dd>{game.odds.line}</dd></div>
@@ -96,12 +101,11 @@
         <div><dt>Under</dt><dd>{american(game.odds.under_price)}</dd></div>
         <div><dt>Sportsbook</dt><dd>{game.odds.sportsbook_name}</dd></div>
       </dl>
-      {#if game.odds.state === 'stale'}<p class="market-warning">Stale quote: {game.odds.reason}. It is not current.</p>{/if}
+      {#if marketFreshness.state === 'stale'}<p class="market-warning">Stale quote: {marketFreshness.reason}. It is not current.</p>{/if}
       <p class="source-line"><span>{game.odds.provider}</span><span>Source updated {formatTimestamp(game.odds.source_updated_at)}</span><span>Retrieved {formatTimestamp(game.odds.observed_at)}</span></p>
     {/if}
   </section>
 
-  <ParkWindDiagram {game} {geometry} />
   <DecompositionLadder {game} />
 
   <section class="evidence-section evidence-receipt" aria-labelledby={`receipt-${game.game_pk}`}>
@@ -117,8 +121,8 @@
       <div><dt>Weather valid</dt><dd>{formatTimestamp(game.weather.valid_at)}</dd></div>
       <div><dt>Evidence state</dt><dd>{held ? 'Weather-adjusted factor held' : 'Verified weather inputs'}</dd></div>
       <div><dt>Lineups</dt><dd>{game.lineup.state === 'confirmed' ? 'confirmed / confirmed' : game.lineup.state.replaceAll('_', ' ')}</dd></div>
-      <div><dt>Approach B</dt><dd>{game.factors.state}</dd></div>
-      <div><dt>Approach C</dt><dd>{game.approach_c.state.replaceAll('_', ' ')}</dd></div>
+      <div><dt>Park-factor method</dt><dd>{game.factors.state}</dd></div>
+      <div><dt>Flight context</dt><dd>{game.approach_c.state.replaceAll('_', ' ')}</dd></div>
     </dl>
   </section>
 
@@ -126,7 +130,7 @@
     <div class="section-heading">
       <div>
         <p class="eyebrow">Lineup state</p>
-        <h3 id={`lineup-${game.game_pk}`}>Approach C context</h3>
+        <h3 id={`lineup-${game.game_pk}`}>Lineup and flight context</h3>
       </div>
       <StateBadge state={game.approach_c.state} />
     </div>
@@ -145,7 +149,7 @@
       </div>
     </div>
     <p>{lineupReady ? `Lineups observed ${formatTimestamp(game.lineup.observed_at)}.` : (game.lineup.reason ?? 'Confirmed lineups are not yet available.')}</p>
-    <p class="plain-note">{game.approach_c.reason ?? game.approach_c.method ?? 'Approach C is optional and never blocks the weather-adjusted park-factor slate.'}</p>
+    <p class="plain-note">{game.approach_c.reason ?? game.approach_c.method ?? 'Flight context is optional and never blocks the weather-adjusted park-factor slate.'}</p>
   </section>
 
   <TrajectoryTheater {game} />

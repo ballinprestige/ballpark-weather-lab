@@ -36,7 +36,7 @@
   <div class="section-heading">
     <div>
       <p class="eyebrow">Optional physics context</p>
-      <h3 id={`trajectory-${game.game_pk}`}>Trajectory theater</h3>
+      <h3 id={`trajectory-${game.game_pk}`}>Flight-path comparison</h3>
     </div>
     <span class="section-note">Neutral vs weather</span>
   </div>

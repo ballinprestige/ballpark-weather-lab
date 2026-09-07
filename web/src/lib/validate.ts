@@ -255,6 +255,18 @@ function validateOdds(value: unknown, path: string, gamePk: number, gameDate: st
     if ([market.line, market.over_price, market.under_price, market.source_updated_at, market.observed_at, market.raw_sha256, market.snapshot_id, market.sportsbook_id, market.sportsbook_name, market.provider_event_id].some((entry) => entry === null)) {
       fail(path, 'quoted market must include the line, both prices, book, source/retrieval times, hash, and snapshot');
     }
+    for (const [label, price] of [['over_price', market.over_price], ['under_price', market.under_price]] as const) {
+      if (price === null || (price > -100 && price < 100)) fail(`${path}.${label}`, 'must be a supported American price (≤ -100 or ≥ +100)');
+    }
+    if (!/^[a-f0-9]{64}$/.test(market.raw_sha256 ?? '') || !/^[a-f0-9]{64}$/.test(market.snapshot_id ?? '')) {
+      fail(path, 'quoted market provenance must use lowercase SHA-256 digests');
+    }
+    const sourceMs = Date.parse(market.source_updated_at!);
+    const observedMs = Date.parse(market.observed_at!);
+    if (sourceMs > observedMs + 5 * 60_000) fail(path, 'source update cannot be more than five minutes after retrieval');
+    if (state === 'current' && (sourceMs < observedMs - 15 * 60_000 || sourceMs > observedMs + 5 * 60_000)) {
+      fail(path, 'current quote must be within the canonical 15-minute freshness window');
+    }
   }
   return market;
 }
@@ -320,6 +332,29 @@ function validateHealth(value: unknown): PublicationHealth {
   return result;
 }
 
+function validateOddsHealth(value: unknown, games: BallparkGame[], requiresOddsLane: boolean): PublicationHealth {
+  const health = validateHealth(value);
+  if (!requiresOddsLane) return health;
+  const odds = objectAt(objectAt(value, 'health').odds, 'health.odds');
+  const state = enumAt(odds.state, 'health.odds.state', ['available', 'partial', 'unavailable', 'not_applicable']);
+  const source = stringAt(odds.source, 'health.odds.source') as string;
+  if (!source || odds.optional !== false) fail('health.odds', 'must identify a non-optional canonical odds lane');
+  const counts = {
+    current: integerAt(odds.current_games, 'health.odds.current_games', 0),
+    stale: integerAt(odds.stale_games, 'health.odds.stale_games', 0),
+    unavailable: integerAt(odds.unavailable_games, 'health.odds.unavailable_games', 0)
+  };
+  const actual = { current: 0, stale: 0, unavailable: 0 };
+  for (const game of games) actual[game.odds.state] += 1;
+  if (counts.current !== actual.current || counts.stale !== actual.stale || counts.unavailable !== actual.unavailable || counts.current + counts.stale + counts.unavailable !== games.length) {
+    fail('health.odds', 'counts must match every game market state exactly');
+  }
+  const expectedState = actual.current === games.length ? 'available' : actual.current > 0 ? 'partial' : 'unavailable';
+  if (state !== expectedState) fail('health.odds.state', 'must match the summarized game market states');
+  health.odds = odds;
+  return health;
+}
+
 function validateModel(value: unknown): JsonRecord {
   const model = objectAt(value, 'model');
   stringAt(model.name, 'model.name');
@@ -352,6 +387,11 @@ export function validatePayload(value: unknown): BallparkPayload {
   const rawGames = arrayAt(root.games, 'games');
   const rawIds = rawGames.map((game, index) => integerAt(objectAt(game, `games[${index}]`).game_pk, `games[${index}].game_pk`, 1));
   if (new Set(rawIds).size !== rawIds.length) fail('games', 'duplicates game ID');
+  const oddsFields = rawGames.map((game, index) => 'odds' in objectAt(game, `games[${index}]`));
+  const hasOdds = oddsFields.some(Boolean);
+  if (hasOdds && oddsFields.some((entry) => !entry)) fail('games', 'cannot mix legacy games with quoted-market games');
+  const hasOddsHealth = 'odds' in objectAt(root.health, 'health');
+  if (rawGames.length > 0 && hasOdds !== hasOddsHealth) fail('health.odds', 'must accompany every quoted-market game and no legacy game');
   const games = rawGames.map(validateGame);
   const seen = new Set<number>();
   for (const [index, game] of games.entries()) {
@@ -372,7 +412,7 @@ export function validatePayload(value: unknown): BallparkPayload {
     status,
     no_slate_reason: noSlateReason,
     model: validateModel(root.model),
-    health: validateHealth(root.health),
+    health: validateOddsHealth(root.health, games, hasOdds),
     games
   };
 }

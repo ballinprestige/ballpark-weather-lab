@@ -33,8 +33,8 @@
 <section class="evidence-section decomposition" aria-labelledby={`decomposition-${game.game_pk}`}>
   <div class="section-heading">
     <div>
-      <p class="eyebrow">Approach B</p>
-      <h3 id={`decomposition-${game.game_pk}`}>Decomposition ladder</h3>
+      <p class="eyebrow">How the park reading is built</p>
+      <h3 id={`decomposition-${game.game_pk}`}>Park-context breakdown</h3>
     </div>
     <span class="section-note">Neutral = 1.000</span>
   </div>

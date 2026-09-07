@@ -56,7 +56,7 @@ describe('validatePayload', () => {
 
   it('keeps legacy releases readable while labeling their market unavailable', () => {
     const payload = readyPayload();
-    delete (payload.games[0] as unknown as Record<string, unknown>).odds;
+    for (const game of payload.games) delete (game as unknown as Record<string, unknown>).odds;
     delete (payload.health as unknown as Record<string, unknown>).odds;
     const validated = validatePayload(payload);
     expect(validated.games[0].odds.state).toBe('unavailable');
@@ -67,5 +67,28 @@ describe('validatePayload', () => {
     const payload = readyPayload();
     payload.games[0].odds.over_price = null;
     expect(() => validatePayload(payload)).toThrow(/quoted market must include the line, both prices/i);
+  });
+
+  it('rejects invalid American prices, malformed provenance, and expired current quotes', () => {
+    const invalidPrice = readyPayload();
+    invalidPrice.games[0].odds.over_price = 0;
+    expect(() => validatePayload(invalidPrice)).toThrow(/supported American price/i);
+
+    const invalidDigest = readyPayload();
+    invalidDigest.games[0].odds.raw_sha256 = 'not-a-digest';
+    expect(() => validatePayload(invalidDigest)).toThrow(/provenance/i);
+
+    const expired = readyPayload();
+    expired.games[0].odds.source_updated_at = '2026-08-27T15:00:00Z';
+    expired.games[0].odds.observed_at = '2026-08-27T16:00:00Z';
+    expect(() => validatePayload(expired)).toThrow(/15-minute freshness/i);
+  });
+
+  it('requires a complete, reconciling odds health lane once markets exist', () => {
+    const payload = readyPayload();
+    payload.health.odds.current_games = 1;
+    expect(() => validatePayload(payload)).toThrow(/counts must match/i);
+    delete (payload.health as unknown as Record<string, unknown>).odds;
+    expect(() => validatePayload(payload)).toThrow(/must accompany every quoted-market game/i);
   });
 });

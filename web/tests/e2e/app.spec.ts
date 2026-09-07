@@ -12,6 +12,10 @@ function digest(text: string): string {
   return createHash('sha256').update(text).digest('hex');
 }
 
+function capturePath(name: string): string {
+  return resolve(process.env.CAPTURE_DIR ?? resolve(process.cwd(), '../docs/screenshots'), name);
+}
+
 function fifteenGamePayload(): BallparkPayload {
   const payload = readyPayload();
   const games: Array<[string, string, string]> = [
@@ -104,7 +108,7 @@ test('desktop employer path exposes the complete evidence chain', async ({ page 
   await expect(page.getByText('SHA ', { exact: false }).first()).toBeVisible();
   if (process.env.CAPTURE_DEMO === '1') {
     await page.evaluate(() => document.fonts.ready);
-    await page.screenshot({ path: resolve(process.cwd(), '../docs/screenshots/desktop-slate.png'), fullPage: true, animations: 'disabled' });
+    await page.screenshot({ path: capturePath('desktop-slate.png'), fullPage: true, animations: 'disabled' });
   }
 
   const themeToggle = page.getByRole('button', { name: 'Use night theme' });
@@ -124,7 +128,7 @@ test('desktop employer path exposes the complete evidence chain', async ({ page 
   if (process.env.CAPTURE_DEMO === '1') {
     await page.getByRole('button', { name: 'Use night theme' }).click();
     await page.evaluate(() => document.fonts.ready);
-    await page.screenshot({ path: resolve(process.cwd(), '../docs/screenshots/game-night.png'), fullPage: true, animations: 'disabled' });
+    await page.screenshot({ path: capturePath('game-night.png'), fullPage: true, animations: 'disabled' });
     await page.getByRole('button', { name: 'Use day theme' }).click();
   }
 
@@ -183,7 +187,7 @@ test('mobile slate and game details remain compact and touch safe', async ({ pag
   expect((windBox?.y ?? 0) - ((gridBox?.y ?? 0) + (gridBox?.height ?? 0))).toBeLessThan(300);
   if (process.env.CAPTURE_DEMO === '1') {
     await page.evaluate(() => document.fonts.ready);
-    await page.screenshot({ path: resolve(process.cwd(), '../docs/screenshots/mobile-slate.png'), fullPage: true, animations: 'disabled' });
+    await page.screenshot({ path: capturePath('mobile-slate.png'), fullPage: true, animations: 'disabled' });
   }
   await second.scrollIntoViewIfNeeded();
   const slateScrollY = await page.evaluate(() => window.scrollY);
@@ -226,6 +230,43 @@ test('single-game mobile wind strip keeps its game in view', async ({ page }, te
     scrollWidth: element.scrollWidth
   }));
   expect(dimensions.scrollWidth - dimensions.clientWidth).toBeLessThanOrEqual(1);
+});
+
+test('field instrument keeps a real wind vector, roof hold, and missing direction distinct', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('desktop'));
+  const payload = readyPayload();
+  await mockPublication(page, payload);
+  await page.goto('/#game/1001');
+  await expect(page.locator('.wind-stream')).toHaveCount(4);
+  await expect(page.locator('.wind-decomposition')).toContainText('FROM');
+  await expect(page.locator('.wind-decomposition')).toContainText('CROSS');
+  await expect(page.getByRole('heading', { name: 'Full-game total' })).toBeVisible();
+
+  payload.games[0].weather.roof_state = 'fixed-roof';
+  payload.games[0].weather.dome_active = true;
+  await mockPublication(page, payload);
+  await page.reload();
+  await expect(page.getByText('Roof active · outdoor wind withheld')).toBeVisible();
+  await expect(page.locator('.wind-stream')).toHaveCount(0);
+
+  payload.games[0].weather.roof_state = 'open-air';
+  payload.games[0].weather.dome_active = false;
+  payload.games[0].weather.wind_direction_deg = null;
+  await mockPublication(page, payload);
+  await page.reload();
+  await expect(page.getByText('Direction not reported · no vector shown')).toBeVisible();
+  await expect(page.getByText('Calm · 0 mph')).toHaveCount(0);
+});
+
+test('319px game detail retains the field and avoids horizontal overflow', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('mobile'));
+  await page.setViewportSize({ width: 319, height: 480 });
+  await mockPublication(page, readyPayload());
+  await page.goto('/#game/1002');
+  await expect(page.getByRole('heading', { name: 'Park wind diagram' })).toBeVisible();
+  await expect(page.locator('.park-wind')).toContainText('CARRY');
+  await expect(page.getByRole('heading', { name: 'Full-game total' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });
 
 test('a full fifteen-game slate defaults to the table and retains the responsive card path', async ({ page }, testInfo) => {

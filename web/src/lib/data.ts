@@ -11,13 +11,16 @@ export class PublicationLoadError extends Error {
   }
 }
 
-async function fetchText(path: string): Promise<string> {
+async function fetchText(path: string, signal?: AbortSignal): Promise<string> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= REQUEST_ATTEMPTS; attempt += 1) {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
+      const abort = () => controller.abort();
+      signal?.addEventListener('abort', abort, { once: true });
       const response = await fetch(path, { cache: 'no-store', signal: controller.signal });
+      signal?.removeEventListener('abort', abort);
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       return await response.text();
     } catch (error) {
@@ -47,40 +50,40 @@ export async function sha256Text(text: string): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function loadRelease(): Promise<ReleasePointer> {
-  return validateRelease(parseJson(await fetchText('./data/release.json'), 'Release pointer'));
+async function loadRelease(signal?: AbortSignal): Promise<ReleasePointer> {
+  return validateRelease(parseJson(await fetchText('./data/release.json', signal), 'Release pointer'));
 }
 
-async function loadPayloadWithHash(path: string): Promise<{ payload: BallparkPayload; hash: string }> {
-  const text = await fetchText(path);
+async function loadPayloadWithHash(path: string, signal?: AbortSignal): Promise<{ payload: BallparkPayload; hash: string }> {
+  const text = await fetchText(path, signal);
   return { payload: validatePayload(parseJson(text, 'Payload')), hash: await sha256Text(text) };
 }
 
-async function loadOptionalArchive(warnings: string[]): Promise<ArchiveIndex> {
+async function loadOptionalArchive(warnings: string[], signal?: AbortSignal): Promise<ArchiveIndex> {
   try {
-    return validateArchiveIndex(parseJson(await fetchText('./archive/index.json'), 'Archive index'));
+    return validateArchiveIndex(parseJson(await fetchText('./archive/index.json', signal), 'Archive index'));
   } catch (error) {
     warnings.push(error instanceof Error ? `History unavailable: ${error.message}` : 'History unavailable.');
     return { dates: [] };
   }
 }
 
-async function loadOptionalGeometry(warnings: string[]): Promise<GeometryArtifact | null> {
+async function loadOptionalGeometry(warnings: string[], signal?: AbortSignal): Promise<GeometryArtifact | null> {
   try {
-    return validateGeometry(parseJson(await fetchText('./park_geometry.json'), 'Park geometry'));
+    return validateGeometry(parseJson(await fetchText('./park_geometry.json', signal), 'Park geometry'));
   } catch (error) {
     warnings.push(error instanceof Error ? `Park geometry unavailable: ${error.message}` : 'Park geometry unavailable.');
     return null;
   }
 }
 
-export async function loadCurrentPublication(): Promise<PublicationBundle> {
+export async function loadCurrentPublication(signal?: AbortSignal): Promise<PublicationBundle> {
   const warnings: string[] = [];
   const [release, payloadResult, archive, geometry] = await Promise.all([
-    loadRelease(),
-    loadPayloadWithHash('./data/data.json'),
-    loadOptionalArchive(warnings),
-    loadOptionalGeometry(warnings)
+    loadRelease(signal),
+    loadPayloadWithHash('./data/data.json', signal),
+    loadOptionalArchive(warnings, signal),
+    loadOptionalGeometry(warnings, signal)
   ]);
   if (payloadResult.hash !== release.payload_sha256) {
     throw new PublicationLoadError(`Publication hash mismatch. Expected ${release.payload_sha256.slice(0, 12)}…, received ${payloadResult.hash.slice(0, 12)}….`);
@@ -101,8 +104,8 @@ export async function loadCurrentPublication(): Promise<PublicationBundle> {
   };
 }
 
-export async function loadArchivePublication(entry: ArchiveEntry): Promise<{ payload: BallparkPayload; payloadHash: string }> {
-  const result = await loadPayloadWithHash(`./archive/${encodeURIComponent(entry.date)}.json`);
+export async function loadArchivePublication(entry: ArchiveEntry, signal?: AbortSignal): Promise<{ payload: BallparkPayload; payloadHash: string }> {
+  const result = await loadPayloadWithHash(`./archive/${encodeURIComponent(entry.date)}.json`, signal);
   if (result.hash !== entry.payload_sha256) {
     throw new PublicationLoadError(`Archive hash mismatch for ${entry.date}.`);
   }

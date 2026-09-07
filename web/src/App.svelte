@@ -28,6 +28,7 @@
   let loadingArchiveDate: string | null = null;
   let isArchive = false;
   let loadSequence = 0;
+  let activeRequest: AbortController | null = null;
   let loadingPublication = false;
   let currentInstant = new Date();
   let slateReturn: { gameKey: string; scrollY: number } | null = null;
@@ -122,27 +123,33 @@
     if (route !== 'game') slateReturn = null;
   }
 
+  function beginRequest(): { sequence: number; controller: AbortController } {
+    activeRequest?.abort();
+    const controller = new AbortController();
+    activeRequest = controller;
+    return { sequence: ++loadSequence, controller };
+  }
+
   async function loadPublication(background = false): Promise<void> {
     if (loadingPublication) return;
     loadingPublication = true;
-    const sequence = ++loadSequence;
+    const { sequence, controller } = beginRequest();
     if (!background || !payload) { loading = true; error = null; }
     try {
-      const loaded = await loadCurrentPublication();
-      if (sequence !== loadSequence) return;
+      const loaded = await loadCurrentPublication(controller.signal);
+      if (sequence !== loadSequence || controller.signal.aborted) return;
       bundle = loaded;
       payload = loaded.payload;
       payloadHash = loaded.payloadHash;
       isArchive = false;
       refreshError = null;
     } catch (reason) {
-      if (sequence !== loadSequence) return;
+      if (sequence !== loadSequence || controller.signal.aborted) return;
       const message = reason instanceof Error ? reason.message : 'The publication could not be loaded.';
       if (payload) refreshError = message;
       else error = message;
     } finally {
-      if (sequence === loadSequence) loading = false;
-      loadingPublication = false;
+      if (sequence === loadSequence) { loading = false; loadingPublication = false; }
     }
   }
 
@@ -152,13 +159,17 @@
   }
 
   async function openArchive(entry: ArchiveEntry): Promise<void> {
+    const { sequence, controller } = beginRequest();
+    loadingPublication = false;
+    isArchive = true;
     archiveError = null;
     loadingArchiveDate = entry.date;
     try {
-      const loaded = await loadArchivePublication(entry);
+      const loaded = await loadArchivePublication(entry, controller.signal);
+      if (sequence !== loadSequence || controller.signal.aborted) return;
       payload = loaded.payload;
       payloadHash = loaded.payloadHash;
-      isArchive = entry.date !== bundle?.payload.date;
+      isArchive = true;
       window.location.hash = 'slate';
     } catch (reason) {
       archiveError = reason instanceof Error ? reason.message : 'The archive snapshot could not be loaded.';
@@ -168,11 +179,8 @@
   }
 
   function returnLive(): void {
-    if (!bundle) return;
-    payload = bundle.payload;
-    payloadHash = bundle.payloadHash;
-    isArchive = false;
     archiveError = null;
+    void loadPublication(true);
   }
 
   function showHealth(): void {
@@ -248,13 +256,13 @@
           onAction={showHealth}
         />
       {:else}
-        <SlateView {payload} geometry={bundle.geometry} onOpenGame={openGame} />
+        <SlateView {payload} geometry={bundle.geometry} onOpenGame={openGame} now={currentInstant} />
       {/if}
     {:else if route === 'game'}
       {#if routedGame}
         <section class="game-route">
           <a class="station-back" href="#slate">← Back to daily park factors</a>
-          <GameDetail game={routedGame} geometry={bundle.geometry} headingLevel={1} />
+          <GameDetail game={routedGame} geometry={bundle.geometry} headingLevel={1} now={currentInstant} />
         </section>
       {:else}
         <StatePanel

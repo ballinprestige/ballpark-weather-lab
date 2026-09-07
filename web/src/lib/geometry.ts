@@ -54,3 +54,19 @@ export function wallPath(angles: number[], distances: number[]): string {
 export function normalizeDegrees(value: number): number {
   return ((value % 360) + 360) % 360;
 }
+
+/** Linear interpolation is intentional: geometry is sampled by angle, not by a display index. */
+export function distanceAtAngle(angles: number[], distances: number[], angle: number): number | null {
+  if (!angles.length || angles.length !== distances.length) return null;
+  if (angle <= angles[0]) return distances[0] ?? null;
+  if (angle >= angles[angles.length - 1]) return distances[distances.length - 1] ?? null;
+  for (let index = 1; index < angles.length; index += 1) {
+    if (angle <= angles[index]) {
+      const before = angles[index - 1];
+      const after = angles[index];
+      const ratio = (angle - before) / (after - before);
+      return (distances[index - 1] ?? 0) + ((distances[index] ?? 0) - (distances[index - 1] ?? 0)) * ratio;
+    }
+  }
+  return null;
+}

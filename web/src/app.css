@@ -77,13 +77,13 @@
 }
 
 html {
-  min-width: 20rem;
+  min-width: 19rem;
   scroll-behavior: smooth;
   background: var(--canvas);
 }
 
 body {
-  min-width: 20rem;
+  min-width: 19rem;
   min-height: 100vh;
   margin: 0;
   padding-block-end: calc(4.2rem + env(safe-area-inset-bottom));
@@ -2714,4 +2714,72 @@ body::before {
   .game-detail-header h2,
   .game-detail-header > h3 { font-size: clamp(2.25rem, 14vw, 3.75rem); }
   .footer-links span { margin-left: 0; }
+}
+
+/* BP-006: recovered field instrument. The dark panel intentionally echoes the
+   CEO-approved evidence while retaining the current app's truthful data states. */
+.game-detail-header {
+  gap: 0.45rem;
+  padding-block: clamp(1rem, 2.8vw, 2.25rem);
+}
+
+.game-detail { display: flex; flex-direction: column; }
+.game-detail-header { order: 0; }
+.game-detail > .park-wind { order: 1; }
+.game-detail > .market-section { order: 2; margin-block: 0; padding-block: clamp(1rem, 2vw, 1.5rem); }
+.game-detail > .factor-headline, .game-detail > .game-hold { order: 3; }
+.game-detail > .conditions-strip { order: 4; }
+.game-detail > .decomposition { order: 5; }
+.game-detail > .evidence-receipt { order: 6; }
+.game-detail > .lineup-context { order: 7; }
+.game-detail > .trajectory { order: 8; }
+
+.park-wind {
+  color: #e8e3d9;
+  background: #101619;
+  border-block: 1px solid #384044;
+}
+:root:not([data-theme="night"]) .park-wind { color: #eef1ea; background: #172126; }
+
+.park-wind .eyebrow,
+.park-wind figcaption,
+.park-wind .wind-source-line { color: #a9aaa3; }
+.park-wind h3 { color: #f0ece1; font-family: Georgia, 'Times New Roman', serif; font-size: clamp(1.85rem, 3.6vw, 3rem); }
+.park-wind .park-heading { align-items: end; }
+.carry-reading { display: grid; justify-items: end; gap: 0.12rem; color: #64b6cd; font-family: var(--font-code); font-variant-numeric: tabular-nums; }
+.carry-reading span { font-size: 0.68rem; font-weight: 800; letter-spacing: .16em; }
+.carry-reading strong { font-size: clamp(1rem, 2.3vw, 1.55rem); }
+.park-stage { position: relative; max-width: 58rem; margin: clamp(1rem, 2.6vw, 2rem) auto 0; }
+.park-wind svg { width: 100%; min-height: 0; border: 0; background: transparent; }
+.park-grid { opacity: .3; }
+.park-grid-line { fill: none; stroke: #385058; stroke-width: .55; }
+.range-arc { fill: none; stroke: #506066; stroke-dasharray: 2 5; stroke-width: .7; }
+.park-wind .field-fill { fill: #172127; opacity: .76; }
+.park-wind .field-wall { stroke: #dfddd4; stroke-width: 2.2; }
+.park-wind .foul-lines { stroke: #b6b7af; stroke-width: 1.05; }
+.park-wind .infield-mark { fill: none; stroke: #b6b7af; stroke-width: 1; }
+.park-wind .mound-mark { fill: #dfddd4; }
+.park-wind .field-label { fill: #d9d7cf; font-family: var(--font-code); font-size: 10px; letter-spacing: .05em; }
+.wind-stream { fill: none; stroke: #55b3cf; stroke-width: 2.1; stroke-dasharray: 7 8; animation: wind-flow var(--wind-period) linear infinite; }
+.wind-vector { stroke: #55b3cf; stroke-width: 2; }
+.wind-arrow-head { fill: #55b3cf; }
+.north-compass circle { fill: #101619; stroke: #c8c4b8; stroke-width: 1; }
+.north-compass path { fill: none; stroke: #c8c4b8; stroke-width: 1.1; }
+.north-compass text { fill: #c8c4b8; font-family: var(--font-code); font-size: 9px; }
+.park-wind .diagram-hold, .park-wind .diagram-note { fill: #e3c579; font-family: var(--font-code); font-size: 10px; }
+.wind-decomposition { display: flex; gap: 0; margin: .35rem 0 0; border-top: 1px solid #384044; border-bottom: 1px solid #384044; }
+.wind-decomposition > div { flex: 1; min-width: 0; padding: .55rem .65rem; border-right: 1px solid #384044; }
+.wind-decomposition > div:last-child { border-right: 0; }
+.wind-decomposition dt { color: #939c9b; font: 700 .62rem var(--font-code); letter-spacing: .1em; }
+.wind-decomposition dd { margin: .2rem 0 0; color: #e8e3d9; font: 700 .86rem var(--font-code); white-space: nowrap; }
+.wind-source-line { margin: .65rem 0 0; font-size: .72rem; }
+.park-wind figcaption { margin-top: .7rem; font-size: .76rem; max-width: 74ch; }
+@keyframes wind-flow { to { stroke-dashoffset: -30; } }
+@media (prefers-reduced-motion: reduce) { .wind-stream { animation: none; } }
+@media (max-width: 22rem) {
+  .park-wind { padding-inline: .7rem; }
+  .park-wind .park-heading { align-items: start; }
+  .carry-reading { justify-items: start; }
+  .wind-decomposition > div { padding-inline: .38rem; }
+  .wind-decomposition dd { font-size: .72rem; }
 }
