@@ -53,16 +53,33 @@ See [the architecture](docs/architecture.md) for the full state and trust bounda
 
 ## One-command daily operation
 
-After the one-time installation below, the complete local daily operation is:
+After the verified one-time installation below, use the virtual-environment interpreter for the
+complete local daily operation.
+
+Linux x86_64:
 
 ```bash
-python -m ballpark daily
+.venv/bin/python -m ballpark daily
 ```
 
-The default slate date is the current date in `America/New_York`. To make a run reproducible:
+Windows x86_64 PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m ballpark daily
+```
+
+The default date is the current date in `America/New_York`. To make a reproducible Linux x86_64
+run:
 
 ```bash
-python -m ballpark daily --date 2026-08-26 --fixture tests/fixtures/normal_slate.json \
+.venv/bin/python -m ballpark daily --date 2026-08-26 --fixture tests/fixtures/normal_slate.json \
+  --generated-at 2026-08-26T12:00:00Z
+```
+
+Windows x86_64 PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m ballpark daily --date 2026-08-26 --fixture tests/fixtures/normal_slate.json `
   --generated-at 2026-08-26T12:00:00Z
 ```
 
@@ -72,9 +89,13 @@ receipt. Detailed setup and recovery steps are in [operations](docs/operations.m
 
 ## Install once
 
-Requirements are Python 3.12 or newer and Node.js 22.x.
+The application metadata permits Python 3.12 or newer, but the hash-locked clean
+test/verification setup below is currently verified only for **CPython 3.12** on **Linux x86_64**
+and **Windows x86_64**. `.github/requirements-verify.txt` contains only those two PyYAML wheels;
+macOS and CPython 3.13+ are not currently supported verification-install targets. Node.js 22.x is
+required for the frontend commands.
 
-macOS/Linux:
+Linux x86_64 (CPython 3.12):
 
 ```bash
 python3.12 -m venv .venv
@@ -84,7 +105,7 @@ python3.12 -m venv .venv
 npm ci --prefix web
 ```
 
-Windows PowerShell:
+Windows x86_64 PowerShell (CPython 3.12):
 
 ```powershell
 py -3.12 -m venv .venv
@@ -99,7 +120,7 @@ optional and must not be relied on for clean-install verification.
 
 ## Verify locally
 
-macOS/Linux:
+Linux x86_64:
 
 ```bash
 .venv/bin/python -m pytest
@@ -108,7 +129,7 @@ npm run verify --prefix web
 npm run test:e2e --prefix web
 ```
 
-Windows PowerShell:
+Windows x86_64 PowerShell:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest
@@ -179,9 +200,19 @@ SHA-256 receipt, was generated on its New York slate date, and has a correspondi
 hosted public-readback log. The exact seven receipts and workflow links are recorded in
 [verification](docs/verification.md):
 
+Linux x86_64:
+
 ```bash
-python -m ballpark verify-reliability \
+.venv/bin/python -m ballpark verify-reliability \
   --url "https://ballinprestige.github.io/ballpark-weather-lab/" \
+  --ending-date 2026-09-02
+```
+
+Windows x86_64 PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m ballpark verify-reliability `
+  --url "https://ballinprestige.github.io/ballpark-weather-lab/" `
   --ending-date 2026-09-02
 ```
 

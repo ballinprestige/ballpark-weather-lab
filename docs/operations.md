@@ -7,9 +7,12 @@ GitHub Pages artifact, and prove that the public date and payload bytes match th
 
 ## One-time setup
 
-Install Python 3.12 or newer and Node.js 22.x, then run from the repository root:
+The application metadata permits Python 3.12 or newer, but this hash-locked clean setup is verified
+only for **CPython 3.12** on **Linux x86_64** and **Windows x86_64**. The verification-only lock has
+only those PyYAML wheels; macOS and CPython 3.13+ are not supported verification-install targets.
+Install Node.js 22.x, then run from the repository root:
 
-macOS/Linux:
+Linux x86_64 (CPython 3.12):
 
 ```bash
 python3.12 -m venv .venv
@@ -19,7 +22,7 @@ python3.12 -m venv .venv
 npm ci --prefix web
 ```
 
-Windows PowerShell:
+Windows x86_64 PowerShell (CPython 3.12):
 
 ```powershell
 py -3.12 -m venv .venv
@@ -34,9 +37,9 @@ clean-install evidence.
 
 ## One daily command
 
-macOS/Linux: `.venv/bin/python -m ballpark daily`
+Linux x86_64: `.venv/bin/python -m ballpark daily`
 
-Windows PowerShell: `.\.venv\Scripts\python.exe -m ballpark daily`
+Windows x86_64 PowerShell: `.\.venv\Scripts\python.exe -m ballpark daily`
 
 The default date is the current `America/New_York` calendar date. For an explicit date:
 
@@ -65,7 +68,7 @@ that the distribution's payload bytes match `web/dist/data/release.json`.
 
 ## Preflight verification
 
-macOS/Linux:
+Linux x86_64:
 
 ```bash
 .venv/bin/python -m pytest
@@ -74,7 +77,7 @@ npm run verify --prefix web
 npm run test:e2e --prefix web
 ```
 
-Windows PowerShell:
+Windows x86_64 PowerShell:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest
@@ -121,7 +124,8 @@ The workflow:
 1. Installs the locked direct dependencies.
 2. Runs Python tests, artifact verification, Svelte checks, and frontend unit tests.
 3. Restores valid public history when available.
-4. Runs `python -m ballpark daily`.
+4. Runs the runner's configured Python entrypoint for `ballpark daily` (the hosted runner does not
+   use a local `.venv`).
 5. Uploads `web/dist` as one Pages artifact.
 6. Deploys with GitHub's Pages identity.
 7. Reads back the public date and exact payload SHA-256 with bounded retries.
@@ -177,8 +181,17 @@ The current hosted and public receipts are recorded in [verification.md](verific
 
 Check the rolling evidence gate directly against the public archive:
 
+Linux x86_64:
+
 ```bash
-python -m ballpark verify-reliability \
+.venv/bin/python -m ballpark verify-reliability \
+  --url "https://ballinprestige.github.io/ballpark-weather-lab/"
+```
+
+Windows x86_64 PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m ballpark verify-reliability `
   --url "https://ballinprestige.github.io/ballpark-weather-lab/"
 ```
 
@@ -194,9 +207,19 @@ corresponding successful workflow/public-readback links as the hosted execution 
 
 Given the deployed URL and a local release receipt:
 
+Linux x86_64:
+
 ```bash
-python -m ballpark verify-public \
+.venv/bin/python -m ballpark verify-public \
   --url "https://ballinprestige.github.io/ballpark-weather-lab/" \
+  --receipt web/dist/data/release.json
+```
+
+Windows x86_64 PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m ballpark verify-public `
+  --url "https://ballinprestige.github.io/ballpark-weather-lab/" `
   --receipt web/dist/data/release.json
 ```
 

@@ -41,33 +41,52 @@ where Python's ordinary equality would conflate them. This keeps action inputs s
 
 ## Literal clean-run validation
 
-Run these commands from a fresh checkout with Python 3.12 and Node in the declared range. They
-validate the same local code paths; they are not a hosted pull-request receipt or proof that a
-remote ruleset is enforced.
+Run these commands from a fresh checkout with **CPython 3.12** and Node in the declared range. The
+verification lock currently supports only Linux x86_64 and Windows x86_64; macOS and CPython 3.13+
+are not advertised clean-install verification targets. These commands validate local code paths;
+they are not a hosted pull-request receipt or proof that a remote ruleset is enforced.
+
+Linux x86_64:
 
 ```bash
-python -m venv .venv
-. .venv/bin/activate
-python -m pip install --disable-pip-version-check --require-hashes -r requirements.lock
-python -m pip install --disable-pip-version-check --only-binary=:all: --require-hashes \
+python3.12 -m venv .venv
+.venv/bin/python -m pip install --disable-pip-version-check --require-hashes -r requirements.lock
+.venv/bin/python -m pip install --disable-pip-version-check --only-binary=:all: --require-hashes \
   -r .github/requirements-verify.txt
-python -m pip install --disable-pip-version-check --no-build-isolation --no-deps -e .
+.venv/bin/python -m pip install --disable-pip-version-check --no-build-isolation --no-deps -e .
 npm ci --prefix web
-python -m ruff check src tests scripts
-python -m pytest
-python -m ballpark verify-artifacts
+.venv/bin/python -m ruff check src tests scripts
+.venv/bin/python -m pytest
+.venv/bin/python -m ballpark verify-artifacts
 npm run verify --prefix web
 npx --prefix web playwright install --with-deps chromium
 npm run test:e2e --prefix web
 ```
 
-The focused workflow contract is included by ordinary `python -m pytest` discovery. To inspect it
+Windows x86_64 PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --disable-pip-version-check --require-hashes -r requirements.lock
+.\.venv\Scripts\python.exe -m pip install --disable-pip-version-check --only-binary=:all: --require-hashes -r .github/requirements-verify.txt
+.\.venv\Scripts\python.exe -m pip install --disable-pip-version-check --no-build-isolation --no-deps -e .
+npm ci --prefix web
+.\.venv\Scripts\python.exe -m ruff check src tests scripts
+.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m ballpark verify-artifacts
+npm run verify --prefix web
+npx --prefix web playwright install chromium
+npm run test:e2e --prefix web
+```
+
+The focused workflow contract is included by ordinary `.venv` interpreter test discovery. To inspect it
 on its own and demonstrate a fail-closed intentional defect, run:
 
-```bash
-python scripts/check_verify_workflow.py
-python -m pytest tests/test_verify_workflow.py
-```
+Linux x86_64: `.venv/bin/python scripts/check_verify_workflow.py` and
+`.venv/bin/python -m pytest tests/test_verify_workflow.py`.
+
+Windows x86_64 PowerShell: `.\.venv\Scripts\python.exe scripts/check_verify_workflow.py` and
+`.\.venv\Scripts\python.exe -m pytest tests/test_verify_workflow.py`.
 
 The final test deliberately runs a process that exits 23 and asserts that its following command
 is not reached (`bash -euo pipefail` on the Linux runner; `cmd`'s `&&` equivalent on a Windows
