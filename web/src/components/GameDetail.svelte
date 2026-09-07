@@ -129,6 +129,7 @@
         <div><dt>Market phase</dt><dd>{game.exchange_market?.game_phase?.replaceAll('_', ' ')}</dd></div>
       </dl>
       <p class="market-warning">Contract asks are quoted in cents, not American sportsbook odds. Source update age is unknown; fees are excluded.</p>
+      {#if game.exchange_market?.failure_reason}<p class="market-warning"><strong>Update failed.</strong> Retaining the captured asks above: {game.exchange_market.failure_reason}</p>{/if}
       <p class="source-line"><span>Kalshi</span><span>Captured/as of {formatTimestamp(game.exchange_market?.observed_at ?? null)}</span><span>{game.exchange_market?.market_ticker}</span></p>
     </section>
   {/if}

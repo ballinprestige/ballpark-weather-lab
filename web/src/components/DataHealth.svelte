@@ -16,6 +16,7 @@
   $: factorReady = payload.games.filter((game) => isReadyState(game.factors.state)).length;
   $: lineupsReady = payload.games.filter((game) => isReadyState(game.lineup.state)).length;
   $: trajectoryReady = payload.games.filter((game) => isReadyState(game.trajectory.state)).length;
+  $: exchangeFailures = payload.games.filter((game) => game.exchange_market?.failure_reason).map((game) => `${game.away_team} at ${game.home_team}: ${game.exchange_market?.failure_reason}`);
 </script>
 
 <section class="view health-view" aria-labelledby="health-title">
@@ -81,6 +82,15 @@
     </dl>
     <p class="plain-note">Schedule and validated weather/factors define the core slate. Lineups and trajectory context may arrive later without suppressing ready games.</p>
   </section>
+
+  {#if exchangeFailures.length}
+    <section class="warning-ledger" aria-labelledby="exchange-failure-title">
+      <p class="eyebrow">Supplemental exchange status</p>
+      <h2 id="exchange-failure-title">Kalshi update failed</h2>
+      <p>Captured contract asks may be retained with their original as-of time; they are not a new observation.</p>
+      <ul>{#each exchangeFailures as failure}<li>{failure}</li>{/each}</ul>
+    </section>
+  {/if}
 
   {#if warnings.length}
     <section class="warning-ledger" aria-labelledby="warnings-title">

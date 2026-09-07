@@ -2293,6 +2293,7 @@ body::before {
 .board-matchup:hover strong, .board-matchup:focus-visible strong { text-decoration: underline; text-underline-offset: 0.18em; }
 .exchange-ask { display: block; margin-top: 0.18rem; color: var(--ink-soft); font-size: 0.65rem; line-height: 1.2; }
 .market-secondary { display: block; margin-top: 0.18rem; color: var(--ink-faint); font-size: 0.65rem; }
+.market-failure { display: block; margin-top: .18rem; color: var(--danger); font-size: .65rem; line-height: 1.2; }
 .exchange-market { padding-block: 1rem; border-block-end: 1px solid var(--rule); }
 .exchange-grid { margin-bottom: 0.65rem; }
 .wind-derived { color: var(--wind); }
