@@ -1,6 +1,6 @@
 # BP004 Terra integration handoff
 
-Implementation candidate revision: recorded after this correction commit.
+Implementation candidate revision: `fdb6c3652aef4c9e1d4e6f2560bc2d75831a94db`.
 
 ## What is wired
 
@@ -78,10 +78,11 @@ precision and must never enter an American-odds formatter.
 ## Evidence and validation
 
 The final local release is outside the repository at
-`C:\Users\kylea\Projects\Playground\ballpark-delivery-2026-09-06\previews\bp004-terra-live-final`.
-Its release receipt is `3fa932c9713292cdedfdc7f54eb09cf9c556eeb7fae501e52332a09d72d1ff73`.
+`C:\Users\kylea\Projects\Playground\ballpark-delivery-2026-09-06\previews\bp004-terra-coverage-final`.
+Its release receipt is `4f85b021839956226002f6cd6ef1f7ebbcc4c7d8eb1479e7f608be622253afa0`.
 It contains the real CIN/LAD `0.4900`/`0.5200` paired asks and exact ticker;
-the supplemental lane was partial (4 observed, 7 unavailable) at the capture.
+the supplemental lane was partial (7 observed-unknown-age, 4 unavailable) at the capture,
+including WSH/SD and STL/SF with their variable-length Kalshi aliases.
 
 Run from the repository root:
 
