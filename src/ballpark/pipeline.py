@@ -11,6 +11,7 @@ from ballpark.contract import validate_payload
 from ballpark.errors import DataContractError
 from ballpark.http import HttpClient
 from ballpark.lineups import fetch_lineup
+from ballpark.kalshi import KalshiExchangeProvider, unavailable_market as unavailable_exchange_market
 from ballpark.model import ParkFactorModel
 from ballpark.odds import unavailable_market
 from ballpark.paths import ProjectPaths
@@ -42,6 +43,8 @@ def load_fixture(path: Path, target_date: date) -> dict[str, Any]:
         raise DataContractError("fixture lineups_by_game must be an object")
     if not isinstance(value.get("odds_by_game", {}), dict):
         raise DataContractError("fixture odds_by_game must be an object")
+    if not isinstance(value.get("exchange_by_game", {}), dict):
+        raise DataContractError("fixture exchange_by_game must be an object")
     return value
 
 
@@ -77,6 +80,7 @@ class DailyPipeline:
         fixture_path: Path | None = None,
         generated_at: str | None = None,
     ) -> dict[str, Any]:
+        generated_at_supplied = generated_at is not None
         generated_at = generated_at or utc_now()
         network_deadline = time.monotonic() + 180.0
         receipt = verify_artifacts(self.paths)
@@ -96,7 +100,7 @@ class DailyPipeline:
             validate_payload(payload, self.paths.schemas / "slate.schema.json")
             return payload
 
-        observed_at = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+        observed_at = datetime.now(UTC)
         if fixture and isinstance(fixture.get("odds_by_game"), dict):
             odds_by_game = {
                 int(game["game_pk"]): fixture["odds_by_game"].get(
@@ -116,6 +120,17 @@ class DailyPipeline:
                 )
                 for game in schedule
             }
+        if fixture:
+            exchange_by_game = {
+                int(game["game_pk"]): fixture.get("exchange_by_game", {}).get(
+                    str(game["game_pk"]), unavailable_exchange_market(game, observed_at, "fixture omits Kalshi exchange market")
+                )
+                for game in schedule
+            }
+        else:
+            exchange_by_game = KalshiExchangeProvider(
+                self.client, cache_path=self.paths.root / ".ballpark-cache" / "kalshi-exchange.json"
+            ).fetch(schedule, observed_at=observed_at)
 
         model = ParkFactorModel(self.paths.models, self.paths.data)
         physics: PhysicsEngine | None = None
@@ -223,6 +238,7 @@ class DailyPipeline:
                     "approach_c": approach_c,
                     "trajectory": trajectory_theater(venue, weather),
                     "odds": odds_by_game[game_pk],
+                    "exchange_market": exchange_by_game[game_pk],
                 }
             )
 
@@ -235,6 +251,8 @@ class DailyPipeline:
             lineup_state = "unavailable"
         else:
             lineup_state = "not_yet_available"
+        if not generated_at_supplied:
+            generated_at = utc_now()
         payload = {
             "schema_version": 1,
             "product": "ballpark-weather-lab",
@@ -262,6 +280,7 @@ class DailyPipeline:
                     "optional": True,
                 },
                 "odds": self._odds_health(odds_by_game),
+                "exchange_markets": self._exchange_health(exchange_by_game),
                 "artifacts": receipt.as_dict(),
             },
             "games": games,
@@ -294,6 +313,18 @@ class DailyPipeline:
             "stale_games": states.count("stale"),
             "unavailable_games": states.count("unavailable"),
             "optional": False,
+        }
+
+    @staticmethod
+    def _exchange_health(exchange_by_game: dict[int, dict[str, Any]]) -> dict[str, Any]:
+        states = [str(value.get("state")) for value in exchange_by_game.values()]
+        return {
+            "state": "available" if states and all(state == "available" for state in states) else "partial" if "available" in states else "unavailable",
+            "source": "Kalshi public market-data API",
+            "available_games": states.count("available"),
+            "unknown_age_games": states.count("available"),
+            "unavailable_games": states.count("unavailable"),
+            "optional": True,
         }
 
     @staticmethod
@@ -358,6 +389,14 @@ class DailyPipeline:
                     "stale_games": 0,
                     "unavailable_games": 0,
                     "optional": False,
+                },
+                "exchange_markets": {
+                    "state": "not_applicable",
+                    "source": "Kalshi public market-data API",
+                    "available_games": 0,
+                    "unknown_age_games": 0,
+                    "unavailable_games": 0,
+                    "optional": True,
                 },
                 "artifacts": receipt.as_dict(),
             },

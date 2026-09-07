@@ -5,7 +5,7 @@ import json
 import shutil
 import subprocess
 import sys
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -38,6 +38,11 @@ def _build_parser() -> argparse.ArgumentParser:
         command.add_argument("--output", type=Path)
         command.add_argument("--generated-at")
     commands.choices["daily"].add_argument("--skip-web", action="store_true")
+
+    refresh = commands.add_parser("refresh-exchange")
+    refresh.add_argument("--payload", type=Path, required=True)
+    refresh.add_argument("--output", type=Path, required=True)
+    refresh.add_argument("--generated-at")
 
     verify = commands.add_parser("verify-public")
     verify.add_argument("--url", required=True)
@@ -118,6 +123,37 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "daily" and not args.skip_web:
                 result["web"] = _run_web_build(paths)
             _print(result)
+            return 0
+
+        if args.command == "refresh-exchange":
+            from ballpark.contract import validate_payload
+            from ballpark.http import HttpClient
+            from ballpark.kalshi import KalshiExchangeProvider
+            from ballpark.publication import publish_payload
+
+            payload = json.loads(args.payload.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict) or not isinstance(payload.get("games"), list):
+                raise ValueError("--payload must contain a daily slate object")
+            observed_at = datetime.now(UTC)
+            quotes = KalshiExchangeProvider(
+                HttpClient(), cache_path=paths.root / ".ballpark-cache" / "kalshi-exchange.json"
+            ).fetch(payload["games"], observed_at=observed_at)
+            for game in payload["games"]:
+                game["exchange_market"] = quotes[int(game["game_pk"])]
+            states = [quote["state"] for quote in quotes.values()]
+            generated_at = args.generated_at or datetime.now(UTC).isoformat().replace("+00:00", "Z")
+            payload["generated_at"] = generated_at
+            payload["health"]["exchange_markets"] = {
+                "state": "available" if states and all(state == "available" for state in states) else "partial" if "available" in states else "unavailable",
+                "source": "Kalshi public market-data API",
+                "available_games": states.count("available"),
+                "unknown_age_games": states.count("available"),
+                "unavailable_games": states.count("unavailable"),
+                "optional": True,
+            }
+            validate_payload(payload, paths.schemas / "slate.schema.json")
+            release = publish_payload(args.output.resolve(), payload)
+            _print({"state": "published-locally", "output": str(args.output.resolve()), "release": release})
             return 0
 
         if args.command == "verify-public":

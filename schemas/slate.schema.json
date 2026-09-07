@@ -72,6 +72,7 @@
         "weather": { "$ref": "#/$defs/weatherHealth" },
         "lineups": { "$ref": "#/$defs/lineupHealth" },
         "odds": { "$ref": "#/$defs/oddsHealth" },
+        "exchange_markets": { "$ref": "#/$defs/exchangeHealth" },
         "artifacts": { "$ref": "#/$defs/artifactHealth" }
       }
     },
@@ -124,6 +125,19 @@
         "stale_games": { "type": "integer", "minimum": 0, "maximum": 30 },
         "unavailable_games": { "type": "integer", "minimum": 0, "maximum": 30 },
         "optional": { "const": false }
+      }
+    },
+    "exchangeHealth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "source", "available_games", "unknown_age_games", "unavailable_games", "optional"],
+      "properties": {
+        "state": { "enum": ["available", "partial", "unavailable", "not_applicable"] },
+        "source": { "type": "string", "minLength": 1 },
+        "available_games": { "type": "integer", "minimum": 0, "maximum": 30 },
+        "unknown_age_games": { "type": "integer", "minimum": 0, "maximum": 30 },
+        "unavailable_games": { "type": "integer", "minimum": 0, "maximum": 30 },
+        "optional": { "const": true }
       }
     },
     "artifactHealth": {
@@ -268,7 +282,8 @@
             }
           }
         }
-        ,"odds": { "$ref": "#/$defs/odds" }
+        ,"odds": { "$ref": "#/$defs/odds" },
+        "exchange_market": { "$ref": "#/$defs/exchangeMarket" }
       }
     },
     "odds": {
@@ -296,6 +311,26 @@
         "if": { "properties": { "state": { "enum": ["current", "stale"] } } },
         "then": { "properties": { "line": { "type": "number" }, "over_price": { "type": "integer" }, "under_price": { "type": "integer" }, "source_updated_at": { "type": "string" }, "observed_at": { "type": "string" }, "raw_sha256": { "type": "string" }, "snapshot_id": { "type": "string" }, "sportsbook_id": { "type": "string" }, "sportsbook_name": { "type": "string" }, "provider_event_id": { "type": "string" } } }
       }]
+    },
+    "exchangeMarket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reason", "provider", "provider_url", "event_ticker", "market_ticker", "slate_date", "game_pk", "game_time", "market_type", "period", "game_phase", "quote_type", "condition", "price_format", "currency", "line", "over_ask_dollars", "under_ask_dollars", "over_ask_cents", "under_ask_cents", "over_ask_size", "under_ask_size", "source_updated_at", "observed_at", "raw_sha256", "snapshot_id", "active", "source_schema_version", "failure_reason"],
+      "properties": {
+        "state": { "enum": ["available", "unavailable"] },
+        "reason": { "type": ["string", "null"] }, "failure_reason": { "type": ["string", "null"] },
+        "provider": { "const": "Kalshi" }, "provider_url": { "const": "https://external-api.kalshi.com/trade-api/v2" },
+        "event_ticker": { "type": ["string", "null"], "minLength": 1 }, "market_ticker": { "type": ["string", "null"], "minLength": 1 }, "slate_date": { "type": "string", "format": "date" },
+        "game_pk": { "type": "integer", "minimum": 1 }, "game_time": { "type": ["string", "null"], "format": "date-time" },
+        "market_type": { "const": "total" }, "period": { "const": "full_game" }, "game_phase": { "enum": ["pregame", "in_progress", "after_scheduled_start", "final", "unknown"] }, "quote_type": { "const": "contract_ask" },
+        "condition": { "type": ["string", "null"] }, "price_format": { "const": "contract_cents" }, "currency": { "const": "USD" },
+        "line": { "type": ["number", "null"], "minimum": 0, "maximum": 40 },
+        "over_ask_dollars": { "type": ["string", "null"], "pattern": "^0\\.[0-9]+$" }, "under_ask_dollars": { "type": ["string", "null"], "pattern": "^0\\.[0-9]+$" },
+        "over_ask_cents": { "type": ["integer", "null"], "minimum": 1, "maximum": 99 }, "under_ask_cents": { "type": ["integer", "null"], "minimum": 1, "maximum": 99 },
+        "over_ask_size": { "type": ["string", "null"], "pattern": "^[0-9]+(?:\\.[0-9]+)?$" }, "under_ask_size": { "type": ["string", "null"], "pattern": "^[0-9]+(?:\\.[0-9]+)?$" },
+        "source_updated_at": { "const": null }, "observed_at": { "type": "string", "format": "date-time" },
+        "raw_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }, "snapshot_id": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }, "active": { "type": "boolean" }, "source_schema_version": { "type": "string", "minLength": 1 }
+      }
     },
     "trajectoryPoint": {
       "type": "array",
