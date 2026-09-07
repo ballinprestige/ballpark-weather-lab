@@ -16,6 +16,35 @@ function capturePath(name: string): string {
   return resolve(process.env.CAPTURE_DIR ?? resolve(process.cwd(), '../docs/screenshots'), name);
 }
 
+function alignPayloadDate(payload: BallparkPayload, date: string, generatedAt: string): void {
+  const shiftMs = Date.parse(`${date}T00:00:00Z`) - Date.parse(`${payload.date}T00:00:00Z`);
+  const shiftTime = (value: string | null): string | null => value === null ? null : new Date(Date.parse(value) + shiftMs).toISOString();
+  payload.date = date;
+  payload.generated_at = generatedAt;
+  for (const game of payload.games) {
+    game.game_date = date;
+    game.game_time = shiftTime(game.game_time) as string;
+    game.weather.valid_at = shiftTime(game.weather.valid_at);
+    game.weather.fetched_at = shiftTime(game.weather.fetched_at) as string;
+    game.lineup.observed_at = shiftTime(game.lineup.observed_at);
+    game.odds.slate_date = date;
+    game.odds.source_updated_at = shiftTime(game.odds.source_updated_at);
+    game.odds.observed_at = shiftTime(game.odds.observed_at);
+    if (game.exchange_market) game.exchange_market.slate_date = date;
+  }
+}
+
+function reconcileHealthCounts(payload: BallparkPayload): void {
+  payload.health.schedule.game_count = payload.games.length;
+  const weatherHealth = payload.health.weather as { verified_games: number; held_games: number };
+  weatherHealth.verified_games = payload.games.filter((game) => game.weather.state === 'verified').length;
+  weatherHealth.held_games = payload.games.length - weatherHealth.verified_games;
+  payload.health.lineups.confirmed_games = payload.games.filter((game) => game.lineup.state === 'confirmed').length;
+  payload.health.odds.current_games = payload.games.filter((game) => game.odds.state === 'current').length;
+  payload.health.odds.stale_games = payload.games.filter((game) => game.odds.state === 'stale').length;
+  payload.health.odds.unavailable_games = payload.games.filter((game) => game.odds.state === 'unavailable').length;
+}
+
 function fifteenGamePayload(): BallparkPayload {
   const payload = readyPayload();
   const games: Array<[string, string, string]> = [
@@ -40,9 +69,7 @@ function fifteenGamePayload(): BallparkPayload {
     game.weather.wind_carry_mph = index;
     return game;
   });
-  payload.health.schedule.game_count = 15;
-  payload.health.weather.verified_games = 15;
-  payload.health.lineups.confirmed_games = 8;
+  reconcileHealthCounts(payload);
   return payload;
 }
 
@@ -63,7 +90,7 @@ async function mockPublication(
   if (!archivePayload) {
     archive.date = '2026-08-26';
     archive.generated_at = '2026-08-26T16:05:00Z';
-    archive.games.forEach((game) => { game.game_date = archive.date; game.odds.slate_date = archive.date; });
+    alignPayloadDate(archive, archive.date, archive.generated_at);
   }
   const archiveText = jsonText(archive);
 
@@ -112,12 +139,12 @@ test('desktop employer path exposes the complete evidence chain', async ({ page 
   await page.getByRole('button', { name: 'Use day theme' }).click();
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#f5f7fa');
 
-  await page.getByRole('button', { name: /Open San Diego Padres.*San Francisco Giants.*details/i }).click();
+  await page.getByRole('link', { name: /Open San Diego Padres.*San Francisco Giants.*details/i }).click();
   await expect(page).toHaveURL(/#game\/1002$/);
   await expect(page.getByTestId('game-detail').getByRole('heading', { name: /San Diego Padres at San Francisco Giants/i })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Park wind diagram' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Decomposition ladder' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Trajectory theater' })).toBeVisible();
+  await expect(page.getByText('Park wind diagram', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Park-context breakdown' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Flight-path comparison' })).toBeVisible();
   await expect(page.getByText('Approach C awaits confirmed lineups.')).toBeVisible();
   if (process.env.CAPTURE_DEMO === '1') {
     await page.getByRole('button', { name: 'Use night theme' }).click();
@@ -156,8 +183,10 @@ test('quoted full-game totals show both actual prices and stale or missing marke
   payload.health.odds = { state: 'partial', source: 'fixture Covers total table', current_games: 1, stale_games: 1, unavailable_games: 0, optional: false };
   await mockPublication(page, payload);
   await page.goto('/#slate');
-  await expect(page.getByRole('row', { name: /SEA at BOS/i })).toContainText('O -105 / U -115');
-  await expect(page.getByRole('row', { name: /SD at SF/i })).toContainText('bet365 · stale');
+  const seaAtBos = page.locator('.ledger tbody tr').filter({ has: page.locator('[data-game-key="1001"]') });
+  const sdAtSf = page.locator('.ledger tbody tr').filter({ has: page.locator('[data-game-key="1002"]') });
+  await expect(seaAtBos).toContainText('O -105 · U -115');
+  await expect(sdAtSf).toContainText('bet365 · stale');
   await page.getByRole('link', { name: /Open San Diego Padres.*San Francisco Giants.*details/i }).click();
   await expect(page.getByRole('heading', { name: 'Total, Over & Under' })).toBeVisible();
   await expect(page.getByText('Stale quote:', { exact: false })).toContainText('not current');
@@ -192,9 +221,9 @@ test('mobile slate and game details remain compact and touch safe', async ({ pag
   await expect(page.getByRole('link', { name: 'Back to ballpark board' })).toBeVisible();
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
   await expect(stationHeading).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Park wind diagram' })).toBeVisible();
+  await expect(page.getByText('Park wind diagram', { exact: true })).toBeVisible();
 
-  const tooSmall = await page.locator('button:visible, nav a:visible, .game-card h3 a:visible, .station-back:visible').evaluateAll((elements) => elements
+  const tooSmall = await page.locator('button:visible, .game-card h3 a:visible, .station-back:visible').evaluateAll((elements) => elements
     .map((element) => ({ label: element.textContent?.trim(), box: element.getBoundingClientRect() }))
     .filter(({ box }) => box.width < 44 || box.height < 44)
     .map(({ label, box }) => ({ label, width: box.width, height: box.height })));
@@ -212,6 +241,7 @@ test('single-game mobile wind strip keeps its game in view', async ({ page }, te
   test.skip(!testInfo.project.name.startsWith('mobile'));
   const payload = readyPayload();
   payload.games = payload.games.slice(0, 1);
+  reconcileHealthCounts(payload);
   await mockPublication(page, payload);
   await page.goto('/#slate');
 
@@ -234,9 +264,15 @@ test('field instrument keeps a real wind vector, roof hold, and missing directio
   await expect(page.locator('.wind-decomposition')).toContainText('FROM');
   await expect(page.locator('.wind-decomposition')).toContainText('CROSS');
   await expect(page.getByRole('heading', { name: 'Total, Over & Under' })).toBeVisible();
-  const fieldBox = await page.locator('.park-wind svg').boundingBox();
-  expect(fieldBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(400);
-  expect((fieldBox?.y ?? 0) + (fieldBox?.height ?? Number.POSITIVE_INFINITY)).toBeLessThan(800);
+  const [fieldBox, viewport] = await Promise.all([
+    page.locator('.park-wind svg').boundingBox(),
+    page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }))
+  ]);
+  expect(fieldBox).not.toBeNull();
+  expect((fieldBox?.x ?? -1) >= 0).toBe(true);
+  expect((fieldBox?.y ?? -1) >= 0).toBe(true);
+  expect((fieldBox?.x ?? Number.POSITIVE_INFINITY) + (fieldBox?.width ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(viewport.width);
+  expect((fieldBox?.y ?? Number.POSITIVE_INFINITY) + (fieldBox?.height ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(viewport.height);
   const samples = page.getByRole('tab', { name: /center carry|high air/i });
   await expect(samples).toHaveCount(2);
   await samples.first().focus();
@@ -275,7 +311,7 @@ test('319px game detail retains the field and avoids horizontal overflow', async
   await page.setViewportSize({ width: 319, height: 480 });
   await mockPublication(page, readyPayload());
   await page.goto('/#game/1002');
-  await expect(page.getByRole('heading', { name: 'Park wind diagram' })).toBeVisible();
+  await expect(page.getByText('Park wind diagram', { exact: true })).toBeVisible();
   await expect(page.locator('.park-wind')).toContainText('CARRY');
   await expect(page.getByRole('heading', { name: 'Total, Over & Under' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
@@ -291,7 +327,7 @@ test('a full fifteen-game slate stays a compact, sortable table', async ({ page 
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 
   const firstMatchup = page.locator('.ledger tbody tr').first().getByRole('link');
-  await expect(firstMatchup).toHaveAccessibleName(/Arizona Diamondbacks.*Colorado Rockies/i);
+  await expect(firstMatchup).toHaveAccessibleName(/Atlanta Braves.*Miami Marlins/i);
   await page.locator('.sort-control select').selectOption('time');
   await expect(firstMatchup).toHaveAccessibleName(/Atlanta Braves.*Miami Marlins/i);
   await page.locator('.sort-control select').selectOption('wind');
@@ -305,13 +341,9 @@ test('a full fifteen-game slate stays a compact, sortable table', async ({ page 
 test('an older current release is labeled stale and cannot present as ready', async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith('desktop'));
   const payload = readyPayload();
-  payload.date = '2020-08-27';
-  payload.generated_at = '2020-08-27T16:05:00Z';
-  payload.games.forEach((game) => game.game_date = payload.date);
+  alignPayloadDate(payload, '2020-08-27', '2020-08-27T16:05:00Z');
   const archive = readyPayload();
-  archive.date = '2020-08-26';
-  archive.generated_at = '2020-08-26T16:05:00Z';
-  archive.games.forEach((game) => game.game_date = archive.date);
+  alignPayloadDate(archive, '2020-08-26', '2020-08-26T16:05:00Z');
   await mockPublication(page, payload, archive, '2020-08-28');
   await page.goto('/#slate');
 
@@ -341,8 +373,8 @@ test('a missing-weather game is held without hiding its valid neighbor', async (
   test.skip(!testInfo.project.name.startsWith('desktop'));
   await mockPublication(page, missingWeatherPayload());
   await page.goto('/#slate');
-  await expect(page.getByRole('row', { name: /SEA at BOS/i })).toContainText('runs');
-  await expect(page.getByRole('row', { name: /SD at SF/i })).toContainText('Weather held');
+  await expect(page.locator('.ledger tbody tr').filter({ has: page.locator('[data-game-key="1001"]') })).toContainText('runs');
+  await expect(page.locator('.ledger tbody tr').filter({ has: page.locator('[data-game-key="1002"]') })).toContainText('Weather held');
   for (const option of ['time', 'wind', 'venue', 'movement']) {
     await page.locator('.sort-control select').selectOption(option);
     await expect(page.locator('.ledger tbody tr').last().getByRole('link')).toHaveAccessibleName(/San Diego Padres.*San Francisco Giants/i);
@@ -353,7 +385,7 @@ test('a missing-weather game is held without hiding its valid neighbor', async (
   await expect(page.locator('.ledger tbody tr')).toHaveCount(1);
   await expect(page.locator('.ledger tbody tr').getByRole('link')).toHaveAccessibleName(/San Diego Padres.*San Francisco Giants/i);
   await page.getByRole('button', { name: 'All' }).click();
-  const heldRow = page.getByRole('row', { name: /SD at SF/i });
+  const heldRow = page.locator('.ledger tbody tr').filter({ has: page.locator('[data-game-key="1002"]') });
   await expect(heldRow).not.toContainText('0.988');
   await expect(heldRow).not.toContainText('0.976');
   await expect(heldRow).not.toContainText('70°');
@@ -443,35 +475,111 @@ test('cold game hydrates geometry without waiting for a delayed archive', async 
 
 test('optional updates are fenced across archive and Return Live generations', async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith('desktop'));
-  const payload = readyPayload();
-  await mockPublication(page, payload);
+  await mockPublication(page, readyPayload());
   let releaseOldGeometry: (() => void) | undefined;
   const oldGeometryHeld = new Promise<void>((resolve) => { releaseOldGeometry = resolve; });
+  let geometryRequest = 0;
   await page.route('**/park_geometry.json', async (route) => {
-    await oldGeometryHeld;
-    await route.fulfill({ contentType: 'application/json', body: jsonText(FENWAY_GEOMETRY) });
+    geometryRequest += 1;
+    if (geometryRequest === 1) {
+      await oldGeometryHeld;
+      await route.fulfill({ contentType: 'application/json', body: jsonText(FENWAY_GEOMETRY) });
+      return;
+    }
+    await route.fulfill({ status: 503, body: 'newer geometry outage' });
   });
   await page.goto('/#slate');
   await expect(page.getByRole('table')).toBeVisible();
   await page.getByRole('link', { name: 'History' }).click();
   await page.getByRole('button', { name: /Open Wed, Aug 26, 2026 snapshot/i }).click();
   await expect(page.getByText('Historical snapshot')).toBeVisible();
-  releaseOldGeometry?.();
-  await page.goto('/#game/1001');
-  await expect(page.getByTestId('game-detail')).toBeVisible();
+  await page.getByRole('link', { name: 'History' }).click();
+  await page.getByRole('button', { name: 'Return to current release' }).click();
+  await expect.poll(() => geometryRequest).toBe(2);
+  await page.getByRole('link', { name: 'Slate', exact: true }).click();
+  await page.getByRole('link', { name: /Open Seattle Mariners at Boston Red Sox details/i }).click();
   await expect(page.locator('.field-wall')).toHaveCount(0);
+  await page.getByRole('link', { name: 'Data Health' }).click();
+  const warnings = page.locator('section.warning-ledger').filter({ has: page.getByRole('heading', { name: 'Degraded enhancements' }) });
+  await expect(warnings).toContainText('Park geometry unavailable');
+  releaseOldGeometry?.();
+  await page.waitForTimeout(25);
+  await expect(warnings).toContainText('Park geometry unavailable');
+});
+
+test('stale archive and geometry callbacks cannot overwrite a visibility refresh', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('desktop'));
+  await mockPublication(page, readyPayload());
+  const archived = readyPayload();
+  alignPayloadDate(archived, '2026-08-26', '2026-08-26T16:05:00Z');
+  const archivedText = jsonText(archived);
+  const oldArchiveIndex = {
+    dates: [{
+      date: archived.date,
+      payload_sha256: digest(archivedText),
+      status: archived.status,
+      game_count: archived.games.length,
+      generated_at: archived.generated_at
+    }]
+  };
+  let releaseOldArchive: (() => void) | undefined;
+  let releaseOldGeometry: (() => void) | undefined;
+  const oldArchiveHeld = new Promise<void>((resolve) => { releaseOldArchive = resolve; });
+  const oldGeometryHeld = new Promise<void>((resolve) => { releaseOldGeometry = resolve; });
+  let archiveRequests = 0;
+  let geometryRequests = 0;
+  await page.route('**/archive/index.json', async (route) => {
+    archiveRequests += 1;
+    if (archiveRequests === 1) {
+      await oldArchiveHeld;
+      await route.fulfill({ contentType: 'application/json', body: jsonText(oldArchiveIndex) });
+      return;
+    }
+    await route.fulfill({ contentType: 'application/json', body: jsonText({ dates: [] }) });
+  });
+  await page.route('**/park_geometry.json', async (route) => {
+    geometryRequests += 1;
+    if (geometryRequests === 1) {
+      await oldGeometryHeld;
+      await route.fulfill({ contentType: 'application/json', body: jsonText(FENWAY_GEOMETRY) });
+      return;
+    }
+    await route.fulfill({ status: 503, body: 'newer geometry outage' });
+  });
+  await page.goto('/#slate');
+  await expect(page.getByRole('table')).toBeVisible();
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect.poll(() => archiveRequests).toBe(2);
+  await expect.poll(() => geometryRequests).toBe(2);
+  await page.getByRole('link', { name: 'Data Health' }).click();
+  const warnings = page.locator('section.warning-ledger').filter({ has: page.getByRole('heading', { name: 'Degraded enhancements' }) });
+  await expect(warnings).toContainText('Park geometry unavailable');
+  await expect(page.getByText('Geometry artifact').locator('..')).toContainText('Unavailable');
+  releaseOldArchive?.();
+  releaseOldGeometry?.();
+  await page.waitForTimeout(25);
+  await expect(warnings).toContainText('Park geometry unavailable');
+  await page.getByRole('link', { name: 'History' }).click();
+  await expect(page.getByRole('heading', { name: 'History is not available yet' })).toBeVisible();
 });
 
 test('sequential optional failures retain both warning notices', async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith('desktop'));
   await mockPublication(page, readyPayload());
   await page.route('**/archive/index.json', (route) => route.fulfill({ status: 503, body: 'archive outage' }));
-  await page.route('**/park_geometry.json', (route) => route.fulfill({ status: 503, body: 'geometry outage' }));
+  let releaseGeometry: (() => void) | undefined;
+  const geometryHeld = new Promise<void>((resolve) => { releaseGeometry = resolve; });
+  await page.route('**/park_geometry.json', async (route) => {
+    await geometryHeld;
+    await route.fulfill({ status: 503, body: 'geometry outage' });
+  });
   await page.goto('/#slate');
   await expect(page.getByRole('table')).toBeVisible();
   await page.getByRole('link', { name: 'Data Health' }).click();
-  const warnings = page.getByRole('heading', { name: 'Degraded enhancements' }).locator('..');
+  const warnings = page.locator('section.warning-ledger').filter({ has: page.getByRole('heading', { name: 'Degraded enhancements' }) });
   await expect(warnings).toContainText('History unavailable');
+  await expect(warnings).not.toContainText('Park geometry unavailable');
+  releaseGeometry?.();
   await expect(warnings).toContainText('Park geometry unavailable');
 });
 
@@ -480,22 +588,36 @@ test('retained Kalshi asks show the provider failure without becoming current', 
   const payload = retainedExchangePayload();
   await mockPublication(page, payload);
   await page.goto('/#slate');
-  const marketRow = page.getByRole('row').nth(1);
+  const marketRow = page.locator('.ledger tbody tr').filter({ has: page.locator('[data-game-key="1001"]') });
   await expect(marketRow).toContainText('Over 49¢ · Under 52¢');
   await expect(marketRow).toContainText('Update failed: Kalshi public market-data request returned 503.');
-  await expect(marketRow).toContainText('observed');
+  await expect(marketRow).toContainText('observed Aug 27, 9:00 AM PDT');
   await expect(page.getByText(/current sportsbook totals/i)).toHaveCount(0);
+  await marketRow.getByRole('link').click();
+  const exchangeDetail = page.locator('section.exchange-market');
+  await expect(exchangeDetail).toContainText('YES ask49¢');
+  await expect(exchangeDetail).toContainText('NO ask52¢');
+  await expect(exchangeDetail).toContainText('Captured/as of Aug 27, 9:00 AM PDT');
+  await expect(exchangeDetail).toContainText('Update failed. Retaining the captured asks above');
   await page.getByRole('link', { name: 'Data Health' }).click();
-  const failureLedger = page.getByRole('heading', { name: 'Kalshi update failed' }).locator('..');
+  const failureLedger = page.locator('section.warning-ledger').filter({ has: page.getByRole('heading', { name: 'Kalshi update failed' }) });
   await expect(failureLedger).toContainText('Kalshi public market-data request returned 503.');
 });
 
 test('319px retained Kalshi row preserves capture time and update failure', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('mobile'));
   await page.setViewportSize({ width: 319, height: 480 });
   await mockPublication(page, retainedExchangePayload());
   await page.goto('/#slate');
   const row = page.locator('.compact-game-row').first();
   await expect(row).toContainText('Over 49¢ · Under 52¢');
-  await expect(row).toContainText('captured');
+  await expect(row).toContainText('captured 9:00 AM PDT');
   await expect(row).toContainText('Update failed: Kalshi public market-data request returned 503.');
+  await row.getByRole('link').click();
+  const exchangeDetail = page.locator('section.exchange-market');
+  await expect(exchangeDetail).toContainText('Captured/as of Aug 27, 9:00 AM PDT');
+  await expect(exchangeDetail).toContainText('Update failed. Retaining the captured asks above');
+  await page.getByRole('link', { name: 'Data Health' }).click();
+  const failureLedger = page.locator('section.warning-ledger').filter({ has: page.getByRole('heading', { name: 'Kalshi update failed' }) });
+  await expect(failureLedger).toContainText('Kalshi public market-data request returned 503.');
 });

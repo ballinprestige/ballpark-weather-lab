@@ -11,7 +11,7 @@ export default defineConfig({
     trace: 'on-first-retry'
   },
   webServer: {
-    command: 'npm run build && npm run preview -- --host 127.0.0.1',
+    command: 'npm run build && npm run preview -- --host 127.0.0.1 --port 4175 --strictPort',
     port: 4175,
     // Browser proof must belong to this worktree's own preview, never another task's listener.
     reuseExistingServer: false,
