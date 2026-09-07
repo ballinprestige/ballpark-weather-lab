@@ -2708,6 +2708,45 @@ body::before {
   .game-detail-header h2,
   .game-detail-header > h3 { font-size: clamp(2.25rem, 14vw, 3.75rem); }
   .footer-links span { margin-left: 0; }
+  .view.slate-view { padding-block: .55rem; }
+  .slate-intro { margin-bottom: .35rem; padding-block: .55rem; }
+  .slate-intro h1 { font-size: clamp(1.9rem, 9vw, 2.25rem); }
+  .slate-intro .eyebrow { margin-block-end: .25rem; }
+  .slate-controls { margin-bottom: .4rem; }
+}
+
+/* The 319px route is a real primary viewport: keep every navigation and
+   slate control discoverable without consuming the first screen. */
+@media (max-width: 25rem) {
+  .site-header nav {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+    width: 100%;
+  }
+
+  .site-header nav a {
+    min-width: 0;
+    min-height: 2.25rem;
+    padding-inline: .16rem;
+    font-size: .68rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .view.slate-view { padding-block: .35rem; }
+  .slate-intro { margin-bottom: .3rem; padding-block: .45rem; }
+  .slate-intro h1 { font-size: 1.82rem; }
+  .slate-intro .eyebrow { margin-block-end: .24rem; font-size: .7rem; }
+  .slate-meta { font-size: .68rem; line-height: 1.25; }
+  .slate-controls { display: grid; grid-template-columns: minmax(0, 1fr) 6.35rem; gap: .3rem; margin-bottom: .35rem; padding-block: 0; }
+  .control-group, .sort-control { gap: 0; min-width: 0; }
+  .control-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .control-group { width: auto; overflow: visible; }
+  .pill-row { width: 100%; }
+  .pill-row button { flex: 1 1 0; min-width: 0; min-height: 2.2rem; padding-inline: .12rem; font-size: .65rem; }
+  .sort-control select { width: 100%; min-height: 2.2rem; padding-inline: .35rem 1.2rem; font-size: .65rem; }
+  .sort-control::after { right: .4rem; bottom: .9rem; }
 }
 
 /* BP-006: recovered field instrument. The dark panel intentionally echoes the
