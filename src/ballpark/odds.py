@@ -12,7 +12,10 @@ import hashlib
 import html as html_lib
 import json
 import re
+import os
+import tempfile
 from datetime import UTC, date, datetime
+from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
@@ -27,6 +30,7 @@ FRESHNESS_SECONDS = 15 * 60
 FUTURE_SKEW_SECONDS = 5 * 60
 RETRYABLE_HTTP_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
 _NY = ZoneInfo("America/New_York")
+_ODDS_TEAMS = {"Boston Red Sox": "BOS", "New York Yankees": "NYY", "Los Angeles Dodgers": "LAD", "Cincinnati Reds": "CIN", "Chicago Cubs": "CHC", "Milwaukee Brewers": "MIL", "Atlanta Braves": "ATL", "Philadelphia Phillies": "PHI", "New York Mets": "NYM", "Miami Marlins": "MIA", "San Diego Padres": "SD", "San Francisco Giants": "SF", "Los Angeles Angels": "LAA", "Baltimore Orioles": "BAL", "Cleveland Guardians": "CLE", "St. Louis Cardinals": "STL"}
 _ROW_RE = re.compile(r'<tr\b[^>]*class="[^"]*oddsGameRow[^"]*"[^>]*>(.*?)</tr>', re.I | re.S)
 _CELL_RE = re.compile(r'<td\b(?P<attrs>[^>]*)>(?P<body>.*?)</td>', re.I | re.S)
 _ATTR_RE = re.compile(r'([\w-]+)="([^"]*)"', re.I)
@@ -64,8 +68,15 @@ def provider_failure_reason(status: int | None, error: BaseException | None = No
 class OddsSnapshotCache:
     """In-memory restart/replay seam: newer observed evidence wins, never yesterday."""
 
-    def __init__(self) -> None:
+    def __init__(self, path: Path | None = None) -> None:
         self._by_game: dict[tuple[str, int], dict[str, Any]] = {}
+        self.path = path
+        if path and path.exists():
+            try:
+                for value in json.loads(path.read_text(encoding="utf-8")).get("markets", []):
+                    if isinstance(value, dict): self._by_game[(str(value.get("slate_date")), int(value.get("game_pk")))] = value
+            except (OSError, ValueError, TypeError):
+                pass
 
     def accept(self, market: dict[str, Any]) -> bool:
         key = (str(market.get("slate_date")), int(market.get("game_pk")))
@@ -73,6 +84,16 @@ class OddsSnapshotCache:
         if existing and str(existing.get("observed_at") or "") >= str(market.get("observed_at") or ""):
             return False
         self._by_game[key] = dict(market)
+        if self.path:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            fd, temporary = tempfile.mkstemp(prefix=".odds-", dir=self.path.parent)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    json.dump({"markets": list(self._by_game.values())}, handle, sort_keys=True)
+                    handle.flush(); os.fsync(handle.fileno())
+                os.replace(temporary, self.path)
+            finally:
+                if os.path.exists(temporary): os.unlink(temporary)
         return True
 
     def for_slate(self, slate_date: date, game_pk: int) -> dict[str, Any] | None:
@@ -335,7 +356,15 @@ class TheOddsApiProvider:
             return result
         for event in events:
             if not isinstance(event, dict): continue
-            matches = [g for g in schedule if g.get("home_team") == event.get("home_team") and g.get("away_team") == event.get("away_team")]
+            home = _ODDS_TEAMS.get(str(event.get("home_team")), event.get("home_team"))
+            away = _ODDS_TEAMS.get(str(event.get("away_team")), event.get("away_team"))
+            try:
+                event_date = _utc(str(event.get("commence_time"))).astimezone(_NY).date()
+            except (TypeError, ValueError):
+                continue
+            if event_date != target_date:
+                continue
+            matches = [g for g in schedule if g.get("home_team") == home and g.get("away_team") == away]
             if len(matches) != 1: continue
             game_pk = int(matches[0]["game_pk"])
             books = [b for b in event.get("bookmakers", []) if isinstance(b, dict) and b.get("key") == self.book_id]

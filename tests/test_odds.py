@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 from ballpark.odds import OddsSnapshotCache, TheOddsApiProvider, normalize_covers_html, provider_failure_reason
 
@@ -75,7 +76,7 @@ def test_unverified_book_cell_timestamp_never_certifies_current() -> None:
 
 def test_odds_api_replay_is_exact_book_totals_only_and_honest_about_book_time() -> None:
     provider = TheOddsApiProvider(object(), api_key="runtime-only", book_id="draftkings")
-    events = [{"id": "event-1", "home_team": "BOS", "away_team": "NYY", "bookmakers": [
+    events = [{"id": "event-1", "commence_time": "2026-09-06T17:05:00Z", "home_team": "BOS", "away_team": "NYY", "bookmakers": [
         {"key": "other", "title": "Other", "last_update": "2026-09-06T17:00:00Z", "markets": []},
         {"key": "draftkings", "title": "DraftKings", "last_update": "2026-09-06T17:00:00Z", "markets": [
             {"key": "h2h", "outcomes": []},
@@ -111,7 +112,7 @@ def test_provider_failure_classification_and_snapshot_order_are_bounded() -> Non
 
 
 def test_odds_api_execution_retries_once_then_uses_same_date_cache_on_401() -> None:
-    events = [{"id": "event-1", "home_team": "BOS", "away_team": "NYY", "bookmakers": [{"key": "draftkings", "title": "DraftKings", "markets": [{"key": "totals", "outcomes": [{"name": "Over", "point": 8.5, "price": -105}, {"name": "Under", "point": 8.5, "price": -115}]}]}]}]
+    events = [{"id": "event-1", "commence_time": "2026-09-06T17:05:00Z", "home_team": "BOS", "away_team": "NYY", "bookmakers": [{"key": "draftkings", "title": "DraftKings", "markets": [{"key": "totals", "outcomes": [{"name": "Over", "point": 8.5, "price": -105}, {"name": "Under", "point": 8.5, "price": -115}]}]}]}]
     responses = [(429, {}, b"[]"), (200, {"x-requests-remaining": "5"}, __import__("json").dumps(events).encode())]
     provider = TheOddsApiProvider(object(), api_key="runtime-only", book_id="draftkings", requester=lambda _url: responses.pop(0))
     first = provider.fetch(TARGET, _schedule(), observed_at=OBSERVED)
@@ -119,3 +120,12 @@ def test_odds_api_execution_retries_once_then_uses_same_date_cache_on_401() -> N
     provider.requester = lambda _url: (401, {}, b"{}")
     recovered = provider.fetch(TARGET, _schedule(), observed_at=OBSERVED)
     assert recovered[11]["snapshot_id"] == first[11]["snapshot_id"]
+
+
+def test_snapshot_cache_survives_restart_and_never_returns_prior_date(tmp_path: Path) -> None:
+    path = tmp_path / "odds-cache.json"
+    market = {"slate_date": "2026-09-06", "game_pk": 11, "observed_at": "2026-09-06T17:00:00Z", "snapshot_id": "persisted"}
+    assert OddsSnapshotCache(path).accept(market)
+    restarted = OddsSnapshotCache(path)
+    assert restarted.for_slate(TARGET, 11)["snapshot_id"] == "persisted"
+    assert restarted.for_slate(date(2026, 9, 7), 11) is None
