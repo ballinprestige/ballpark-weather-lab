@@ -74,22 +74,45 @@ receipt. Detailed setup and recovery steps are in [operations](docs/operations.m
 
 Requirements are Python 3.12 or newer and Node.js 22.x.
 
+macOS/Linux:
+
 ```bash
-python -m venv .venv
-python -m pip install --require-hashes --requirement requirements.lock
-python -m pip install --only-binary=:all: --require-hashes --requirement .github/requirements-verify.txt
-python -m pip install --no-build-isolation --no-deps --editable .
+python3.12 -m venv .venv
+.venv/bin/python -m pip install --require-hashes --requirement requirements.lock
+.venv/bin/python -m pip install --only-binary=:all: --require-hashes --requirement .github/requirements-verify.txt
+.venv/bin/python -m pip install --no-build-isolation --no-deps --editable .
 npm ci --prefix web
 ```
 
-Activate the virtual environment using the normal command for your platform before running the
-remaining commands.
+Windows PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --require-hashes --requirement requirements.lock
+.\.venv\Scripts\python.exe -m pip install --only-binary=:all: --require-hashes --requirement .github/requirements-verify.txt
+.\.venv\Scripts\python.exe -m pip install --no-build-isolation --no-deps --editable .
+npm ci --prefix web
+```
+
+The commands deliberately invoke the virtual-environment interpreter directly; activation is
+optional and must not be relied on for clean-install verification.
 
 ## Verify locally
 
+macOS/Linux:
+
 ```bash
-python -m pytest
-python -m ballpark verify-artifacts
+.venv/bin/python -m pytest
+.venv/bin/python -m ballpark verify-artifacts
+npm run verify --prefix web
+npm run test:e2e --prefix web
+```
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m ballpark verify-artifacts
 npm run verify --prefix web
 npm run test:e2e --prefix web
 ```

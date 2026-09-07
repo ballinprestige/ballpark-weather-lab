@@ -9,32 +9,54 @@ GitHub Pages artifact, and prove that the public date and payload bytes match th
 
 Install Python 3.12 or newer and Node.js 22.x, then run from the repository root:
 
+macOS/Linux:
+
 ```bash
-python -m venv .venv
-python -m pip install --require-hashes --requirement requirements.lock
-python -m pip install --only-binary=:all: --require-hashes --requirement .github/requirements-verify.txt
-python -m pip install --no-build-isolation --no-deps --editable .
+python3.12 -m venv .venv
+.venv/bin/python -m pip install --require-hashes --requirement requirements.lock
+.venv/bin/python -m pip install --only-binary=:all: --require-hashes --requirement .github/requirements-verify.txt
+.venv/bin/python -m pip install --no-build-isolation --no-deps --editable .
 npm ci --prefix web
 ```
 
-Activate `.venv` using the normal command for the operating system.
+Windows PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --require-hashes --requirement requirements.lock
+.\.venv\Scripts\python.exe -m pip install --only-binary=:all: --require-hashes --requirement .github/requirements-verify.txt
+.\.venv\Scripts\python.exe -m pip install --no-build-isolation --no-deps --editable .
+npm ci --prefix web
+```
+
+The documented commands invoke `.venv` directly, so activation is optional and does not affect
+clean-install evidence.
 
 ## One daily command
 
-```bash
-python -m ballpark daily
-```
+macOS/Linux: `.venv/bin/python -m ballpark daily`
+
+Windows PowerShell: `.\.venv\Scripts\python.exe -m ballpark daily`
 
 The default date is the current `America/New_York` calendar date. For an explicit date:
 
 ```bash
-python -m ballpark daily --date 2026-08-26
+.venv/bin/python -m ballpark daily --date 2026-08-26
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m ballpark daily --date 2026-08-26
 ```
 
 For a deterministic, network-free demonstration:
 
 ```bash
-python -m ballpark daily --date 2026-08-26 --fixture tests/fixtures/normal_slate.json \
+.venv/bin/python -m ballpark daily --date 2026-08-26 --fixture tests/fixtures/normal_slate.json \
+  --generated-at 2026-08-26T12:00:00Z
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m ballpark daily --date 2026-08-26 --fixture tests/fixtures/normal_slate.json `
   --generated-at 2026-08-26T12:00:00Z
 ```
 
@@ -43,9 +65,20 @@ that the distribution's payload bytes match `web/dist/data/release.json`.
 
 ## Preflight verification
 
+macOS/Linux:
+
 ```bash
-python -m pytest
-python -m ballpark verify-artifacts
+.venv/bin/python -m pytest
+.venv/bin/python -m ballpark verify-artifacts
+npm run verify --prefix web
+npm run test:e2e --prefix web
+```
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m ballpark verify-artifacts
 npm run verify --prefix web
 npm run test:e2e --prefix web
 ```
