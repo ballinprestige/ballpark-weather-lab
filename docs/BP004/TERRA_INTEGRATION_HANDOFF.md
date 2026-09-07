@@ -1,6 +1,6 @@
 # BP004 Terra integration handoff
 
-Candidate revision: `PENDING_COMMIT` (replace with the commit below before review).
+Implementation candidate revision: `821f9bd093da910cf7de6182ede785ab94a13da6`.
 
 ## What is wired
 
