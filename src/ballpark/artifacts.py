@@ -16,6 +16,7 @@ REQUIRED_ARTIFACTS = {
     "assets/models/hr_weather_model.json",
     "assets/models/training_manifest.json",
     "assets/data/hr_baselines_2026.json",
+    "assets/data/venue_orientation_provenance.json",
     "web/public/park_geometry.json",
 }
 

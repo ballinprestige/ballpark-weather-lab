@@ -43,6 +43,7 @@ def _write_inventory(
         "assets/models/runs_weather_model.json": b"{}\n",
         "assets/models/hr_weather_model.json": b"{}\n",
         "assets/data/hr_baselines_2026.json": b"{}\n",
+        "assets/data/venue_orientation_provenance.json": b"{\"schema_version\":1,\"venues\":{}}\n",
         "web/public/park_geometry.json": b"{}\n",
     }
     entries: dict[str, dict[str, object]] = {
@@ -97,7 +98,7 @@ def test_malformed_optional_parquet_marks_approach_c_unavailable(tmp_path: Path)
 
     assert receipt.state == "partial"
     assert receipt.approach_c_state == "unavailable"
-    assert receipt.files_checked == 6
+    assert receipt.files_checked == 7
     assert len(receipt.optional_errors) == 1
     assert "parquet metadata is unreadable" in receipt.optional_errors[0]
 

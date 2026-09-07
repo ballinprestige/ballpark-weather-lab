@@ -59,7 +59,9 @@ VENUES: dict[str, Venue] = {
     "HOU": _v("HOU", 117, "Daikin Park", 29.7573, -95.3555, 40, 1, 1.040, 65),
     "KC": _v("KC", 118, "Kauffman Stadium", 39.0517, -94.4803, 820, 0, 0.990, 45),
     "LAA": _v("LAA", 108, "Angel Stadium", 33.8003, -117.8827, 160, 0, 0.980, 45),
-    "LAD": _v("LAD", 119, "Dodger Stadium", 34.0739, -118.2400, 515, 0, 0.970, 325),
+    # Approximate USGS-derived estimate; source, calculation, and tolerance are in
+    # assets/data/venue_orientation_provenance.json and exported into park geometry.
+    "LAD": _v("LAD", 119, "Dodger Stadium", 34.0739, -118.2400, 515, 0, 0.970, 24),
     "MIA": _v("MIA", 146, "loanDepot park", 25.7781, -80.2196, 7, 1, 0.930, 350),
     "MIL": _v("MIL", 158, "American Family Field", 43.0280, -87.9712, 640, 1, 1.020, 15),
     "MIN": _v("MIN", 142, "Target Field", 44.9817, -93.2776, 840, 0, 1.010, 5),

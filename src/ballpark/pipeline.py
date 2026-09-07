@@ -9,9 +9,11 @@ from typing import Any
 from ballpark.artifacts import ArtifactReceipt, verify_artifacts
 from ballpark.contract import validate_payload
 from ballpark.errors import DataContractError
+from ballpark.geometry_artifact import verify_exported_geometry
 from ballpark.http import HttpClient
+from ballpark.kalshi import KalshiExchangeProvider
+from ballpark.kalshi import unavailable_market as unavailable_exchange_market
 from ballpark.lineups import fetch_lineup
-from ballpark.kalshi import KalshiExchangeProvider, unavailable_market as unavailable_exchange_market
 from ballpark.model import ParkFactorModel
 from ballpark.odds import unavailable_market
 from ballpark.paths import ProjectPaths
@@ -133,6 +135,7 @@ class DailyPipeline:
             ).fetch(schedule, observed_at=observed_at)
 
         model = ParkFactorModel(self.paths.models, self.paths.data)
+        verify_exported_geometry(self.paths.root)
         physics: PhysicsEngine | None = None
         games: list[dict[str, Any]] = []
         weather_verified = 0

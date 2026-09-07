@@ -26,6 +26,11 @@
       "rows": 3018625,
       "sha256": "cfd1f4602896381297e95c3f33ed8dfd7024f010f5fb09d2fb57e4d3b6004451"
     },
+    "assets/data/venue_orientation_provenance.json": {
+      "bytes": 1979,
+      "critical": true,
+      "sha256": "578ba052f50f667aae19988d7fdc0d972aa95cacdf2d8ba0a6056aad553c1673"
+    },
     "assets/models/feature_importance.json": {
       "bytes": 1000,
       "critical": false,
@@ -48,9 +53,9 @@
       "sha256": "3df383f1f1b3b74611c607d87e7e27e7b29e71a7d5dfd99b59a955c37f223cf9"
     },
     "web/public/park_geometry.json": {
-      "bytes": 25575,
+      "bytes": 27286,
       "critical": true,
-      "sha256": "49966b4c072d0d41c972a7b6fcea7b44a08d3f3bc0131e2e55f4dead9364ac46"
+      "sha256": "e90985366e881542295764a48724bb2772f2133168862e96064cd9cc252de645"
     }
   },
   "evidence_counts": {

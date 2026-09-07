@@ -98,8 +98,11 @@ def main(argv: list[str] | None = None) -> int:
         paths = ProjectPaths.discover()
         if args.command == "verify-artifacts":
             from ballpark.artifacts import verify_artifacts
+            from ballpark.geometry_artifact import verify_exported_geometry
 
-            _print(verify_artifacts(paths).as_dict())
+            receipt = verify_artifacts(paths)
+            verify_exported_geometry(paths.root)
+            _print(receipt.as_dict())
             return 0
 
         if args.command in {"build", "daily"}:
