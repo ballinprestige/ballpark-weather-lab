@@ -77,7 +77,9 @@ async function loadOptionalGeometry(warnings: string[], signal?: AbortSignal): P
   }
 }
 
-export type OptionalPublicationUpdate = Pick<PublicationBundle, 'archive'> | Pick<PublicationBundle, 'geometry'>;
+export type OptionalPublicationUpdate =
+  | { archive: ArchiveIndex; warnings: string[] }
+  | { geometry: GeometryArtifact | null; warnings: string[] };
 
 export async function loadCurrentPublication(
   signal?: AbortSignal,
@@ -107,8 +109,8 @@ export async function loadCurrentPublication(
   };
   // History and park geometry never hold the verified daily slate hostage.
   // Each reports independently so a failing archive cannot delay geometry.
-  void loadOptionalArchive(warnings, signal).then((archive) => onOptional?.({ archive }));
-  void loadOptionalGeometry(warnings, signal).then((geometry) => onOptional?.({ geometry }));
+  void loadOptionalArchive(warnings, signal).then((archive) => onOptional?.({ archive, warnings: [...warnings] }));
+  void loadOptionalGeometry(warnings, signal).then((geometry) => onOptional?.({ geometry, warnings: [...warnings] }));
   return bundle;
 }
 

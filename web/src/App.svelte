@@ -141,7 +141,7 @@
         if (sequence !== loadSequence || controller.signal.aborted || isArchive || !bundle || bundle.payloadHash !== coreHash) return;
         // Reassignment is intentional: Svelte must observe independent optional
         // completion, and stale request generations must never cross routes.
-        bundle = { ...bundle, ...optional, warnings: [...bundle.warnings] };
+        bundle = { ...bundle, ...optional, warnings: [...optional.warnings] };
       });
       if (sequence !== loadSequence || controller.signal.aborted) return;
       coreHash = loaded.payloadHash;
