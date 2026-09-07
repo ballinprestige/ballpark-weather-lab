@@ -134,10 +134,17 @@
     if (loadingPublication) return;
     loadingPublication = true;
     const { sequence, controller } = beginRequest();
+    let coreHash = '';
     if (!background || !payload) { loading = true; error = null; }
     try {
-      const loaded = await loadCurrentPublication(controller.signal);
+      const loaded = await loadCurrentPublication(controller.signal, (optional) => {
+        if (sequence !== loadSequence || controller.signal.aborted || isArchive || !bundle || bundle.payloadHash !== coreHash) return;
+        // Reassignment is intentional: Svelte must observe independent optional
+        // completion, and stale request generations must never cross routes.
+        bundle = { ...bundle, ...optional, warnings: [...bundle.warnings] };
+      });
       if (sequence !== loadSequence || controller.signal.aborted) return;
+      coreHash = loaded.payloadHash;
       bundle = loaded;
       payload = loaded.payload;
       payloadHash = loaded.payloadHash;

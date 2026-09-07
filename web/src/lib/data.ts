@@ -77,7 +77,12 @@ async function loadOptionalGeometry(warnings: string[], signal?: AbortSignal): P
   }
 }
 
-export async function loadCurrentPublication(signal?: AbortSignal): Promise<PublicationBundle> {
+export type OptionalPublicationUpdate = Pick<PublicationBundle, 'archive'> | Pick<PublicationBundle, 'geometry'>;
+
+export async function loadCurrentPublication(
+  signal?: AbortSignal,
+  onOptional?: (update: OptionalPublicationUpdate) => void
+): Promise<PublicationBundle> {
   const warnings: string[] = [];
   const [release, payloadResult] = await Promise.all([
     loadRelease(signal),
@@ -101,14 +106,9 @@ export async function loadCurrentPublication(signal?: AbortSignal): Promise<Publ
     payloadHash: payloadResult.hash
   };
   // History and park geometry never hold the verified daily slate hostage.
-  // They mutate only this generation's bundle after their own bounded retries.
-  void Promise.all([
-    loadOptionalArchive(warnings, signal),
-    loadOptionalGeometry(warnings, signal)
-  ]).then(([archive, geometry]) => {
-    bundle.archive = archive;
-    bundle.geometry = geometry;
-  });
+  // Each reports independently so a failing archive cannot delay geometry.
+  void loadOptionalArchive(warnings, signal).then((archive) => onOptional?.({ archive }));
+  void loadOptionalGeometry(warnings, signal).then((geometry) => onOptional?.({ geometry }));
   return bundle;
 }
 
