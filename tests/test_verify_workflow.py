@@ -1,0 +1,94 @@
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+from scripts.check_verify_workflow import validate
+
+WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "verify.yml"
+
+
+def test_candidate_pr_workflow_satisfies_security_and_execution_contract() -> None:
+    assert validate(WORKFLOW) == []
+
+
+def test_contract_rejects_pull_request_target_and_persisted_checkout(tmp_path: Path) -> None:
+    unsafe = tmp_path / "verify.yml"
+    unsafe.write_text(
+        WORKFLOW.read_text(encoding="utf-8")
+        .replace("pull_request:\n", "pull_request_target:\n", 1)
+        .replace("persist-credentials: false", "persist-credentials: true", 1),
+        encoding="utf-8",
+    )
+
+    errors = validate(unsafe)
+
+    assert any("pull_request_target" in error for error in errors)
+    assert any("persisted checkout" in error for error in errors)
+
+
+def test_contract_rejects_an_unpinned_or_unapproved_action(tmp_path: Path) -> None:
+    unsafe = tmp_path / "verify.yml"
+    unsafe.write_text(
+        WORKFLOW.read_text(encoding="utf-8").replace(
+            "actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38",
+            "actions/setup-node@v6",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    errors = validate(unsafe)
+
+    assert any("unapproved or non-SHA-pinned action" in error for error in errors)
+
+
+def test_validator_command_fails_nonzero_for_an_unsafe_workflow(tmp_path: Path) -> None:
+    unsafe = tmp_path / "verify.yml"
+    unsafe.write_text(
+        WORKFLOW.read_text(encoding="utf-8").replace(
+            "python -m pytest", "python -m pytest -k never-runs", 1
+        ),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "scripts/check_verify_workflow.py", str(unsafe)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert "dynamic Python test discovery" in completed.stderr
+
+
+def test_fail_closed_command_stops_after_an_intentional_failure() -> None:
+    command = (
+        [
+            "cmd",
+            "/d",
+            "/s",
+            "/c",
+            "cmd /c exit 23 && echo unreachable",
+        ]
+        if os.name == "nt"
+        else [
+            "bash",
+            "-euo",
+            "pipefail",
+            "-c",
+            "python -c \"raise SystemExit(23)\"; echo unreachable",
+        ]
+    )
+    completed = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 23
+    assert "unreachable" not in completed.stdout
