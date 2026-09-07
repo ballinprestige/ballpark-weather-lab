@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-from ballpark.odds import normalize_covers_html
+from ballpark.odds import TheOddsApiProvider, normalize_covers_html
 
 
 TARGET = date(2026, 9, 6)
@@ -71,3 +71,26 @@ def test_unverified_book_cell_timestamp_never_certifies_current() -> None:
     assert market["state"] == "unavailable"
     assert market["source_updated_at"] is None
     assert market["line"] == 8.5
+
+
+def test_odds_api_replay_is_exact_book_totals_only_and_honest_about_book_time() -> None:
+    provider = TheOddsApiProvider(object(), api_key="runtime-only", book_id="draftkings")
+    events = [{"id": "event-1", "home_team": "BOS", "away_team": "NYY", "bookmakers": [
+        {"key": "other", "title": "Other", "last_update": "2026-09-06T17:00:00Z", "markets": []},
+        {"key": "draftkings", "title": "DraftKings", "last_update": "2026-09-06T17:00:00Z", "markets": [
+            {"key": "h2h", "outcomes": []},
+            {"key": "totals", "outcomes": [{"name": "Over", "point": 8.5, "price": -105}, {"name": "Under", "point": 8.5, "price": -115}]},
+        ]},
+    ]}]
+    market = provider.normalize(events, target_date=TARGET, schedule=_schedule(), observed_at=OBSERVED)[11]
+    assert market["state"] == "unavailable"
+    assert market["line"] == 8.5 and market["over_price"] == -105 and market["under_price"] == -115
+    assert market["source_updated_at"] is None
+    assert market["sportsbook_id"] == "draftkings"
+
+
+def test_odds_api_missing_key_and_malformed_replay_fail_closed() -> None:
+    missing = TheOddsApiProvider(object(), api_key=None, book_id="draftkings")
+    configured = TheOddsApiProvider(object(), api_key="runtime-only", book_id="draftkings")
+    assert missing.fetch(TARGET, _schedule(), observed_at=OBSERVED)[11]["state"] == "unavailable"
+    assert configured.normalize({"unexpected": True}, target_date=TARGET, schedule=_schedule(), observed_at=OBSERVED)[11]["state"] == "unavailable"
