@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { BallparkGame } from '../lib/types';
-  import { formatContractCents, formatDelta, formatTime, gameHoldReason, isGameHeld, teamLabel } from '../lib/format';
+  import { formatContractCents, formatDelta, formatTime, gameHoldReason, isGameHeld, isModelAdjustmentHeld, isWeatherHeld, teamLabel } from '../lib/format';
   import { assessOddsFreshness } from '../lib/freshness';
 
   export let game: BallparkGame;
@@ -8,13 +8,19 @@
   export let now = new Date();
 
   $: held = isGameHeld(game);
+  $: weatherHeld = isWeatherHeld(game);
+  $: modelHeld = !weatherHeld && isModelAdjustmentHeld(game);
   $: market = assessOddsFreshness(game.odds, now);
-  $: wind = held
+  $: wind = weatherHeld
     ? 'Weather held'
     : game.weather.dome_active || game.weather.roof_state === 'fixed-roof'
       ? 'Roof active'
       : `${game.weather.wind_carry_mph >= 2 ? 'Out' : game.weather.wind_carry_mph <= -2 ? 'In' : Math.abs(game.weather.wind_cross_mph) >= 2 ? 'Cross' : 'Light'} · ${formatDelta(game.weather.wind_carry_mph, 1)} carry`;
-  $: weather = held ? gameHoldReason(game) : `${Math.round(game.weather.temperature_f)}°F · ${Math.round(game.weather.humidity_pct)}%`;
+  $: weather = weatherHeld
+    ? gameHoldReason(game)
+    : modelHeld
+      ? `Model adjustment held · ${gameHoldReason(game)}`
+      : `${Math.round(game.weather.temperature_f)}°F · ${Math.round(game.weather.humidity_pct)}%`;
   $: exchange = game.exchange_market?.state === 'observed_unknown_age'
     && game.exchange_market.line !== null
     && game.exchange_market.over_ask_cents !== null

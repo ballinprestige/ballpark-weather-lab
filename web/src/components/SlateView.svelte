@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { BallparkGame, BallparkPayload } from '../lib/types';
-  import { formatContractCents, formatDate, formatDelta, formatTime, formatTimestamp, gameHoldReason, isGameHeld, teamLabel } from '../lib/format';
+  import { formatContractCents, formatDate, formatDelta, formatTime, formatTimestamp, gameHoldReason, isGameHeld, isWeatherHeld, teamLabel } from '../lib/format';
   import GameListItem from './GameListItem.svelte';
   import WindFieldStrip from './WindFieldStrip.svelte';
   import { assessOddsFreshness } from '../lib/freshness';
@@ -56,7 +56,7 @@
   const american = (price: number | null): string => price === null ? '—' : `${price > 0 ? '+' : ''}${price}`;
 
   const windContext = (game: BallparkGame): string => {
-    if (isGameHeld(game)) return 'Weather held';
+    if (isWeatherHeld(game)) return 'Weather held';
     if (game.weather.dome_active || game.weather.roof_state === 'fixed-roof') return 'Roof active';
     const carry = game.weather.wind_carry_mph;
     const cross = game.weather.wind_cross_mph;
@@ -150,7 +150,7 @@
               <td><a class="board-matchup" href={`#game/${key}`} data-game-key={game.game_pk} aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} details`} on:click={(event) => openBoardDetails(event, key)}><strong>{game.away_team} <i>at</i> {game.home_team}</strong><small>{formatTime(game.game_time)} · {game.venue}</small></a></td>
               <td>{#if exchange}<strong>{exchange.line}</strong> <span>Over {formatContractCents(exchange.over_ask_cents)} · Under {formatContractCents(exchange.under_ask_cents)}</span><small class="exchange-ask">Kalshi contract ask · {exchange.game_phase.replaceAll('_', ' ')} · source age unknown · observed {formatTimestamp(exchange.observed_at)}</small>{#if exchange.failure_reason}<small class="market-failure">Update failed: {exchange.failure_reason}</small>{/if}{:else if market.state === 'unavailable'}<strong>Sportsbook unavailable</strong>{:else}<strong>{game.odds.line}</strong> <span>O {american(game.odds.over_price)} · U {american(game.odds.under_price)}</span><br /><small>{game.odds.sportsbook_name} · {market.state === 'observed' ? 'observed, age unverified' : market.state}</small>{/if}</td>
               <td>{windContext(game)}</td>
-              <td>{movement == null ? 'Held' : `${formatDelta(movement, 0)}% runs`}<br /><small>{isGameHeld(game) ? gameHoldReason(game) : `${Math.round(game.weather.temperature_f)}°F · ${Math.round(game.weather.humidity_pct)}%`}</small></td>
+              <td>{movement == null ? (isWeatherHeld(game) ? 'Weather held' : 'Model adjustment held') : `${formatDelta(movement, 0)}% runs`}<br /><small>{isGameHeld(game) ? gameHoldReason(game) : `${Math.round(game.weather.temperature_f)}°F · ${Math.round(game.weather.humidity_pct)}%`}</small></td>
             </tr>
           {/each}
         </tbody>

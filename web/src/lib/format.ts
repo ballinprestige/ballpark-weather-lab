@@ -82,7 +82,15 @@ export function stateTone(state: string | null | undefined): 'good' | 'hold' | '
 }
 
 export function isGameHeld(game: BallparkGame): boolean {
-  return !isReadyState(game.weather.state) || !isReadyState(game.factors.state);
+  return isWeatherHeld(game) || isModelAdjustmentHeld(game);
+}
+
+export function isWeatherHeld(game: BallparkGame): boolean {
+  return !isReadyState(game.weather.state);
+}
+
+export function isModelAdjustmentHeld(game: BallparkGame): boolean {
+  return !isReadyState(game.factors.state);
 }
 
 export function gameHoldReason(game: BallparkGame): string {

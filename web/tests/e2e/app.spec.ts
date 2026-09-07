@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import type { BallparkPayload } from '../../src/lib/types';
-import { missingWeatherPayload, noSlatePayload, readyPayload } from '../fixtures';
+import { missingWeatherPayload, modelAdjustmentHeldPayload, noSlatePayload, readyPayload } from '../fixtures';
 
 function jsonText(value: unknown): string {
   return JSON.stringify(value);
@@ -427,6 +427,26 @@ test('duplicate game IDs fail closed', async ({ page }, testInfo) => {
   await page.goto('/#slate');
   await expect(page.getByRole('heading', { name: 'Release verification failed' })).toBeVisible();
   await expect(page.getByText(/duplicates game ID/i)).toBeVisible();
+});
+
+test('a held learned adjustment retains verified LAD wind and total evidence', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('desktop'));
+  await mockPublication(page, modelAdjustmentHeldPayload());
+  await page.goto('/#slate');
+
+  const row = page.locator('.ledger tbody tr').filter({ has: page.locator('[data-game-key="1002"]') });
+  await expect(row).toContainText('Out · +7.2 carry');
+  await expect(row).toContainText('Model adjustment held');
+  await expect(row).not.toContainText('Weather held');
+  await expect(row).toContainText('8.5');
+
+  await page.getByRole('link', { name: /Open San Diego Padres.*Los Angeles Dodgers.*details/i }).click();
+  await expect(page.getByTestId('weather-hold')).toContainText('Model validation pending');
+  await expect(page.getByTestId('weather-hold')).toContainText(/0° wind axis/i);
+  await expect(page.locator('.factor-headline')).toHaveCount(0);
+  await expect(page.locator('.conditions-strip')).toContainText('82°F');
+  await expect(page.locator('.conditions-strip')).toContainText('12 mph from SW');
+  await expect(page.getByText('Kalshi contract asks')).toHaveCount(0);
 });
 
 const FENWAY_GEOMETRY = {

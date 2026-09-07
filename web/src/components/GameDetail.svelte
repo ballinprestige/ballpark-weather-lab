@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { BallparkGame, GeometryArtifact } from '../lib/types';
-  import { displayValue, formatContractCents, formatFactor, formatTime, formatTimestamp, gameHoldReason, isGameHeld, pitcherName, stateTone, teamLabel, windLabel } from '../lib/format';
+  import { displayValue, formatContractCents, formatFactor, formatTime, formatTimestamp, gameHoldReason, isGameHeld, isModelAdjustmentHeld, pitcherName, stateTone, teamLabel, windLabel } from '../lib/format';
   import { isReadyState } from '../lib/validate';
   import { assessOddsFreshness } from '../lib/freshness';
   import StateBadge from './StateBadge.svelte';
@@ -15,6 +15,7 @@
 
   $: held = isGameHeld(game);
   $: weatherHeld = !isReadyState(game.weather.state);
+  $: modelHeld = !weatherHeld && isModelAdjustmentHeld(game);
   $: titleId = `game-detail-title-${game.game_pk}`;
   $: lineupReady = isReadyState(game.lineup.state);
   $: marketFreshness = assessOddsFreshness(game.odds, now);
@@ -54,7 +55,7 @@
     <div class="game-hold" role="status" data-testid="weather-hold">
       <span class="hold-hatch" aria-hidden="true"></span>
       <div>
-        <p class="eyebrow">Data unavailable</p>
+        <p class="eyebrow">{modelHeld ? 'Model validation pending' : 'Data unavailable'}</p>
         <h3>Weather-adjusted headline withheld</h3>
         <p>{gameHoldReason(game)} The rest of the slate remains available.</p>
       </div>
@@ -147,7 +148,7 @@
     <dl class="receipt-grid">
       <div><dt>Weather source</dt><dd>{game.weather.source ?? 'Not reported'}</dd></div>
       <div><dt>Weather valid</dt><dd>{formatTimestamp(game.weather.valid_at)}</dd></div>
-      <div><dt>Evidence state</dt><dd>{held ? 'Weather-adjusted factor held' : 'Verified weather inputs'}</dd></div>
+      <div><dt>Evidence state</dt><dd>{weatherHeld ? 'Weather evidence held' : modelHeld ? 'Verified weather · learned adjustment held' : 'Verified weather inputs'}</dd></div>
       <div><dt>Lineups</dt><dd>{game.lineup.state === 'confirmed' ? 'confirmed / confirmed' : game.lineup.state.replaceAll('_', ' ')}</dd></div>
       <div><dt>Park-factor method</dt><dd>{game.factors.state}</dd></div>
       <div><dt>Flight context</dt><dd>{game.approach_c.state.replaceAll('_', ' ')}</dd></div>
