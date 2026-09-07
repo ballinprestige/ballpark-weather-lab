@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from ballpark.odds import OddsSnapshotCache, TheOddsApiProvider, normalize_covers_html, provider_failure_reason
+from ballpark.kalshi import normalize_markets
 
 
 TARGET = date(2026, 9, 6)
@@ -120,6 +121,13 @@ def test_odds_api_execution_retries_once_then_uses_same_date_cache_on_401() -> N
     provider.requester = lambda _url: (401, {}, b"{}")
     recovered = provider.fetch(TARGET, _schedule(), observed_at=OBSERVED)
     assert recovered[11]["snapshot_id"] == first[11]["snapshot_id"]
+
+
+def test_kalshi_exchange_asks_are_cents_not_american_odds() -> None:
+    quote = normalize_markets(_schedule()[0], {"status": "open", "event_ticker": "KXMLBTOTAL-26SEP072110CINLAD"}, [{"ticker": "KXMLBTOTAL-26SEP072110CINLAD-9", "status": "active", "title": "Over 8.5 runs scored", "yes_ask_dollars": "0.4900", "no_ask_dollars": "0.5200"}], observed_at=OBSERVED)
+    assert quote["state"] == "observed_unknown_age"
+    assert quote["over_ask_cents"] == 49 and quote["under_ask_cents"] == 52
+    assert quote["price_format"] == "contract_cents" and quote["source_updated_at"] is None
 
 
 def test_snapshot_cache_survives_restart_and_never_returns_prior_date(tmp_path: Path) -> None:
