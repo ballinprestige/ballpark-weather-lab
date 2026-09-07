@@ -55,7 +55,7 @@ export interface GameExchangeMarket {
   state: 'observed_unknown_age' | 'unavailable';
   reason: string | null;
   failure_reason: string | null;
-  game_phase: 'pregame' | 'after_scheduled_start' | 'unavailable';
+  game_phase: 'pregame' | 'in_progress' | 'after_scheduled_start' | 'final' | 'unknown' | 'unavailable';
   provider: 'Kalshi';
   provider_url: string;
   event_ticker: string | null;

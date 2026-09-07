@@ -308,7 +308,7 @@ function validateExchangeMarket(value: unknown, path: string, gamePk: number, ga
   const underCents = decimalAt(row.under_ask_cents, `${path}.under_ask_cents`, true);
   const market: GameExchangeMarket = {
     game_pk: integerAt(row.game_pk, `${path}.game_pk`, 1), slate_date: isoDateAt(row.slate_date, `${path}.slate_date`), game_time: timestampAt(row.game_time, `${path}.game_time`, true), state,
-    reason: nullableStringAt(row.reason, `${path}.reason`), failure_reason: nullableStringAt(row.failure_reason, `${path}.failure_reason`), game_phase: enumAt(row.game_phase, `${path}.game_phase`, ['pregame', 'after_scheduled_start', 'unavailable']), provider: enumAt(row.provider, `${path}.provider`, ['Kalshi']), provider_url: stringAt(row.provider_url, `${path}.provider_url`) as string,
+    reason: nullableStringAt(row.reason, `${path}.reason`), failure_reason: nullableStringAt(row.failure_reason, `${path}.failure_reason`), game_phase: enumAt(row.game_phase, `${path}.game_phase`, ['pregame', 'in_progress', 'after_scheduled_start', 'final', 'unknown', 'unavailable']), provider: enumAt(row.provider, `${path}.provider`, ['Kalshi']), provider_url: stringAt(row.provider_url, `${path}.provider_url`) as string,
     event_ticker: nullableStringAt(row.event_ticker, `${path}.event_ticker`), market_ticker: nullableStringAt(row.market_ticker, `${path}.market_ticker`),
     market_type: enumAt(row.market_type, `${path}.market_type`, ['total']), period: enumAt(row.period, `${path}.period`, ['full_game']),
     quote_type: enumAt(row.quote_type, `${path}.quote_type`, ['contract_ask']), price_format: enumAt(row.price_format, `${path}.price_format`, ['contract_cents']),
