@@ -25,6 +25,12 @@
         "cf_axis_from_right_baseline_degrees": 24.749288733868468,
         "baseline_bisector_degrees": 24.65824437344631
       },
+      "learned_weather_adjustment": {
+        "state": "held_pending_feature_compatibility_validation",
+        "evidence": "tasks/BP-006/evidence/orientation-check/training-lineage/THREE_DAY_SOURCE_CHECK.md",
+        "finding": "Three sampled 2016 LAD training dates exactly reproduce stored carry/cross with a 0 degree default axis, not the current 24 degree physical axis.",
+        "scope": "This is a sampled LAD training-lineage finding only; it does not classify every date or venue."
+      },
       "uncertainty": "Manual visual feature localization on a coarse basemap; the plus/minus 10 degree tolerance is a conservative interpretation bound, not a statistical confidence interval."
     }
   }

@@ -89,6 +89,7 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
         raise DataContractError("scheduled-slate payload cannot contain a no-slate explanation")
 
     verified_weather = 0
+    modeled_factors = 0
     confirmed_lineups = 0
     unavailable_lineups = 0
     odds_states: list[str] = []
@@ -99,27 +100,41 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
         lineup_state = game["lineup"]["state"]
         approach_c_state = game["approach_c"]["state"]
         trajectory_state = game["trajectory"]["state"]
+        factors = game["factors"]
+        held_baselines = (
+            factors["weather_multiplier_runs"] == 1.0
+            and factors["weather_multiplier_hr"] == 1.0
+            and factors["game_pf_runs"] == factors["seasonal_pf_runs"]
+            and factors["game_pf_hr"] == factors["seasonal_pf_hr"]
+            and factors["weather_delta_runs"] == 0.0
+            and factors["weather_delta_hr"] == 0.0
+        )
         if weather_state == "verified":
             verified_weather += 1
-            if factor_state != "modeled" or trajectory_state != "available":
+            if trajectory_state != "available":
                 raise DataContractError(
-                    "verified weather must produce modeled factors and an available trajectory"
+                    "verified weather must produce an available trajectory"
                 )
+            if factor_state == "held":
+                if not isinstance(factors["reason"], str) or not factors["reason"].strip():
+                    raise DataContractError(
+                        "verified weather with held factors requires a model-validation reason"
+                    )
+                if not held_baselines:
+                    raise DataContractError(
+                        "verified weather with held factors must expose unchanged seasonal "
+                        "baselines"
+                    )
+            elif factor_state != "modeled":
+                raise DataContractError("verified weather has an invalid factor state")
+            else:
+                modeled_factors += 1
         else:
             if factor_state != "held" or trajectory_state != "held":
                 raise DataContractError(
                     "degraded weather must hold factors and the trajectory comparison"
                 )
-            factors = game["factors"]
-            if (
-                factors["weather_multiplier_runs"] != 1.0
-                or factors["weather_multiplier_hr"] != 1.0
-                or factors["game_pf_runs"] != factors["seasonal_pf_runs"]
-                or factors["game_pf_hr"] != factors["seasonal_pf_hr"]
-                or factors["weather_delta_runs"] != 0.0
-                or factors["weather_delta_hr"] != 0.0
-                or game["trajectory"]["arcs"]
-            ):
+            if not held_baselines or game["trajectory"]["arcs"]:
                 raise DataContractError(
                     "degraded weather must expose unchanged seasonal baselines"
                 )
@@ -236,9 +251,13 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
             elif state != "unavailable":
                 raise DataContractError("exchange market has an unknown state")
 
-    expected_status = "ready" if verified_weather == len(games) else "degraded"
+    expected_status = (
+        "ready"
+        if verified_weather == len(games) and modeled_factors == len(games)
+        else "degraded"
+    )
     if payload.get("status") != expected_status:
-        raise DataContractError("payload status does not match game-level weather health")
+        raise DataContractError("payload status does not match weather and factor availability")
     if health["weather"].get("verified_games") != verified_weather:
         raise DataContractError("weather health count does not match the slate")
     if health["weather"].get("held_games") != len(games) - verified_weather:

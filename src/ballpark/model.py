@@ -52,6 +52,22 @@ class ParkFactorModel:
         except Exception as exc:
             raise ArtifactError("HR baseline receipt is malformed") from exc
 
+    def _held_factors(self, venue: Venue, seasonal_hr: float, reason: str) -> dict[str, Any]:
+        seasonal_runs = venue.seasonal_pf_runs
+        return {
+            "state": "held",
+            "reason": reason,
+            "seasonal_pf_runs": round(seasonal_runs, 4),
+            "seasonal_pf_hr": round(seasonal_hr, 4),
+            "weather_multiplier_runs": 1.0,
+            "weather_multiplier_hr": 1.0,
+            "game_pf_runs": round(seasonal_runs, 4),
+            "game_pf_hr": round(seasonal_hr, 4),
+            "weather_delta_runs": 0.0,
+            "weather_delta_hr": 0.0,
+            "hr_baseline_as_of": self.hr_baseline_as_of,
+        }
+
     def predict(
         self,
         *,
@@ -65,19 +81,18 @@ class ParkFactorModel:
             raise ArtifactError(f"HR baseline is missing for {venue.team}")
 
         if weather.get("state") != "verified":
-            return {
-                "state": "held",
-                "reason": "game-hour weather is not verified; seasonal baselines remain visible",
-                "seasonal_pf_runs": round(seasonal_runs, 4),
-                "seasonal_pf_hr": round(seasonal_hr, 4),
-                "weather_multiplier_runs": 1.0,
-                "weather_multiplier_hr": 1.0,
-                "game_pf_runs": round(seasonal_runs, 4),
-                "game_pf_hr": round(seasonal_hr, 4),
-                "weather_delta_runs": 0.0,
-                "weather_delta_hr": 0.0,
-                "hr_baseline_as_of": self.hr_baseline_as_of,
-            }
+            return self._held_factors(
+                venue,
+                seasonal_hr,
+                "game-hour weather is not verified; seasonal baselines remain visible",
+            )
+        if not venue.weather_model_adjustment_eligible:
+            return self._held_factors(
+                venue,
+                seasonal_hr,
+                venue.weather_model_adjustment_reason
+                or "learned weather adjustment is pending feature-compatibility validation",
+            )
 
         values = {
             "temperature_f": float(weather["temperature_f"]),

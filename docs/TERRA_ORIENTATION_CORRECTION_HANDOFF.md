@@ -31,21 +31,33 @@ reverses the old carry-sign error. Full backend validation:
     python -m pytest
     python -m ballpark verify-artifacts
 
-The source-built release is in the new archive-preserving preview root:
+The first source-built release remains retained for audit only and is not
+promotable: its learned LAD adjustment consumed 24-degree serving features.
+The retained three-day training receipt instead reproduces historical LAD
+features with the prior 0-degree default. It therefore does not establish
+feature compatibility for a 24-degree learned adjustment.
+
+The successor source-built release is in the new archive-preserving preview
+root:
 C:/Users/kylea/Projects/Playground/ballpark-delivery-2026-09-06/program/previews/
-bp004-terra-lad-orientation-20260907
+bp004-terra-lad-orientation-model-held-20260907
 
-- Generated 2026-09-07T22:20:13.700132Z; 11 games.
-- Payload/archive SHA-256: c65a10d5dd658d97b6c10f1a0265c279f53e00f68c75f3c01061c58dba35db48.
-- Release SHA-256: f5ab96d5361d6401e5478b728722db2694dcece75cd242ba32061ad7a64635f2.
-- Artifact manifest SHA-256: d71543807b0add260a17181e0bc82903a7fab1ced10d4b6953b311be21b6a886.
+- Generated 2026-09-07T22:39:13.295618Z; 11 games.
+- Payload/archive SHA-256: 95a2a382224f42a74bae13d168c9a03f5c6f312a7be2beb57f2c0c3c783c1f47.
+- Release SHA-256: 7d85aa49e56effd3658f33da875368fb9c0e68a7b081856f702dfbb5e165c3ed.
+- Artifact manifest SHA-256: ebc20660657a854d19e043981fb52d661c891ad13c5a807b8deeff6f52518c87.
 - Matching backend/frontend geometry SHA-256:
-  e90985366e881542295764a48724bb2772f2133168862e96064cd9cc252de645.
+  398d21f25cc1a6eb26d3f9d9af6d16060f6e2bb14ffe0fa7077efb17c2021f1c.
 
-For CIN at LAD, fresh Open-Meteo inputs FROM 252 degrees at 5.7 mph yielded
-carry 3.81 mph, cross 4.24 mph, modeled factors, and an available trajectory.
+For CIN at LAD, fresh Open-Meteo inputs FROM 252 degrees at 5.7 mph yield
+physical carry 3.81 mph, cross 4.24 mph, and an available trajectory. The
+weather remains verified. Only the learned Approach B adjustment is held at
+the documented seasonal baselines, with unity multipliers and zero deltas. This
+is neither a neutral prediction nor a weather hold; market totals remain
+available when their exchange evidence is available.
 
-Historical training rows are intentionally not redistributed and trained model
-files are unchanged. Carry and cross were training features, so a retraining
-claim requires original historical inputs and a separate training receipt.
+The three retained LAD dates demonstrate only the sampled LAD training frame;
+they do not classify other LAD rows or any other venue. Historical training
+rows and model files are unchanged. A learned-adjustment release requires
+feature-compatibility evidence or retraining with its own validation receipt.
 Existing published archives were not overwritten.

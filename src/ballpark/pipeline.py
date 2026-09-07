@@ -86,6 +86,7 @@ class DailyPipeline:
         generated_at = generated_at or utc_now()
         network_deadline = time.monotonic() + 180.0
         receipt = verify_artifacts(self.paths)
+        verify_exported_geometry(self.paths.root)
         fixture = load_fixture(fixture_path, target_date) if fixture_path else None
         schedule = fixture["schedule"] if fixture else fetch_schedule(target_date, self.client)
         game_ids = [int(game["game_pk"]) for game in schedule]
@@ -135,10 +136,10 @@ class DailyPipeline:
             ).fetch(schedule, observed_at=observed_at)
 
         model = ParkFactorModel(self.paths.models, self.paths.data)
-        verify_exported_geometry(self.paths.root)
         physics: PhysicsEngine | None = None
         games: list[dict[str, Any]] = []
         weather_verified = 0
+        modeled_factors = 0
         lineups_confirmed = 0
         lineup_unavailable = 0
         weather_fixture = fixture.get("weather_by_game", {}) if fixture else {}
@@ -197,6 +198,8 @@ class DailyPipeline:
                 lineup_unavailable += 1
 
             factors = model.predict(target_date=target_date, venue=venue, weather=weather)
+            if factors.get("state") == "modeled":
+                modeled_factors += 1
             if lineup.get("state") == "confirmed" and weather.get("state") == "verified":
                 try:
                     if receipt.approach_c_state != "verified":
@@ -261,7 +264,11 @@ class DailyPipeline:
             "product": "ballpark-weather-lab",
             "date": target_date.isoformat(),
             "generated_at": generated_at,
-            "status": "ready" if weather_verified == len(games) else "degraded",
+            "status": (
+                "ready"
+                if weather_verified == len(games) and modeled_factors == len(games)
+                else "degraded"
+            ),
             "no_slate_reason": None,
             "model": self._model_receipt(receipt),
             "health": {

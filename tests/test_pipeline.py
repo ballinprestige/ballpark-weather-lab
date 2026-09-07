@@ -231,6 +231,7 @@ def test_malformed_critical_model_rejects_without_overwriting_prior_output(
         web=isolated / "web",
     )
     monkeypatch.setattr(pipeline_module, "verify_artifacts", lambda _paths: verified_receipt)
+    monkeypatch.setattr(pipeline_module, "verify_exported_geometry", lambda _root: None)
     output = tmp_path / "site"
     (output / "data").mkdir(parents=True)
     prior_payload = b'{"state":"last-good"}\n'

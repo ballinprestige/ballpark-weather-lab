@@ -14,6 +14,8 @@ class Venue:
     dome_type: int
     seasonal_pf_runs: float
     center_field_azimuth: float
+    weather_model_adjustment_eligible: bool = True
+    weather_model_adjustment_reason: str | None = None
 
     @property
     def roof_label(self) -> str:
@@ -30,6 +32,9 @@ def _v(
     dome_type: int,
     seasonal_pf_runs: float,
     center_field_azimuth: float,
+    *,
+    weather_model_adjustment_eligible: bool = True,
+    weather_model_adjustment_reason: str | None = None,
 ) -> Venue:
     return Venue(
         team,
@@ -41,6 +46,8 @@ def _v(
         dome_type,
         seasonal_pf_runs,
         center_field_azimuth,
+        weather_model_adjustment_eligible,
+        weather_model_adjustment_reason,
     )
 
 
@@ -61,7 +68,23 @@ VENUES: dict[str, Venue] = {
     "LAA": _v("LAA", 108, "Angel Stadium", 33.8003, -117.8827, 160, 0, 0.980, 45),
     # Approximate USGS-derived estimate; source, calculation, and tolerance are in
     # assets/data/venue_orientation_provenance.json and exported into park geometry.
-    "LAD": _v("LAD", 119, "Dodger Stadium", 34.0739, -118.2400, 515, 0, 0.970, 24),
+    "LAD": _v(
+        "LAD",
+        119,
+        "Dodger Stadium",
+        34.0739,
+        -118.2400,
+        515,
+        0,
+        0.970,
+        24,
+        weather_model_adjustment_eligible=False,
+        weather_model_adjustment_reason=(
+            "learned weather adjustment held: three sampled LAD training dates used a 0° "
+            "wind axis, while current physical weather uses the sourced 24° axis; "
+            "feature compatibility or retraining validation is pending"
+        ),
+    ),
     "MIA": _v("MIA", 146, "loanDepot park", 25.7781, -80.2196, 7, 1, 0.930, 350),
     "MIL": _v("MIL", 158, "American Family Field", 43.0280, -87.9712, 640, 1, 1.020, 15),
     "MIN": _v("MIN", 142, "Target Field", 44.9817, -93.2776, 840, 0, 1.010, 5),
