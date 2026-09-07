@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -147,6 +147,19 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
                 raise DataContractError("payload contains a non-MLB full-game-total market")
             state = odds.get("state")
             odds_states.append(state)
+            populated = any(odds.get(key) is not None for key in ("line", "over_price", "under_price", "raw_sha256", "snapshot_id"))
+            if populated:
+                required_observed = ("line", "over_price", "under_price", "observed_at", "raw_sha256", "snapshot_id", "sportsbook_id", "sportsbook_name", "provider_event_id")
+                if any(odds.get(key) is None for key in required_observed):
+                    raise DataContractError("observed market is missing price, provenance, book, or retrieval evidence")
+                for price_key in ("over_price", "under_price"):
+                    price = odds[price_key]
+                    if not isinstance(price, int) or isinstance(price, bool) or -99 <= price <= 99:
+                        raise DataContractError("quoted market has an invalid American price")
+                observed = datetime.fromisoformat(str(odds["observed_at"]).replace("Z", "+00:00")).astimezone(UTC)
+                generated = datetime.fromisoformat(str(payload["generated_at"]).replace("Z", "+00:00")).astimezone(UTC)
+                if observed > generated + timedelta(minutes=5):
+                    raise DataContractError("market retrieval is implausibly later than publication")
             if state in {"current", "stale"}:
                 required = ("line", "over_price", "under_price", "source_updated_at", "observed_at", "raw_sha256", "snapshot_id", "sportsbook_id", "sportsbook_name", "provider_event_id")
                 if any(odds.get(key) is None for key in required):
