@@ -261,7 +261,7 @@
     {:else if route === 'game'}
       {#if routedGame}
         <section class="game-route">
-          <a class="station-back" href="#slate">← Back to daily park factors</a>
+          <a class="station-back" href="#slate">← Back to ballpark board</a>
           <GameDetail game={routedGame} geometry={bundle.geometry} headingLevel={1} now={currentInstant} />
         </section>
       {:else}

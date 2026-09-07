@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { BallparkGame, BallparkPayload } from '../lib/types';
-  import { formatDate, formatDelta, formatTime, gameHoldReason, isGameHeld, teamLabel } from '../lib/format';
+  import { formatDate, formatDelta, formatTime, formatTimestamp, gameHoldReason, isGameHeld, teamLabel } from '../lib/format';
   import GameListItem from './GameListItem.svelte';
   import WindFieldStrip from './WindFieldStrip.svelte';
   import { assessOddsFreshness } from '../lib/freshness';
@@ -16,7 +16,6 @@
   let desktop = false;
   let filter: SlateFilter = 'all';
   let sort: SlateSort = 'movement';
-  let ledger = true;
 
   const movementPercent = (game: BallparkGame): number | null => {
     if (isGameHeld(game)) return null;
@@ -44,25 +43,28 @@
     return Math.abs(rightMovement) - Math.abs(leftMovement);
   });
 
-  const temperatureRange = (games: BallparkGame[]): string => {
-    const values = games
-      .filter((game) => !game.weather.dome_active && !isGameHeld(game))
-      .map((game) => game.weather.temperature_f)
-      .filter(Number.isFinite);
-    return values.length ? `${Math.round(Math.min(...values))}–${Math.round(Math.max(...values))}°F` : 'temperature held';
-  };
-
-  const firstPitchRange = (games: BallparkGame[]): string => {
-    const values = games
-      .map((game) => game.game_time)
-      .filter((value) => Number.isFinite(Date.parse(value)))
-      .sort((left, right) => Date.parse(left) - Date.parse(right));
-    if (!values.length) return 'time not reported';
-    if (values.length === 1) return formatTime(values[0]);
-    return `${formatTime(values[0])}–${formatTime(values[values.length - 1])}`;
-  };
-
   const american = (price: number | null): string => price === null ? '—' : `${price > 0 ? '+' : ''}${price}`;
+
+  const windContext = (game: BallparkGame): string => {
+    if (isGameHeld(game)) return 'Weather held';
+    if (game.weather.dome_active || game.weather.roof_state === 'fixed-roof') return 'Roof active';
+    const carry = game.weather.wind_carry_mph;
+    const cross = game.weather.wind_cross_mph;
+    const direction = carry >= 2 ? 'Out' : carry <= -2 ? 'In' : Math.abs(cross) >= 2 ? 'Cross' : 'Light';
+    return `${direction} · ${formatDelta(carry, 1)} carry · ${Math.abs(cross).toFixed(1)} cross`;
+  };
+
+  const exchangeAsk = (game: BallparkGame): string | null => {
+    const market = game.exchange_market;
+    if (!market || market.state !== 'observed_unknown_age' || market.line === null || market.over_ask_cents === null || market.under_ask_cents === null) return null;
+    return `${market.game_phase.replaceAll('_', ' ')} · source age unknown · O ${market.line} YES ${market.over_ask_cents}c (${market.over_ask_dollars}) · U ${market.line} NO ${market.under_ask_cents}c (${market.under_ask_dollars})`;
+  };
+
+  function openBoardDetails(event: MouseEvent, key: string): void {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    onOpenGame(key);
+  }
 
   onMount(() => {
     const media = window.matchMedia('(min-width: 44rem)');
@@ -73,29 +75,20 @@
   });
 
   $: games = sorted(payload.games.filter((game) => filtered(game, filter)), sort);
-  $: lift = payload.games.filter((game) => (movementPercent(game) ?? 0) >= 3).length;
-  $: drag = payload.games.filter((game) => (movementPercent(game) ?? 0) <= -3).length;
   $: verified = payload.games.filter((game) => !isGameHeld(game)).length;
-  $: confirmed = payload.games.filter((game) => game.lineup.state === 'confirmed').length;
+  $: currentSportsbook = payload.games.filter((game) => assessOddsFreshness(game.odds, now).state === 'current').length;
+  $: knownSportsbook = payload.games.filter((game) => assessOddsFreshness(game.odds, now).state !== 'unavailable').length;
+  $: marketSummary = knownSportsbook === 0
+    ? `Sportsbook totals unavailable ${payload.games.length}/${payload.games.length}`
+    : `Current sportsbook totals ${currentSportsbook}/${payload.games.length}`;
 </script>
 
 <section class="view slate-view" aria-labelledby="slate-title">
   <section class="slate-intro">
     <div>
       <p class="eyebrow">{formatDate(payload.date)} · {payload.games.length} {payload.games.length === 1 ? 'game' : 'games'}</p>
-      <h1 id="slate-title">Today’s totals &amp; park wind</h1>
-      <p class="lede">Compare the market, park-relative wind, and game-hour conditions at a glance.</p>
-    </div>
-    <div class="slate-station">
-      <dl class="slate-counts" aria-label="Slate summary">
-        <div><dt>games</dt><dd>{payload.games.length}</dd></div>
-        <div><dt>lift</dt><dd>{lift}</dd></div>
-        <div><dt>drag</dt><dd>{drag}</dd></div>
-      </dl>
-      <div class="slate-synopsis">
-        <div><span>Game window</span><strong>{firstPitchRange(payload.games)} · {temperatureRange(payload.games)}</strong></div>
-        <div><span>Data coverage</span><strong>{verified}/{payload.games.length} weather · {confirmed}/{payload.games.length} lineups</strong></div>
-      </div>
+      <h1 id="slate-title">Ballpark board</h1>
+      <p class="slate-meta">Weather ready {verified}/{payload.games.length} · {marketSummary} · Updated {formatTimestamp(payload.generated_at)}</p>
     </div>
   </section>
 
@@ -117,9 +110,6 @@
         <option value="venue">Venue</option>
       </select>
     </label>
-    <button class="view-toggle" class:active={ledger} type="button" on:click={() => ledger = !ledger} aria-pressed={ledger}>
-      {ledger ? 'Card view' : 'Table view'}
-    </button>
   </section>
 
   <h2 class="visually-hidden" id="games-heading">Games</h2>
@@ -129,11 +119,12 @@
       <strong>No games match this filter.</strong>
       <button type="button" on:click={() => filter = 'all'}>Show the full slate</button>
     </div>
-  {:else if desktop && ledger}
+  {:else if desktop}
+    <p class="board-definition">Weather adjustment changes this park’s normal run environment; it is not a game-score forecast.</p>
     <div class="ledger-wrap">
       <table class="ledger">
         <thead>
-          <tr><th>Matchup / first pitch</th><th>Total · Over / Under · book</th><th>Park wind</th><th>Weather impact</th><th>Open</th></tr>
+          <tr><th>Matchup / first pitch</th><th>Total · Over / Under · book</th><th>Park wind</th><th>Weather adjustment</th></tr>
         </thead>
         <tbody>
           {#each games as game (game.game_pk)}
@@ -141,11 +132,10 @@
             {@const movement = movementPercent(game)}
             {@const market = assessOddsFreshness(game.odds, now)}
             <tr data-tone={isGameHeld(game) ? 'hold' : 'ready'}>
-              <td><strong>{game.away_team} <i>at</i> {game.home_team}</strong><br /><small>{formatTime(game.game_time)} · {game.venue}</small></td>
-              <td>{#if market.state === 'unavailable'}<strong>Unavailable</strong><br /><small>{market.reason}</small>{:else}<strong>{game.odds.line}</strong> <span>O {american(game.odds.over_price)} · U {american(game.odds.under_price)}</span><br /><small>{game.odds.sportsbook_name} · {market.state === 'observed' ? 'observed, age unverified' : market.state}</small>{/if}</td>
-              <td>{isGameHeld(game) ? 'Held' : game.weather.dome_active ? 'Roof active' : `${formatDelta(game.weather.wind_carry_mph, 1)} mph carry`}</td>
+              <td><a class="board-matchup" href={`#game/${key}`} data-game-key={game.game_pk} aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} details`} on:click={(event) => openBoardDetails(event, key)}><strong>{game.away_team} <i>at</i> {game.home_team}</strong><small>{formatTime(game.game_time)} · {game.venue}</small></a></td>
+              <td>{#if exchangeAsk(game)}<strong>Kalshi contract ask</strong><small class="exchange-ask">{exchangeAsk(game)}</small><small class="market-secondary">Sportsbook unavailable</small>{:else if market.state === 'unavailable'}<strong>Sportsbook unavailable</strong>{:else}<strong>{game.odds.line}</strong> <span>O {american(game.odds.over_price)} · U {american(game.odds.under_price)}</span><br /><small>{game.odds.sportsbook_name} · {market.state === 'observed' ? 'observed, age unverified' : market.state}</small>{/if}</td>
+              <td>{windContext(game)}</td>
               <td>{movement == null ? 'Held' : `${formatDelta(movement, 0)}% runs`}<br /><small>{isGameHeld(game) ? gameHoldReason(game) : `${Math.round(game.weather.temperature_f)}°F · ${Math.round(game.weather.humidity_pct)}%`}</small></td>
-              <td><button class="inspect-button" data-game-key={game.game_pk} type="button" aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} details`} on:click={() => onOpenGame(key)}>Inspect</button></td>
             </tr>
           {/each}
         </tbody>

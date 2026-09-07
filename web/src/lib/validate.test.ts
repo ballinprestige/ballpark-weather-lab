@@ -100,4 +100,30 @@ describe('validatePayload', () => {
     payload.games[0].odds.state = 'current';
     expect(() => validatePayload(payload)).toThrow(/trustworthy source update time/i);
   });
+
+  it('keeps a supplemental Kalshi contract ask separate, precise, and explicitly unknown-age', () => {
+    const payload = readyPayload();
+    const observed = {
+      state: 'observed_unknown_age', reason: 'Public API does not provide a quote-update timestamp.', failure_reason: null,
+      provider: 'Kalshi', provider_url: 'https://external-api.kalshi.com/trade-api/v2', event_ticker: 'KXMLBTOTAL-TEST', market_ticker: 'KXMLBTOTAL-TEST-9',
+      slate_date: payload.date, game_pk: payload.games[0].game_pk, game_time: payload.games[0].game_time, market_type: 'total', period: 'full_game', game_phase: 'after_scheduled_start',
+      quote_type: 'contract_ask', condition: 'Over 8.5 runs scored', price_format: 'contract_cents', currency: 'USD', line: 8.5,
+      over_ask_dollars: '0.4955', under_ask_dollars: '0.5045', over_ask_cents: '49.55', under_ask_cents: '50.45', over_ask_size: '12.5', under_ask_size: '3',
+      source_updated_at: null, observed_at: '2026-08-27T16:00:00Z', raw_sha256: 'c'.repeat(64), snapshot_id: 'd'.repeat(64), active: true, source_schema_version: 'kalshi-public-total-v1'
+    };
+    const unavailable = {
+      ...observed, state: 'unavailable', reason: 'No active two-sided quote.', failure_reason: 'no_active_two_sided_quote',
+      game_pk: payload.games[1].game_pk, game_time: payload.games[1].game_time, game_phase: 'unavailable', event_ticker: null, market_ticker: null,
+      condition: null, line: null, over_ask_dollars: null, under_ask_dollars: null, over_ask_cents: null, under_ask_cents: null, over_ask_size: null, under_ask_size: null,
+      observed_at: null, raw_sha256: null, snapshot_id: null, active: false
+    };
+    (payload.games[0] as unknown as Record<string, unknown>).exchange_market = observed;
+    (payload.games[1] as unknown as Record<string, unknown>).exchange_market = unavailable;
+    (payload.health as unknown as Record<string, unknown>).exchange_markets = {
+      state: 'partial', source: 'Kalshi public market-data API', optional: true, observed_unknown_age_games: 1, unavailable_games: 1
+    };
+    expect(validatePayload(payload).games[0].exchange_market?.over_ask_cents).toBe('49.55');
+    observed.over_ask_size = '0';
+    expect(() => validatePayload(payload)).toThrow(/positive decimal string/i);
+  });
 });

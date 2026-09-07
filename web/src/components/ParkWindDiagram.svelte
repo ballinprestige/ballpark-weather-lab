@@ -11,6 +11,10 @@
   $: venueGeometry = findVenueGeometry(geometry, game.home_team);
   $: diagramPath = venueGeometry && geometry ? wallPath(geometry.angles_deg, venueGeometry.wall_distance_ft) : '';
   $: vector = venueGeometry ? parkWindVector(game.weather, venueGeometry.cf_azimuth) : null;
+  // Geometry drives the drawing; published components drive the displayed
+  // value so float recomputation cannot disagree with the slate board.
+  $: displayCarry = game.weather.wind_carry_mph;
+  $: displayCross = game.weather.wind_cross_mph;
   $: weatherReady = isReadyState(game.weather.state);
   $: roofSuppressed = isOutdoorWindSuppressed(game.weather);
   $: unknownRoof = game.weather.roof_state === 'unknown' || game.weather.roof_state === 'unconfirmed';
@@ -44,8 +48,8 @@
 <figure class="instrument-figure park-wind" aria-labelledby={titleId} aria-describedby={descId} style={`--wind-period:${streamPeriod}`}>
   <div class="figure-heading park-heading">
     <div><p class="eyebrow">Park wind diagram</p><h3 id={titleId}>{game.venue}</h3></div>
-    <div class="carry-reading" aria-label={vector ? `Carry ${signed(vector.carryMph)} miles per hour` : 'Wind direction unavailable'}>
-      <span>CARRY</span><strong>{vector && !roofSuppressed ? `${signed(vector.carryMph)} mph` : roofSuppressed ? 'ROOF' : '—'}</strong>
+    <div class="carry-reading" aria-label={vector ? `Carry ${signed(displayCarry)} miles per hour` : 'Wind direction unavailable'}>
+      <span>CARRY</span><strong>{vector && !roofSuppressed ? `${signed(displayCarry)} mph` : roofSuppressed ? 'ROOF' : '—'}</strong>
     </div>
   </div>
 
@@ -69,7 +73,7 @@
         {:else if !vector}<text x="210" y="155" text-anchor="middle" class="diagram-hold">Direction not reported · no vector shown</text>
         {:else if calm}<text x="210" y="155" text-anchor="middle" class="diagram-note">Calm · 0 mph</text>{/if}
       </svg>
-      <dl class="wind-decomposition" aria-label="Park-relative wind decomposition"><div><dt>FROM</dt><dd>{vector ? `${Math.round(vector.fromDeg)}°` : '—'}</dd></div><div><dt>CROSS</dt><dd>{vector && !roofSuppressed ? `${signed(vector.crossMph)} mph` : '—'}</dd></div><div><dt>CF AXIS</dt><dd>{venueGeometry.cf_azimuth}°</dd></div></dl>
+      <dl class="wind-decomposition" aria-label="Park-relative wind decomposition"><div><dt>FROM</dt><dd>{vector ? `${Math.round(vector.fromDeg)}°` : '—'}</dd></div><div><dt>CROSS</dt><dd>{vector && !roofSuppressed ? `${signed(displayCross)} mph` : '—'}</dd></div><div><dt>CF AXIS</dt><dd>{venueGeometry.cf_azimuth}°</dd></div></dl>
     </div>
     <figcaption id={descId}>Reported wind is meteorological <strong>FROM</strong>; streams show physical <strong>TO</strong>, rotated against this venue’s centre-field axis. {roofSuppressed ? 'Outdoor effect is suppressed while the roof is active.' : `Weather valid ${formatTimestamp(game.weather.valid_at)}.`}</figcaption>
   {:else}

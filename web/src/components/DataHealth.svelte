@@ -11,7 +11,7 @@
   export let isArchive = false;
   export let isStale = false;
 
-  $: lanes = Object.entries(payload.health) as Array<[keyof BallparkPayload['health'], BallparkPayload['health'][keyof BallparkPayload['health']]]>;
+  $: lanes = Object.entries(payload.health).filter(([, lane]) => lane !== undefined) as Array<[keyof BallparkPayload['health'], NonNullable<BallparkPayload['health'][keyof BallparkPayload['health']]>]>;
   $: weatherReady = payload.games.filter((game) => isReadyState(game.weather.state)).length;
   $: factorReady = payload.games.filter((game) => isReadyState(game.factors.state)).length;
   $: lineupsReady = payload.games.filter((game) => isReadyState(game.lineup.state)).length;
@@ -47,7 +47,7 @@
     <div class="section-heading">
       <div>
         <p class="eyebrow">Dependency state</p>
-        <h2 id="lanes-title">Five publication lanes</h2>
+        <h2 id="lanes-title">Publication lanes</h2>
       </div>
       <span class="section-note">Market failures remain explicit</span>
     </div>

@@ -18,6 +18,10 @@
   $: titleId = `game-detail-title-${game.game_pk}`;
   $: lineupReady = isReadyState(game.lineup.state);
   $: marketFreshness = assessOddsFreshness(game.odds, now);
+  $: exchangeAvailable = game.exchange_market?.state === 'observed_unknown_age'
+    && game.exchange_market.line !== null
+    && game.exchange_market.over_ask_cents !== null
+    && game.exchange_market.under_ask_cents !== null;
   const american = (price: number | null): string => price === null ? '—' : `${price > 0 ? '+' : ''}${price}`;
 </script>
 
@@ -106,6 +110,23 @@
       <p class="source-line"><span>{game.odds.provider}</span><span>Source updated {formatTimestamp(game.odds.source_updated_at)}</span><span>Retrieved {formatTimestamp(game.odds.observed_at)}</span></p>
     {/if}
   </section>
+
+  {#if exchangeAvailable}
+    <section class="exchange-market" aria-labelledby={`exchange-${game.game_pk}`}>
+      <div class="section-heading compact">
+        <div><p class="eyebrow">Supplemental exchange evidence</p><h3 id={`exchange-${game.game_pk}`}>Kalshi contract asks</h3></div>
+        <StateBadge state="observed_unknown_age" label="Observed · source age unknown" />
+      </div>
+      <dl class="market-grid exchange-grid">
+        <div><dt>Total condition</dt><dd>Over {game.exchange_market?.line}</dd></div>
+        <div><dt>YES ask</dt><dd>{game.exchange_market?.over_ask_cents}c <small>({game.exchange_market?.over_ask_dollars})</small></dd></div>
+        <div><dt>NO ask</dt><dd>{game.exchange_market?.under_ask_cents}c <small>({game.exchange_market?.under_ask_dollars})</small></dd></div>
+        <div><dt>Market phase</dt><dd>{game.exchange_market?.game_phase?.replaceAll('_', ' ')}</dd></div>
+      </dl>
+      <p class="market-warning">Contract asks are quoted in cents, not American sportsbook odds. Source update age is unknown; fees are excluded and this does not satisfy sportsbook coverage.</p>
+      <p class="source-line"><span>Kalshi</span><span>Observed {formatTimestamp(game.exchange_market?.observed_at ?? null)}</span><span>{game.exchange_market?.market_ticker}</span></p>
+    </section>
+  {/if}
 
   <DecompositionLadder {game} />
 

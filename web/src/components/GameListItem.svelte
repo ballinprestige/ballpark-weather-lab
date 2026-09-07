@@ -9,8 +9,18 @@
 
   $: held = isGameHeld(game);
   $: market = assessOddsFreshness(game.odds, now);
-  $: wind = held ? 'Weather held' : game.weather.dome_active ? 'Roof active' : `${formatDelta(game.weather.wind_carry_mph, 1)} mph carry`;
+  $: wind = held
+    ? 'Weather held'
+    : game.weather.dome_active || game.weather.roof_state === 'fixed-roof'
+      ? 'Roof active'
+      : `${game.weather.wind_carry_mph >= 2 ? 'Out' : game.weather.wind_carry_mph <= -2 ? 'In' : Math.abs(game.weather.wind_cross_mph) >= 2 ? 'Cross' : 'Light'} · ${formatDelta(game.weather.wind_carry_mph, 1)} carry`;
   $: weather = held ? gameHoldReason(game) : `${Math.round(game.weather.temperature_f)}°F · ${Math.round(game.weather.humidity_pct)}%`;
+  $: exchange = game.exchange_market?.state === 'observed_unknown_age'
+    && game.exchange_market.line !== null
+    && game.exchange_market.over_ask_cents !== null
+    && game.exchange_market.under_ask_cents !== null
+      ? `${game.exchange_market.game_phase.replaceAll('_', ' ')} · source age unknown · O ${game.exchange_market.line} YES ${game.exchange_market.over_ask_cents}c (${game.exchange_market.over_ask_dollars}) · U ${game.exchange_market.line} NO ${game.exchange_market.under_ask_cents}c (${game.exchange_market.under_ask_dollars})`
+      : null;
   const american = (price: number | null): string => price === null ? '—' : `${price > 0 ? '+' : ''}${price}`;
 
   function openDetails(event: MouseEvent): void {
@@ -24,7 +34,8 @@
   <a href={`#game/${game.game_pk}`} data-game-key={game.game_pk} aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} details, ${formatTime(game.game_time)}`} on:click={openDetails}>
     <span class="compact-matchup"><strong>{game.away_team}</strong><i>at</i><strong>{game.home_team}</strong><small>{formatTime(game.game_time)} · {game.venue}</small></span>
     <span class="compact-market">
-      {#if market.state === 'unavailable'}<strong>Market unavailable</strong><small>{market.reason ?? 'No verified quote.'}</small>
+      {#if exchange}<strong>Kalshi contract ask</strong><small>{exchange}</small><small class="market-secondary">Sportsbook unavailable</small>
+      {:else if market.state === 'unavailable'}<strong>Sportsbook unavailable</strong>
       {:else}<strong>{game.odds.line}</strong><small>O {american(game.odds.over_price)} · U {american(game.odds.under_price)} · {game.odds.sportsbook_name}{market.state === 'observed' ? ' · observed, age unverified' : ''}</small>{/if}
     </span>
     <span class="compact-weather"><strong>{wind}</strong><small>{weather}</small></span>

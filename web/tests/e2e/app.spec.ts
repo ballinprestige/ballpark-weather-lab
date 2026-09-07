@@ -93,17 +93,11 @@ test('desktop employer path exposes the complete evidence chain', async ({ page 
   await expect(page.getByText('READY', { exact: true })).toBeVisible();
   await expect(page.getByRole('alert', { name: 'Stale publication warning' })).toHaveCount(0);
   await expect(page.getByText(/Aug 27, 2026 · 2 games/i)).toBeVisible();
-  await expect(page.locator('h1')).toHaveText('Daily park factors');
+  await expect(page.locator('h1')).toHaveText('Ballpark board');
   await expect(page.getByRole('heading', { name: 'Slate wind comparison' })).toBeVisible();
   await expect(page.getByRole('table')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Card view' })).toBeVisible();
-  const [countsBox, synopsisBox] = await Promise.all([
-    page.locator('.slate-counts').boundingBox(),
-    page.locator('.slate-synopsis').boundingBox()
-  ]);
-  expect(countsBox).not.toBeNull();
-  expect(synopsisBox).not.toBeNull();
-  expect((countsBox?.x ?? 0) + (countsBox?.width ?? 0)).toBeLessThanOrEqual(synopsisBox?.x ?? 0);
+  await expect(page.getByText('Weather adjustment changes this park’s normal run environment', { exact: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Card view|Table view/ })).toHaveCount(0);
   await expect(page.getByTestId('game-detail')).toHaveCount(0);
   await expect(page.getByText('SHA ', { exact: false }).first()).toBeVisible();
   if (process.env.CAPTURE_DEMO === '1') {
@@ -134,7 +128,7 @@ test('desktop employer path exposes the complete evidence chain', async ({ page 
 
   await page.getByRole('link', { name: 'Data Health' }).click();
   await expect(page.getByRole('link', { name: 'Data Health' })).toHaveAttribute('aria-current', 'page');
-  await expect(page.getByRole('heading', { name: 'Five publication lanes' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Publication lanes' })).toBeVisible();
   await expect(page.getByText('Payload SHA-256')).toBeVisible();
   await expect(page.getByText('Publication state').locator('..')).toContainText('Ready');
   await expect(page.getByText('Freshness').locator('..')).toContainText('Current');
@@ -164,8 +158,8 @@ test('quoted full-game totals show both actual prices and stale or missing marke
   await page.goto('/#slate');
   await expect(page.getByRole('row', { name: /SEA at BOS/i })).toContainText('O -105 / U -115');
   await expect(page.getByRole('row', { name: /SD at SF/i })).toContainText('bet365 · stale');
-  await page.getByRole('button', { name: /Open San Diego Padres.*San Francisco Giants.*details/i }).click();
-  await expect(page.getByRole('heading', { name: 'Full-game total' })).toBeVisible();
+  await page.getByRole('link', { name: /Open San Diego Padres.*San Francisco Giants.*details/i }).click();
+  await expect(page.getByRole('heading', { name: 'Total, Over & Under' })).toBeVisible();
   await expect(page.getByText('Stale quote:', { exact: false })).toContainText('not current');
   await expect(page.getByText('Source updated', { exact: false })).toBeVisible();
 });
@@ -176,7 +170,7 @@ test('mobile slate and game details remain compact and touch safe', async ({ pag
   await page.goto('/#slate');
 
   const second = page.getByRole('link', { name: /Open San Diego Padres.*San Francisco Giants.*details/i });
-  await expect(page.locator('h1')).toHaveText('Daily park factors');
+  await expect(page.locator('h1')).toHaveText('Ballpark board');
   await expect(page.getByTestId('game-detail')).toHaveCount(0);
   const [gridBox, windBox] = await Promise.all([
     page.locator('.game-grid').boundingBox(),
@@ -195,7 +189,7 @@ test('mobile slate and game details remain compact and touch safe', async ({ pag
   await expect(page).toHaveURL(/#game\/1002$/);
   const stationHeading = page.getByRole('heading', { name: /San Diego Padres at San Francisco Giants/i });
   await expect(stationHeading).toBeFocused();
-  await expect(page.getByRole('link', { name: 'Back to daily park factors' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Back to ballpark board' })).toBeVisible();
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
   await expect(stationHeading).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Park wind diagram' })).toBeVisible();
@@ -207,9 +201,9 @@ test('mobile slate and game details remain compact and touch safe', async ({ pag
   expect(tooSmall).toEqual([]);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
-  await page.getByRole('link', { name: 'Back to daily park factors' }).click();
+  await page.getByRole('link', { name: 'Back to ballpark board' }).click();
   await expect(page).toHaveURL(/#slate$/);
-  await expect(page.locator('h1')).toHaveText('Daily park factors');
+  await expect(page.locator('h1')).toHaveText('Ballpark board');
   expect(Math.abs(await page.evaluate(() => window.scrollY) - slateScrollY)).toBeLessThanOrEqual(2);
   await expect(second).toBeFocused();
 });
@@ -223,8 +217,7 @@ test('single-game mobile wind strip keeps its game in view', async ({ page }, te
 
   const scroller = page.locator('.wind-field__scroller');
   await expect(page.getByRole('heading', { name: 'Slate wind comparison' })).toBeVisible();
-  const firstPitchText = await page.locator('.slate-synopsis strong').first().textContent();
-  expect(firstPitchText?.split('·')[0]).not.toContain('–');
+  await expect(page.getByText(/Aug 27, 2026 · 1 game/i)).toBeVisible();
   const dimensions = await scroller.evaluate((element) => ({
     clientWidth: element.clientWidth,
     scrollWidth: element.scrollWidth
@@ -240,7 +233,23 @@ test('field instrument keeps a real wind vector, roof hold, and missing directio
   await expect(page.locator('.wind-stream')).toHaveCount(4);
   await expect(page.locator('.wind-decomposition')).toContainText('FROM');
   await expect(page.locator('.wind-decomposition')).toContainText('CROSS');
-  await expect(page.getByRole('heading', { name: 'Full-game total' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Total, Over & Under' })).toBeVisible();
+  const samples = page.getByRole('tab', { name: /center carry|high air/i });
+  await expect(samples).toHaveCount(2);
+  await samples.first().focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(samples.nth(1)).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Home');
+  await expect(samples.first()).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('End');
+  await expect(samples.nth(1)).toHaveAttribute('aria-selected', 'true');
+  await samples.first().click();
+  const [neutralPath, weatherPath] = await Promise.all([
+    page.locator('.trajectory-neutral').getAttribute('d'),
+    page.locator('.trajectory-weather').getAttribute('d')
+  ]);
+  const finalX = (path: string | null) => Number((path ?? '').trim().split(/[ L]/).filter(Boolean).at(-1)?.split(',')[0]);
+  expect(finalX(weatherPath)).toBeGreaterThan(finalX(neutralPath));
 
   payload.games[0].weather.roof_state = 'fixed-roof';
   payload.games[0].weather.dome_active = true;
@@ -265,42 +274,29 @@ test('319px game detail retains the field and avoids horizontal overflow', async
   await page.goto('/#game/1002');
   await expect(page.getByRole('heading', { name: 'Park wind diagram' })).toBeVisible();
   await expect(page.locator('.park-wind')).toContainText('CARRY');
-  await expect(page.getByRole('heading', { name: 'Full-game total' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Total, Over & Under' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });
 
-test('a full fifteen-game slate defaults to the table and retains the responsive card path', async ({ page }, testInfo) => {
+test('a full fifteen-game slate stays a compact, sortable table', async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith('desktop'));
   await mockPublication(page, fifteenGamePayload());
   await page.goto('/#slate');
 
   await expect(page.getByRole('table')).toBeVisible();
   await expect(page.getByRole('row')).toHaveCount(16);
-  await page.getByRole('button', { name: 'Card view' }).click();
-  const cards = page.locator('.game-card');
-  await expect(cards).toHaveCount(15);
-  const boxes = await cards.evaluateAll((elements) => elements.slice(0, 4).map((element) => element.getBoundingClientRect().toJSON()));
-  expect(boxes[0].y).toBe(boxes[1].y);
-  expect(boxes[1].y).toBe(boxes[2].y);
-  expect(boxes[3].y).toBeGreaterThan(boxes[0].y);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 
-  const firstCard = cards.first().getByRole('link');
-  await expect(firstCard).toHaveAccessibleName(/Arizona Diamondbacks.*Colorado Rockies/i);
+  const firstMatchup = page.locator('.ledger tbody tr').first().getByRole('link');
+  await expect(firstMatchup).toHaveAccessibleName(/Arizona Diamondbacks.*Colorado Rockies/i);
   await page.locator('.sort-control select').selectOption('time');
-  await expect(firstCard).toHaveAccessibleName(/Atlanta Braves.*Miami Marlins/i);
+  await expect(firstMatchup).toHaveAccessibleName(/Atlanta Braves.*Miami Marlins/i);
   await page.locator('.sort-control select').selectOption('wind');
-  await expect(firstCard).toHaveAccessibleName(/Washington Nationals.*Los Angeles Dodgers/i);
+  await expect(firstMatchup).toHaveAccessibleName(/Washington Nationals.*Los Angeles Dodgers/i);
   await page.locator('.sort-control select').selectOption('venue');
-  await expect(firstCard).toHaveAccessibleName(/Chicago Cubs.*Milwaukee Brewers/i);
+  await expect(firstMatchup).toHaveAccessibleName(/Chicago Cubs.*Milwaukee Brewers/i);
   await page.locator('.sort-control select').selectOption('movement');
-  await expect(firstCard).toHaveAccessibleName(/Arizona Diamondbacks.*Colorado Rockies/i);
-
-  await page.getByRole('button', { name: 'Table view' }).click();
-  await expect(page.getByRole('table')).toBeVisible();
-  await expect(page.getByRole('row')).toHaveCount(16);
-  await page.getByRole('button', { name: 'Card view' }).click();
-  await expect(cards).toHaveCount(15);
+  await expect(firstMatchup).toHaveAccessibleName(/Arizona Diamondbacks.*Colorado Rockies/i);
 });
 
 test('an older current release is labeled stale and cannot present as ready', async ({ page }, testInfo) => {
@@ -342,26 +338,23 @@ test('a missing-weather game is held without hiding its valid neighbor', async (
   test.skip(!testInfo.project.name.startsWith('desktop'));
   await mockPublication(page, missingWeatherPayload());
   await page.goto('/#slate');
-  await page.getByRole('button', { name: 'Card view' }).click();
-  await expect(page.getByText('RUNS PF 1.084')).toBeVisible();
-  await expect(page.getByText('Weather hold')).toBeVisible();
+  await expect(page.getByRole('row', { name: /SEA at BOS/i })).toContainText('runs');
+  await expect(page.getByRole('row', { name: /SD at SF/i })).toContainText('Weather held');
   for (const option of ['time', 'wind', 'venue', 'movement']) {
     await page.locator('.sort-control select').selectOption(option);
-    await expect(page.locator('.game-card').last().getByRole('link')).toHaveAccessibleName(/San Diego Padres.*San Francisco Giants/i);
+    await expect(page.locator('.ledger tbody tr').last().getByRole('link')).toHaveAccessibleName(/San Diego Padres.*San Francisco Giants/i);
   }
   await page.getByRole('button', { name: 'Open air' }).click();
   await expect(page.getByRole('link', { name: /Open San Diego Padres.*San Francisco Giants.*details/i })).toHaveCount(0);
   await page.getByRole('button', { name: 'Incomplete' }).click();
-  await expect(page.locator('.game-card')).toHaveCount(1);
-  await expect(page.locator('.game-card').getByRole('link')).toHaveAccessibleName(/San Diego Padres.*San Francisco Giants/i);
+  await expect(page.locator('.ledger tbody tr')).toHaveCount(1);
+  await expect(page.locator('.ledger tbody tr').getByRole('link')).toHaveAccessibleName(/San Diego Padres.*San Francisco Giants/i);
   await page.getByRole('button', { name: 'All' }).click();
-  await page.getByRole('button', { name: 'Table view' }).click();
   const heldRow = page.getByRole('row', { name: /SD at SF/i });
   await expect(heldRow).not.toContainText('0.988');
   await expect(heldRow).not.toContainText('0.976');
   await expect(heldRow).not.toContainText('70°');
   await expect(heldRow).not.toContainText('100.0');
-  await page.getByRole('button', { name: 'Card view' }).click();
   await page.getByRole('link', { name: /Open San Diego Padres.*San Francisco Giants.*details/i }).click();
   await expect(page.getByTestId('weather-hold')).toContainText('Weather-adjusted headline withheld');
   await expect(page.getByText(/hourly response did not include/i).first()).toBeVisible();
@@ -387,7 +380,7 @@ test('a release hash mismatch fails closed before slate values render', async ({
   await page.goto('/#slate');
   await expect(page.getByRole('heading', { name: 'Release verification failed' })).toBeVisible();
   await expect(page.getByText(/publication hash mismatch/i)).toBeVisible();
-  await expect(page.getByText('Daily park factors', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Ballpark board', { exact: true })).toHaveCount(0);
   await expect(page.getByText('RUNS PF 1.084')).toHaveCount(0);
 });
 
