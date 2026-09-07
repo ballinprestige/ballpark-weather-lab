@@ -68,6 +68,9 @@ jobs:
             echo "Unsupported Node runtime: $node_version (need >=22.12, <23)" >&2
             exit 1
           fi
+          requirements_lock_sha="$(sha256sum requirements.lock | awk '{print $1}')"
+          verify_requirements_sha="$(sha256sum .github/requirements-verify.txt | awk '{print $1}')"
+          package_lock_sha="$(sha256sum web/package-lock.json | awk '{print $1}')"
           {
             echo "### PR verification receipt"
             echo "- Event: \`$EVENT_NAME\`"
@@ -80,8 +83,9 @@ jobs:
             echo "- Runner accepted trigger at: \`$(date -u +'%Y-%m-%dT%H:%M:%SZ')\`"
             echo "- Python: \`$(python --version)\`"
             echo "- Node: \`$node_version\`"
-            echo "- requirements.lock SHA-256: \`$(sha256sum requirements.lock | awk '{print $1}')\`"
-            echo "- web/package-lock.json SHA-256: \`$(sha256sum web/package-lock.json | awk '{print $1}')\`"
+            echo "- requirements.lock SHA-256: \`$requirements_lock_sha\`"
+            echo "- .github/requirements-verify.txt SHA-256: \`$verify_requirements_sha\`"
+            echo "- web/package-lock.json SHA-256: \`$package_lock_sha\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install locked dependencies
@@ -89,6 +93,8 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check --require-hashes -r requirements.lock
+          python -m pip install --disable-pip-version-check --only-binary=:all: \
+            --require-hashes -r .github/requirements-verify.txt
           python -m pip install --disable-pip-version-check --no-build-isolation --no-deps -e .
           npm ci --prefix web
 

@@ -16,7 +16,8 @@ concurrency group cancels a superseded proposed revision; the one job has a 30-m
 After checkout, the job fails unless `git rev-parse HEAD` equals the requested PR-head SHA. Its
 summary receipt records the event, event ref, event merge SHA (`github.sha`), requested PR-head
 SHA, actual checkout SHA, PR number/ref, UTC start, runtime versions, and SHA-256 identities of
-`requirements.lock` and `web/package-lock.json`. The event merge SHA and tested head SHA are
+`requirements.lock`, `.github/requirements-verify.txt`, and `web/package-lock.json`. The event
+merge SHA and tested head SHA are
 deliberately distinct fields: a `pull_request` check can be associated with GitHub's merge
 identity while this workflow deliberately checks out the proposed head tree. A hosted receipt and
 strict up-to-date rule are needed to prove which revision GitHub requires before merge.
@@ -30,6 +31,11 @@ desktop/mobile Chromium suite. The Python verification step unconditionally runs
 `python scripts/check_verify_workflow.py` before test discovery. No job or required step may use
 an `if` condition or `continue-on-error` value/expression.
 
+The validator uses PyYAML 6.0.2 from the separate, hash-pinned
+`.github/requirements-verify.txt`; it does not alter application dependencies or
+`requirements.lock`. It safely parses one YAML document, rejects aliases, merge keys, and duplicate
+mapping keys, then compares the parsed document to the complete reviewed workflow template.
+
 ## Literal clean-run validation
 
 Run these commands from a fresh checkout with Python 3.12 and Node in the declared range. They
@@ -40,6 +46,8 @@ remote ruleset is enforced.
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install --disable-pip-version-check --require-hashes -r requirements.lock
+python -m pip install --disable-pip-version-check --only-binary=:all: --require-hashes \
+  -r .github/requirements-verify.txt
 python -m pip install --disable-pip-version-check --no-build-isolation --no-deps -e .
 npm ci --prefix web
 python -m ruff check src tests scripts
@@ -61,10 +69,12 @@ python -m pytest tests/test_verify_workflow.py
 The final test deliberately runs a process that exits 23 and asserts that its following command
 is not reached (`bash -euo pipefail` on the Linux runner; `cmd`'s `&&` equivalent on a Windows
 author machine without Bash). Other focused mutations make the job conditional, hide `pytest` in
-an `if false` shell branch, use expression-form `continue-on-error`, or add a `write-all` second
-job; each must fail the validator. The validator recognizes only the exact allowlisted job, step,
-permission, action-input, and required-command structure. This is intentionally stricter than a
-general YAML parser: any workflow-shape change requires an explicit validator/test update.
+an `if false` shell branch, use expression-form `continue-on-error`, add a `write-all` second job,
+use spaced YAML keys, add an ignored bare list item, replace Bash with a failure-swallowing shell,
+overwrite the checkout receipt variable, alter triggers, or use duplicate/alias YAML constructs.
+Each must fail the validator. It recognizes only the exact semantic job, step, permission,
+action-input, environment, shell, trigger, and command structure. Any workflow shape change
+requires an explicit template/test update.
 
 These are safe local emulations of failure propagation, not a substitute for opening an untrusted
 hosted PR with a failing change.

@@ -1,314 +1,212 @@
 #!/usr/bin/env python3
-"""Fail-closed contract checks for the untrusted-pull-request workflow.
+"""Semantically validate the exact nondeploying pull-request workflow.
 
-This is intentionally dependency-free so it runs from requirements.lock.  It is
-not a replacement for GitHub's workflow parser: CI and reviewers also run
-actionlint.  The checks here protect the security and execution invariants that
-are specific to Ballpark's verification lane and deliberately fail on a
-mutated unsafe workflow.
+PyYAML is installed from .github/requirements-verify.txt with hashes.  This
+validator rejects duplicate keys, aliases, merge keys, multiple documents, and
+any semantic difference from the reviewed workflow template.  actionlint is a
+separate generic GitHub Actions/YAML syntax check.
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import re
 import sys
 from pathlib import Path
 
+import yaml
+from yaml.events import AliasEvent
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WORKFLOW = ROOT / ".github" / "workflows" / "verify.yml"
-SHA_PIN = r"[0-9a-f]{40}"
-EXPECTED_TOP_LEVEL_KEYS = ("name", "on", "permissions", "concurrency", "jobs")
-EXPECTED_JOB_KEYS = ("name", "runs-on", "timeout-minutes", "permissions", "env", "steps")
-EXPECTED_STEP_NAMES = (
-    "Check out the exact proposed revision without persisted credentials",
-    "Set up locked Python runtime",
-    "Set up supported Node runtime",
-    "Assert exact checkout and record event, runtime, and lock identities",
-    "Install locked dependencies",
-    "Verify Python quality, regressions, contracts, and artifacts",
-    "Verify frontend types, units, build, and budget",
-    "Install bounded browser-test runtime",
-    "Verify desktop and mobile browser paths",
+
+
+class WorkflowLoader(yaml.SafeLoader):
+    """Safe loader with YAML 1.2 booleans and no ambiguous mapping features."""
+
+
+WorkflowLoader.yaml_implicit_resolvers = copy.deepcopy(yaml.SafeLoader.yaml_implicit_resolvers)
+for character, resolvers in WorkflowLoader.yaml_implicit_resolvers.items():
+    WorkflowLoader.yaml_implicit_resolvers[character] = [
+        resolver for resolver in resolvers if resolver[0] != "tag:yaml.org,2002:bool"
+    ]
+WorkflowLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:bool", re.compile(r"^(?:true|false)$", re.IGNORECASE), list("tTfF")
 )
-EXPECTED_RUNS = {
-    "Install locked dependencies": (
-        "set -euo pipefail",
-        "python -m pip install --disable-pip-version-check --require-hashes -r requirements.lock",
-        "python -m pip install --disable-pip-version-check --no-build-isolation --no-deps -e .",
-        "npm ci --prefix web",
-    ),
-    "Verify Python quality, regressions, contracts, and artifacts": (
-        "set -euo pipefail",
-        "python -m ruff check src tests scripts",
-        "python scripts/check_verify_workflow.py",
-        "python -m pytest",
-        "python -m ballpark verify-artifacts",
-    ),
-    "Verify frontend types, units, build, and budget": (
-        "set -euo pipefail",
-        "npm run verify --prefix web",
-    ),
-    "Install bounded browser-test runtime": (
-        "set -euo pipefail",
-        "npx --prefix web playwright install --with-deps chromium",
-    ),
-    "Verify desktop and mobile browser paths": (
-        "set -euo pipefail",
-        "npm run test:e2e --prefix web",
-    ),
-}
 
 
-def _has(text: str, pattern: str) -> bool:
-    return re.search(pattern, text, flags=re.MULTILINE) is not None
+def _compose_node(self: WorkflowLoader, parent: object, index: object) -> yaml.Node:
+    if self.check_event(AliasEvent):
+        raise yaml.YAMLError("aliases are prohibited in the verification workflow")
+    return yaml.SafeLoader.compose_node(self, parent, index)
 
 
-def _indent(line: str) -> int:
-    return len(line) - len(line.lstrip(" "))
+def _construct_mapping(
+    self: WorkflowLoader, node: yaml.MappingNode, deep: bool = False
+) -> dict[object, object]:
+    mapping: dict[object, object] = {}
+    for key_node, value_node in node.value:
+        if key_node.tag == "tag:yaml.org,2002:merge":
+            raise yaml.YAMLError("merge keys are prohibited in the verification workflow")
+        key = self.construct_object(key_node, deep=deep)
+        try:
+            if key in mapping:
+                raise yaml.YAMLError(f"duplicate mapping key: {key!r}")
+        except TypeError as error:
+            raise yaml.YAMLError("mapping keys must be scalar values") from error
+        mapping[key] = self.construct_object(value_node, deep=deep)
+    return mapping
 
 
-def _scope(lines: list[str], start: int, parent_indent: int) -> list[str]:
-    """Return the indented YAML block following a mapping key at ``start``."""
-    end = start + 1
-    while end < len(lines):
-        line = lines[end]
-        if line.strip() and not line.lstrip().startswith("#") and _indent(line) <= parent_indent:
-            break
-        end += 1
-    return lines[start + 1 : end]
+WorkflowLoader.compose_node = _compose_node
+WorkflowLoader.construct_mapping = _construct_mapping
+
+EXPECTED_WORKFLOW_TEMPLATE = r"""name: PR verification
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-verification-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-verify:
+    name: PR verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      PYTHONPATH: src
+    steps:
+      - name: Check out the exact proposed revision without persisted credentials
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up locked Python runtime
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock
+
+      - name: Set up supported Node runtime
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: "22.12.0"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Assert exact checkout and record event, runtime, and lock identities
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_MERGE_SHA: ${{ github.sha }}
+          PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+          PULL_REQUEST_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          REQUESTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          actual_checkout_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_checkout_sha" != "$REQUESTED_HEAD_SHA" ]]; then
+            echo "Checked-out SHA does not match requested PR head SHA" >&2
+            echo "requested=$REQUESTED_HEAD_SHA actual=$actual_checkout_sha" >&2
+            exit 1
+          fi
+          node_version="$(node --version)"
+          if [[ ! "$node_version" =~ ^v22\.(1[2-9]|[2-9][0-9])\. ]]; then
+            echo "Unsupported Node runtime: $node_version (need >=22.12, <23)" >&2
+            exit 1
+          fi
+          requirements_lock_sha="$(sha256sum requirements.lock | awk '{print $1}')"
+          verify_requirements_sha="$(sha256sum .github/requirements-verify.txt | awk '{print $1}')"
+          package_lock_sha="$(sha256sum web/package-lock.json | awk '{print $1}')"
+          {
+            echo "### PR verification receipt"
+            echo "- Event: \`$EVENT_NAME\`"
+            echo "- Event ref: \`$EVENT_REF\`"
+            echo "- Event merge SHA: \`$EVENT_MERGE_SHA\`"
+            echo "- Pull request: \`#$PULL_REQUEST_NUMBER\`"
+            echo "- Proposed ref: \`$PULL_REQUEST_HEAD_REF\`"
+            echo "- Requested head SHA: \`$REQUESTED_HEAD_SHA\`"
+            echo "- Actual checkout SHA: \`$actual_checkout_sha\`"
+            echo "- Runner accepted trigger at: \`$(date -u +'%Y-%m-%dT%H:%M:%SZ')\`"
+            echo "- Python: \`$(python --version)\`"
+            echo "- Node: \`$node_version\`"
+            echo "- requirements.lock SHA-256: \`$requirements_lock_sha\`"
+            echo "- .github/requirements-verify.txt SHA-256: \`$verify_requirements_sha\`"
+            echo "- web/package-lock.json SHA-256: \`$package_lock_sha\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements.lock
+          python -m pip install --disable-pip-version-check --only-binary=:all: \
+            --require-hashes -r .github/requirements-verify.txt
+          python -m pip install --disable-pip-version-check --no-build-isolation --no-deps -e .
+          npm ci --prefix web
+
+      - name: Verify Python quality, regressions, contracts, and artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m ruff check src tests scripts
+          python scripts/check_verify_workflow.py
+          python -m pytest
+          python -m ballpark verify-artifacts
+
+      - name: Verify frontend types, units, build, and budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run verify --prefix web
+
+      - name: Install bounded browser-test runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --prefix web playwright install --with-deps chromium
+
+      - name: Verify desktop and mobile browser paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run test:e2e --prefix web
+"""
 
 
-def _direct_entries(lines: list[str], indent: int) -> list[tuple[str, str]]:
-    pattern = re.compile(rf"^ {{{indent}}}([A-Za-z][\w-]*):(?:\s*(.*))?$")
-    entries: list[tuple[str, str]] = []
-    for line in lines:
-        match = pattern.match(line)
-        if match:
-            entries.append((match.group(1), match.group(2).strip()))
-    return entries
+def _load_single_document(text: str) -> object:
+    documents = list(yaml.load_all(text, Loader=WorkflowLoader))
+    if len(documents) != 1:
+        raise yaml.YAMLError("workflow must contain exactly one YAML document")
+    return documents[0]
 
 
-def _entry_value(entries: list[tuple[str, str]], key: str) -> str | None:
-    values = [value for candidate, value in entries if candidate == key]
-    return values[0] if len(values) == 1 else None
-
-
-def _run_lines(step: list[str]) -> tuple[str, ...] | None:
-    run_index = next((index for index, line in enumerate(step) if line == "        run: |"), None)
-    if run_index is None:
-        return None
-    body = step[run_index + 1 :]
-    if any(line.strip() and _indent(line) < 10 for line in body):
-        return None
-    return tuple(line[10:] for line in body if line.strip())
-
-
-def _validate_structure(lines: list[str]) -> list[str]:
-    """Validate the exact allowlisted GitHub Actions job and step graph.
-
-    This intentionally supports only the committed workflow shape.  A YAML formatting or
-    structural change fails closed and must be reviewed alongside an updated validator.  actionlint
-    separately validates general GitHub Actions/YAML syntax.
-    """
-    errors: list[str] = []
-    if any("\t" in line for line in lines):
-        errors.append("tabs are not allowed in the workflow structure")
-
-    top_entries = _direct_entries(lines, 0)
-    if tuple(key for key, _ in top_entries) != EXPECTED_TOP_LEVEL_KEYS:
-        errors.append("top-level workflow keys differ from the approved structure")
-
-    jobs_index = next((index for index, line in enumerate(lines) if line == "jobs:"), None)
-    if jobs_index is None:
-        return [*errors, "missing jobs mapping"]
-    jobs = _scope(lines, jobs_index, 0)
-    job_entries = _direct_entries(jobs, 2)
-    if job_entries != [("pr-verify", "")]:
-        errors.append("workflow must contain exactly one unconditional pr-verify job")
-        return errors
-
-    job_start = next(
-        index for index, line in enumerate(lines) if line == "  pr-verify:"
-    )
-    job = _scope(lines, job_start, 2)
-    job_entries = _direct_entries(job, 4)
-    if tuple(key for key, _ in job_entries) != EXPECTED_JOB_KEYS:
-        errors.append("pr-verify job keys differ from the approved unconditional structure")
-    if _entry_value(job_entries, "name") != "PR verification":
-        errors.append("pr-verify must retain the stable PR verification check name")
-    if _entry_value(job_entries, "runs-on") != "ubuntu-latest":
-        errors.append("pr-verify must run on ubuntu-latest")
-    if _entry_value(job_entries, "timeout-minutes") != "30":
-        errors.append("pr-verify must retain its 30-minute timeout")
-
-    root_permissions_index = next(
-        (index for index, line in enumerate(lines) if line == "permissions:"), None
-    )
-    if root_permissions_index is None or _direct_entries(
-        _scope(lines, root_permissions_index, 0), 2
-    ) != [("contents", "read")]:
-        errors.append("root permissions must be exactly contents: read")
-
-    job_permissions_index = next(
-        (index for index, line in enumerate(lines) if line == "    permissions:"), None
-    )
-    if job_permissions_index is None or _direct_entries(
-        _scope(lines, job_permissions_index, 4), 6
-    ) != [("contents", "read")]:
-        errors.append("pr-verify permissions must be exactly contents: read")
-
-    job_env_index = next((index for index, line in enumerate(lines) if line == "    env:"), None)
-    if job_env_index is None or _direct_entries(_scope(lines, job_env_index, 4), 6) != [
-        ("PYTHONPATH", "src")
-    ]:
-        errors.append("pr-verify environment must be exactly PYTHONPATH: src")
-
-    if _has("\n".join(lines), r"(?m)^\s*(?:if|continue-on-error):"):
-        errors.append("job and step conditions or continue-on-error are prohibited")
-
-    steps_index = next((index for index, line in enumerate(lines) if line == "    steps:"), None)
-    if steps_index is None:
-        return [*errors, "missing pr-verify steps"]
-    steps = _scope(lines, steps_index, 4)
-    step_starts = [
-        index for index, line in enumerate(steps) if re.match(r"^      - ", line)
-    ]
-    step_names: list[str] = []
-    step_blocks: dict[str, list[str]] = {}
-    for position, start in enumerate(step_starts):
-        match = re.match(r"^      - name: (.+)$", steps[start])
-        if match is None:
-            errors.append("each step must use an allowlisted name mapping")
-            continue
-        name = match.group(1)
-        end = step_starts[position + 1] if position + 1 < len(step_starts) else len(steps)
-        step_names.append(name)
-        step_blocks[name] = steps[start:end]
-    if tuple(step_names) != EXPECTED_STEP_NAMES:
-        errors.append("step names or order differ from the approved verification graph")
-
-    expected_actions = {
-        "Check out the exact proposed revision without persisted credentials": (
-            "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803",
-            [("ref", "${{ github.event.pull_request.head.sha }}"), ("fetch-depth", "1"),
-             ("persist-credentials", "false")],
-        ),
-        "Set up locked Python runtime": (
-            "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1",
-            [("python-version", "\"3.12\""), ("cache", "pip"),
-             ("cache-dependency-path", "requirements.lock")],
-        ),
-        "Set up supported Node runtime": (
-            "actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38",
-            [("node-version", "\"22.12.0\""), ("cache", "npm"),
-             ("cache-dependency-path", "web/package-lock.json")],
-        ),
-    }
-    for name, (action, expected_with) in expected_actions.items():
-        step = step_blocks.get(name, [])
-        if f"        uses: {action} # v6" not in step:
-            errors.append(f"{name} must use its approved full-SHA action")
-        with_index = next(
-            (index for index, line in enumerate(step) if line == "        with:"), None
-        )
-        if with_index is None or _direct_entries(step[with_index + 1 :], 10) != expected_with:
-            errors.append(f"{name} inputs differ from the approved structure")
-
-    for name, expected_run in EXPECTED_RUNS.items():
-        step = step_blocks.get(name, [])
-        if _run_lines(step) != expected_run:
-            errors.append(f"{name} run body differs from the approved fail-closed commands")
-
-    receipt_name = "Assert exact checkout and record event, runtime, and lock identities"
-    receipt = step_blocks.get(receipt_name, [])
-    receipt_env_index = next(
-        (index for index, line in enumerate(receipt) if line == "        env:"), None
-    )
-    expected_receipt_env = [
-        ("EVENT_NAME", "${{ github.event_name }}"),
-        ("EVENT_REF", "${{ github.ref }}"),
-        ("EVENT_MERGE_SHA", "${{ github.sha }}"),
-        ("PULL_REQUEST_NUMBER", "${{ github.event.pull_request.number }}"),
-        ("PULL_REQUEST_HEAD_REF", "${{ github.event.pull_request.head.ref }}"),
-        ("REQUESTED_HEAD_SHA", "${{ github.event.pull_request.head.sha }}"),
-    ]
-    if receipt_env_index is None or _direct_entries(
-        receipt[receipt_env_index + 1 :], 10
-    ) != expected_receipt_env:
-        errors.append("receipt event identity inputs differ from the approved structure")
-    receipt_run = "\n".join(_run_lines(receipt) or ())
-    for required in (
-        'actual_checkout_sha="$(git rev-parse HEAD)"',
-        'if [[ "$actual_checkout_sha" != "$REQUESTED_HEAD_SHA" ]]; then',
-        "Event merge SHA:",
-        "Requested head SHA:",
-        "Actual checkout SHA:",
-        "requirements.lock SHA-256:",
-        "web/package-lock.json SHA-256:",
-    ):
-        if required not in receipt_run:
-            errors.append("receipt must bind event merge/head and actual checkout identities")
-            break
-    return errors
+EXPECTED_WORKFLOW = _load_single_document(EXPECTED_WORKFLOW_TEMPLATE)
 
 
 def validate(workflow_path: Path) -> list[str]:
-    """Return every violated PR-verification invariant for ``workflow_path``."""
+    """Return fail-closed workflow-template validation errors for ``workflow_path``."""
     try:
-        text = workflow_path.read_text(encoding="utf-8")
-    except OSError as error:
-        return [f"cannot read workflow: {error}"]
-
-    lines = text.splitlines()
-    errors = _validate_structure(lines)
-
-    required_patterns = {
-        "a pull_request trigger targeting main": (
-            r"^\s{2}pull_request:\s*$[\s\S]*?^\s{4}branches:\s*\[main\]\s*$"
-        ),
-        "bounded cancellation concurrency": (
-            r"^\s{2}group:\s*pr-verification-\$\{\{ github\.event\.pull_request\.number "
-            r"\}\}\s*$[\s\S]*?^\s{2}cancel-in-progress:\s*true\s*$"
-        ),
-        "a Node range guard": r"node_version=.*node --version[\s\S]*Unsupported Node runtime",
-    }
-    for label, pattern in required_patterns.items():
-        if not _has(text, pattern):
-            errors.append(f"missing {label}")
-
-    forbidden_patterns = {
-        "pull_request_target is unsafe for untrusted PR code": r"\bpull_request_target\b",
-        "write permissions are prohibited": r"^\s+[\w-]+:\s*(?:write|write-all)\s*$",
-        "Pages or OpenID permissions are prohibited": r"^\s+(?:pages|id-token):",
-        "workflow environments are prohibited": r"^\s+environment:",
-        "Pages configuration/deployment/upload actions are prohibited": (
-            r"actions/(?:configure-pages|deploy-pages|upload-pages-artifact|upload-artifact)@"
-        ),
-        "publication commands are prohibited": (
-            r"python -m ballpark (?:daily|restore-history|verify-public|verify-reliability)"
-        ),
-        "push or package publication commands are prohibited": r"(?:git push|npm publish)",
-        "explicit secret interpolation is prohibited": r"\$\{\{\s*secrets\.",
-        "persisted checkout credentials are prohibited": r"persist-credentials:\s*true",
-        "required steps must not continue on error": r"continue-on-error:",
-    }
-    for label, pattern in forbidden_patterns.items():
-        if _has(text, pattern):
-            errors.append(label)
-
-    allowed_actions = {"checkout", "setup-python", "setup-node"}
-    for action_use in re.findall(r"^\s+uses:\s*([^\s#]+)", text, flags=re.MULTILINE):
-        matched = re.fullmatch(rf"actions/([\w-]+)@({SHA_PIN})", action_use)
-        if matched is None or matched.group(1) not in allowed_actions:
-            errors.append(f"unapproved or non-SHA-pinned action: {action_use}")
-
-    for action in allowed_actions:
-        pattern = rf"uses:\s*actions/{action}@{SHA_PIN}(?:\s|$)"
-        if not _has(text, pattern):
-            errors.append(f"actions/{action} must be pinned to a full commit SHA")
-
-    return errors
+        candidate = _load_single_document(workflow_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        return [f"cannot securely parse workflow: {error}"]
+    if candidate != EXPECTED_WORKFLOW:
+        return ["workflow differs from the approved semantic verification template"]
+    return []
 
 
 def main() -> int:

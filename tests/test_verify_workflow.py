@@ -27,8 +27,7 @@ def test_contract_rejects_pull_request_target_and_persisted_checkout(tmp_path: P
 
     errors = validate(unsafe)
 
-    assert any("pull_request_target" in error for error in errors)
-    assert any("persisted checkout" in error for error in errors)
+    assert errors == ["workflow differs from the approved semantic verification template"]
 
 
 def test_contract_rejects_an_unpinned_or_unapproved_action(tmp_path: Path) -> None:
@@ -44,7 +43,7 @@ def test_contract_rejects_an_unpinned_or_unapproved_action(tmp_path: Path) -> No
 
     errors = validate(unsafe)
 
-    assert any("unapproved or non-SHA-pinned action" in error for error in errors)
+    assert errors == ["workflow differs from the approved semantic verification template"]
 
 
 def test_validator_command_fails_nonzero_for_an_unsafe_workflow(tmp_path: Path) -> None:
@@ -64,7 +63,7 @@ def test_validator_command_fails_nonzero_for_an_unsafe_workflow(tmp_path: Path) 
     )
 
     assert completed.returncode == 1
-    assert "run body differs" in completed.stderr
+    assert "approved semantic verification template" in completed.stderr
 
 
 @pytest.mark.parametrize(
@@ -88,8 +87,66 @@ def test_validator_command_fails_nonzero_for_an_unsafe_workflow(tmp_path: Path) 
         lambda text: text
         + "\n  privileged-bypass:\n    runs-on: ubuntu-latest\n    permissions: write-all\n"
         + "    steps:\n      - run: gh api --method POST /repos/example/example/issues\n",
+        lambda text: text.replace(
+            "    name: PR verification", "    if : false\n    name: PR verification", 1
+        ),
+        lambda text: text.replace(
+            "        shell: bash\n        run: |\n          set -euo pipefail\n"
+            "          python -m ruff",
+            "        shell: bash\n        if : false\n        run: |\n"
+            "          set -euo pipefail\n          python -m ruff",
+            1,
+        ),
+        lambda text: text.replace("        shell: bash", "        shell: bash {0} || true", 1),
+        lambda text: text.replace(
+            "    steps:\n",
+            "    steps:\n      -\n        run: echo 'BASH_ENV=attacker' >> \"$GITHUB_ENV\"\n",
+            1,
+        ),
+        lambda text: text.replace(
+            '          actual_checkout_sha="$(git rev-parse HEAD)"',
+            '          actual_checkout_sha="$(git rev-parse HEAD)"\n'
+            '          actual_checkout_sha="$REQUESTED_HEAD_SHA"',
+            1,
+        ),
+        lambda text: text.replace(
+            "\npermissions:\n",
+            "\n  push:\n    branches: [main]\n\npermissions:\n",
+            1,
+        ),
+        lambda text: text.replace(
+            "types: [opened, synchronize, reopened, ready_for_review]",
+            "types: [opened, reopened, ready_for_review]",
+            1,
+        ),
+        lambda text: text
+        + "\n  attacker :\n    runs-on: ubuntu-latest\n    permissions : write-all\n"
+        + "    steps:\n      - run: gh api --method POST /repos/example/example/issues\n",
+        lambda text: text.replace(
+            "name: PR verification", "name: duplicate\nname: PR verification", 1
+        ),
+        lambda text: text.replace(
+            "permissions:\n  contents: read",
+            "permissions: &readonly\n  contents: read\nreused-permissions: *readonly",
+            1,
+        ),
     ],
-    ids=("skipped-job", "conditional-pytest", "expression-continue-on-error", "write-all-job"),
+    ids=(
+        "skipped-job",
+        "conditional-pytest",
+        "expression-continue-on-error",
+        "write-all-job",
+        "spaced-job-if",
+        "spaced-step-if",
+        "custom-shell-swallow",
+        "bare-leading-step",
+        "receipt-overwrite",
+        "extra-push-trigger",
+        "missing-synchronize-trigger",
+        "spaced-write-all-job",
+        "duplicate-key",
+        "alias",
+    ),
 )
 def test_contract_rejects_semantic_bypass_mutations(tmp_path: Path, mutation: object) -> None:
     unsafe = tmp_path / "verify.yml"
