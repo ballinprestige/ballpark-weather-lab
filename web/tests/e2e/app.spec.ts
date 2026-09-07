@@ -446,6 +446,12 @@ test('a held learned adjustment retains verified LAD wind and total evidence', a
   await expect(page.locator('.factor-headline')).toHaveCount(0);
   await expect(page.locator('.conditions-strip')).toContainText('82°F');
   await expect(page.locator('.conditions-strip')).toContainText('12 mph from SW');
+  const decomposition = page.locator('.decomposition');
+  await expect(decomposition).toContainText('Seasonal park baselines:');
+  await expect(decomposition).toContainText('Runs 0.970');
+  await expect(decomposition).toContainText('Home runs 1.070');
+  await expect(decomposition).toContainText('Weather multipliers and game factors remain withheld.');
+  await expect(decomposition.getByRole('table')).toHaveCount(0);
   await expect(page.getByText('Kalshi contract asks')).toHaveCount(0);
 });
 

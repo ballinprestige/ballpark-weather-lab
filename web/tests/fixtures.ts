@@ -235,12 +235,12 @@ export function modelAdjustmentHeldPayload(): BallparkPayload {
   game.factors = {
     state: 'held',
     reason: 'learned weather adjustment held: sampled LAD training rows use a 0° wind axis; compatibility validation is pending',
-    seasonal_pf_runs: 0.988,
-    seasonal_pf_hr: 0.976,
+    seasonal_pf_runs: 0.97,
+    seasonal_pf_hr: 1.07,
     weather_multiplier_runs: 1,
     weather_multiplier_hr: 1,
-    game_pf_runs: 0.988,
-    game_pf_hr: 0.976,
+    game_pf_runs: 0.97,
+    game_pf_hr: 1.07,
     weather_delta_runs: 0,
     weather_delta_hr: 0,
     hr_baseline_as_of: '2026-08-27'

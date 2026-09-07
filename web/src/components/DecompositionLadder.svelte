@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { BallparkGame } from '../lib/types';
-  import { formatDelta, formatFactor } from '../lib/format';
+  import { formatDelta, formatFactor, isWeatherHeld } from '../lib/format';
   import { isReadyState } from '../lib/validate';
 
   export let game: BallparkGame;
@@ -60,6 +60,12 @@
       {/each}
     </div>
     <p class="plain-note">The game factor is the venue baseline adjusted by game-hour weather. It is park context, not a score forecast.</p>
+  {:else if !isWeatherHeld(game)}
+    <div class="figure-hold">
+      <span class="hold-hatch" aria-hidden="true"></span>
+      <p><strong>Learned adjustment held.</strong> {game.factors.reason ?? 'A validated weather-adjusted factor is not available for this game.'}</p>
+      <p class="plain-note"><strong>Seasonal park baselines:</strong> Runs {formatFactor(game.factors.seasonal_pf_runs)} · Home runs {formatFactor(game.factors.seasonal_pf_hr)}. Weather multipliers and game factors remain withheld.</p>
+    </div>
   {:else}
     <div class="figure-hold">
       <span class="hold-hatch" aria-hidden="true"></span>
