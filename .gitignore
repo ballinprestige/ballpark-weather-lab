@@ -12,6 +12,7 @@ node_modules/
 web/node_modules/
 web/.npm-cache/
 web/dist/
+dist/
 web/public/data/
 web/public/archive/
 web/playwright-report/
