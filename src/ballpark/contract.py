@@ -149,6 +149,10 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
                 required = ("line", "over_price", "under_price", "source_updated_at", "observed_at", "raw_sha256", "snapshot_id", "sportsbook_id", "sportsbook_name", "provider_event_id")
                 if any(odds.get(key) is None for key in required):
                     raise DataContractError("quoted market is missing line, both prices, provenance, or timestamps")
+                for price_key in ("over_price", "under_price"):
+                    price = odds[price_key]
+                    if not isinstance(price, int) or -99 <= price <= 99:
+                        raise DataContractError("quoted market has an invalid American price")
             elif state != "unavailable":
                 raise DataContractError("odds market has an unknown state")
 
