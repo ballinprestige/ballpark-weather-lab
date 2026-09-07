@@ -90,6 +90,33 @@ def test_explicit_no_slate_is_a_publishable_state(
     assert FakeParkFactorModel.initializations == 0
 
 
+def test_no_slate_rejects_geometry_drift_before_publication(
+    monkeypatch: pytest.MonkeyPatch,
+    project_paths: ProjectPaths,
+    fixture_root: Path,
+    verified_receipt: ArtifactReceipt,
+    tmp_path: Path,
+) -> None:
+    _stub_pipeline(monkeypatch, verified_receipt)
+
+    def reject_drift(_root: Path) -> None:
+        raise ValueError("park geometry artifact is not the canonical venue-registry export")
+
+    monkeypatch.setattr(pipeline_module, "verify_exported_geometry", reject_drift)
+    output = tmp_path / "site"
+
+    with pytest.raises(ValueError, match="canonical venue-registry export"):
+        DailyPipeline(project_paths).build_and_publish(
+            TARGET_DATE,
+            output,
+            fixture_path=fixture_root / "no_slate.json",
+            generated_at=GENERATED_AT,
+        )
+
+    assert not output.exists()
+    assert FakeParkFactorModel.initializations == 0
+
+
 def test_missing_weather_publishes_held_seasonal_factors(
     monkeypatch: pytest.MonkeyPatch,
     project_paths: ProjectPaths,
