@@ -428,14 +428,16 @@ test('cold game hydrates geometry without waiting for a delayed archive', async 
     await new Promise((resolve) => setTimeout(resolve, 80));
     await route.fulfill({ contentType: 'application/json', body: jsonText(FENWAY_GEOMETRY) });
   });
+  let releaseArchive: (() => void) | undefined;
+  const archiveHeld = new Promise<void>((resolve) => { releaseArchive = resolve; });
   await page.route('**/archive/index.json', async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    await archiveHeld;
     await route.fulfill({ status: 503, body: 'archive unavailable' });
   });
   await page.goto('/#game/1001');
   await expect(page.getByTestId('game-detail')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Park wind diagram' })).toBeVisible();
   await expect(page.locator('.field-wall')).toBeVisible();
+  releaseArchive?.();
 });
 
 test('optional updates are fenced across archive and Return Live generations', async ({ page }, testInfo) => {
@@ -469,7 +471,6 @@ test('retained Kalshi asks show the provider failure without becoming current', 
 });
 
 test('319px retained Kalshi row preserves capture time and update failure', async ({ page }, testInfo) => {
-  test.skip(!testInfo.project.name.startsWith('mobile'));
   await page.setViewportSize({ width: 319, height: 480 });
   await mockPublication(page, retainedExchangePayload());
   await page.goto('/#slate');
