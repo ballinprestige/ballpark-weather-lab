@@ -258,7 +258,7 @@ class KalshiExchangeProvider:
             events_raw = b"\n".join(raw_pages)
         except Exception as exc:
             reason = f"Kalshi public market request failed: {type(exc).__name__}"
-            return {int(game["game_pk"]): self.cache.get(game, observed_at, reason) or {**results[int(game["game_pk"])], "reason": reason} for game in schedule}
+            return {int(game["game_pk"]): self.cache.get(game, datetime.now(UTC), reason) or {**results[int(game["game_pk"])], "reason": reason} for game in schedule}
         used: set[str] = set()
         for game in schedule:
             team_pair = (_KALSHI_TEAM.get(str(game.get("away_team")), game.get("away_team")), _KALSHI_TEAM.get(str(game.get("home_team")), game.get("home_team")))
@@ -295,5 +295,5 @@ class KalshiExchangeProvider:
                 self.cache.accept(quote)
             except Exception as exc:
                 reason = f"Kalshi public market request failed: {type(exc).__name__}"
-                results[int(game["game_pk"])] = self.cache.get(game, observed_at, reason) or {**results[int(game["game_pk"])], "reason": reason}
+                results[int(game["game_pk"])] = self.cache.get(game, datetime.now(UTC), reason) or {**results[int(game["game_pk"])], "reason": reason}
         return results
