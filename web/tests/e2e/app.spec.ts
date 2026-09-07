@@ -444,17 +444,34 @@ test('optional updates are fenced across archive and Return Live generations', a
   test.skip(!testInfo.project.name.startsWith('desktop'));
   const payload = readyPayload();
   await mockPublication(page, payload);
+  let releaseOldGeometry: (() => void) | undefined;
+  const oldGeometryHeld = new Promise<void>((resolve) => { releaseOldGeometry = resolve; });
   await page.route('**/park_geometry.json', async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await oldGeometryHeld;
     await route.fulfill({ contentType: 'application/json', body: jsonText(FENWAY_GEOMETRY) });
   });
   await page.goto('/#slate');
+  await expect(page.getByRole('table')).toBeVisible();
   await page.getByRole('link', { name: 'History' }).click();
   await page.getByRole('button', { name: /Open Wed, Aug 26, 2026 snapshot/i }).click();
   await expect(page.getByText('Historical snapshot')).toBeVisible();
-  await page.getByRole('button', { name: /Return to current release/i }).click();
-  await expect(page.getByText('Current release', { exact: false })).toBeVisible();
-  await expect(page.getByText(payload.date, { exact: false })).toBeVisible();
+  releaseOldGeometry?.();
+  await page.goto('/#game/1001');
+  await expect(page.getByTestId('game-detail')).toBeVisible();
+  await expect(page.locator('.field-wall')).toHaveCount(0);
+});
+
+test('sequential optional failures retain both warning notices', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('desktop'));
+  await mockPublication(page, readyPayload());
+  await page.route('**/archive/index.json', (route) => route.fulfill({ status: 503, body: 'archive outage' }));
+  await page.route('**/park_geometry.json', (route) => route.fulfill({ status: 503, body: 'geometry outage' }));
+  await page.goto('/#slate');
+  await expect(page.getByRole('table')).toBeVisible();
+  await page.getByRole('link', { name: 'Data Health' }).click();
+  const warnings = page.getByRole('heading', { name: 'Degraded enhancements' }).locator('..');
+  await expect(warnings).toContainText('History unavailable');
+  await expect(warnings).toContainText('Park geometry unavailable');
 });
 
 test('retained Kalshi asks show the provider failure without becoming current', async ({ page }, testInfo) => {
@@ -462,12 +479,14 @@ test('retained Kalshi asks show the provider failure without becoming current', 
   const payload = retainedExchangePayload();
   await mockPublication(page, payload);
   await page.goto('/#slate');
-  await expect(page.getByRole('row').nth(1)).toContainText('Over 49¢ · Under 52¢');
-  await expect(page.getByText('Update failed: Kalshi public market-data request returned 503.')).toBeVisible();
+  const marketRow = page.getByRole('row').nth(1);
+  await expect(marketRow).toContainText('Over 49¢ · Under 52¢');
+  await expect(marketRow).toContainText('Update failed: Kalshi public market-data request returned 503.');
+  await expect(marketRow).toContainText('observed');
   await expect(page.getByText(/current sportsbook totals/i)).toHaveCount(0);
   await page.getByRole('link', { name: 'Data Health' }).click();
-  await expect(page.getByRole('heading', { name: 'Kalshi update failed' })).toBeVisible();
-  await expect(page.getByText('Kalshi public market-data request returned 503.')).toBeVisible();
+  const failureLedger = page.getByRole('heading', { name: 'Kalshi update failed' }).locator('..');
+  await expect(failureLedger).toContainText('Kalshi public market-data request returned 503.');
 });
 
 test('319px retained Kalshi row preserves capture time and update failure', async ({ page }, testInfo) => {
