@@ -2655,11 +2655,14 @@ body::before {
     grid-column: 1 / -1;
     grid-row: 2;
     justify-self: stretch;
+    flex-wrap: wrap;
+    overflow-x: visible;
   }
 
   .site-header nav a {
-    flex: 0 0 auto;
+    flex: 1 1 4.25rem;
     min-height: 2.75rem;
+    padding-inline: .45rem;
   }
 
   .site-header .theme-toggle {

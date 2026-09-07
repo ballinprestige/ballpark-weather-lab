@@ -79,11 +79,9 @@ async function loadOptionalGeometry(warnings: string[], signal?: AbortSignal): P
 
 export async function loadCurrentPublication(signal?: AbortSignal): Promise<PublicationBundle> {
   const warnings: string[] = [];
-  const [release, payloadResult, archive, geometry] = await Promise.all([
+  const [release, payloadResult] = await Promise.all([
     loadRelease(signal),
-    loadPayloadWithHash('./data/data.json', signal),
-    loadOptionalArchive(warnings, signal),
-    loadOptionalGeometry(warnings, signal)
+    loadPayloadWithHash('./data/data.json', signal)
   ]);
   if (payloadResult.hash !== release.payload_sha256) {
     throw new PublicationLoadError(`Publication hash mismatch. Expected ${release.payload_sha256.slice(0, 12)}…, received ${payloadResult.hash.slice(0, 12)}….`);
@@ -94,14 +92,24 @@ export async function loadCurrentPublication(signal?: AbortSignal): Promise<Publ
   if (payloadResult.payload.generated_at !== release.generated_at) {
     throw new PublicationLoadError('Publication timestamp mismatch between release pointer and payload.');
   }
-  return {
+  const bundle: PublicationBundle = {
     payload: payloadResult.payload,
     release,
-    archive,
-    geometry,
+    archive: { dates: [] },
+    geometry: null,
     warnings,
     payloadHash: payloadResult.hash
   };
+  // History and park geometry never hold the verified daily slate hostage.
+  // They mutate only this generation's bundle after their own bounded retries.
+  void Promise.all([
+    loadOptionalArchive(warnings, signal),
+    loadOptionalGeometry(warnings, signal)
+  ]).then(([archive, geometry]) => {
+    bundle.archive = archive;
+    bundle.geometry = geometry;
+  });
+  return bundle;
 }
 
 export async function loadArchivePublication(entry: ArchiveEntry, signal?: AbortSignal): Promise<{ payload: BallparkPayload; payloadHash: string }> {

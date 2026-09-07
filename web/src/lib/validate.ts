@@ -271,7 +271,7 @@ function validateOdds(value: unknown, path: string, gamePk: number, gameDate: st
     }
     const sourceMs = Date.parse(market.source_updated_at);
     if (sourceMs > observedMs + 5 * 60_000) fail(path, 'source update cannot be more than five minutes after retrieval');
-    if (state === 'current' && (sourceMs < observedMs - 15 * 60_000 || sourceMs > observedMs + 5 * 60_000)) {
+    if (state === 'current' && (sourceMs < observedMs - 15 * 60_000 || sourceMs > observedMs)) {
       fail(path, 'current quote must be within the canonical 15-minute freshness window');
     }
   }
@@ -474,6 +474,7 @@ export function validatePayload(value: unknown): BallparkPayload {
   if (root.schema_version !== 1) fail('schema_version', 'must equal 1');
   if (root.product !== 'ballpark-weather-lab') fail('product', 'must identify ballpark-weather-lab');
   const date = isoDateAt(root.date, 'date');
+  const generatedAt = timestampAt(root.generated_at, 'generated_at') as string;
   const status = publicationStatusAt(root.status, 'status');
   const rawGames = arrayAt(root.games, 'games');
   const rawIds = rawGames.map((game, index) => integerAt(objectAt(game, `games[${index}]`).game_pk, `games[${index}].game_pk`, 1));
@@ -495,6 +496,9 @@ export function validatePayload(value: unknown): BallparkPayload {
     seen.add(game.game_pk);
     if (game.game_date !== date) fail(`games[${index}].game_date`, 'must match the publication date');
     if (game.weather.game_pk !== game.game_pk) fail(`games[${index}].weather.game_pk`, 'must match the game ID');
+    if (game.odds.state === 'current' && (Date.parse(game.odds.source_updated_at!) > Date.parse(generatedAt) || Date.parse(game.odds.observed_at!) > Date.parse(generatedAt))) {
+      fail(`games[${index}].odds`, 'current quote cannot be sourced or observed after publication generation');
+    }
   }
   if (status === 'no_slate' && games.length !== 0) fail('games', 'must be empty when status is no_slate');
   if (status !== 'no_slate' && games.length === 0) fail('games', 'must contain at least one game unless status is no_slate');
@@ -504,7 +508,7 @@ export function validatePayload(value: unknown): BallparkPayload {
     schema_version: 1,
     product: 'ballpark-weather-lab',
     date,
-    generated_at: timestampAt(root.generated_at, 'generated_at') as string,
+    generated_at: generatedAt,
     status,
     no_slate_reason: noSlateReason,
     model: validateModel(root.model),

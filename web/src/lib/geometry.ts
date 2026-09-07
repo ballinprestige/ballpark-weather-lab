@@ -33,11 +33,15 @@ const teamAliases: Record<string, string> = {
   'washington nationals': 'WSH', nationals: 'WSH', wsh: 'WSH'
 };
 
-export function findVenueGeometry(artifact: GeometryArtifact | null, homeTeam: string): VenueGeometry | null {
+/** Match only an explicit audited venue identity; never infer a park from the home club. */
+export function findVenueGeometry(artifact: GeometryArtifact | null, venue: string): VenueGeometry | null {
   if (!artifact) return null;
-  const normalized = homeTeam.trim().toLowerCase();
-  const key = teamAliases[normalized] ?? homeTeam.trim().toUpperCase();
-  return artifact.venues[key] ?? null;
+  const actual = venue.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!actual) return null;
+  return Object.values(artifact.venues).find((candidate) => {
+    const audited = candidate.venue_id.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return audited.length >= 6 && (actual.includes(audited) || audited.includes(actual));
+  }) ?? null;
 }
 
 export function wallPath(angles: number[], distances: number[]): string {

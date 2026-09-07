@@ -63,7 +63,7 @@ export function assessOddsFreshness(
   const sourceMs = odds.source_updated_at ? Date.parse(odds.source_updated_at) : NaN;
   const observedMs = odds.observed_at ? Date.parse(odds.observed_at) : NaN;
   if (!Number.isFinite(sourceMs) || !Number.isFinite(observedMs)) return { state: 'unavailable', reason: 'Current quote is missing a trustworthy source or retrieval time.' };
-  if (sourceMs > observedMs + QUOTE_FUTURE_SKEW_MS || sourceMs > now.getTime() + QUOTE_FUTURE_SKEW_MS) return { state: 'unavailable', reason: 'Quote source time is implausibly ahead of the retrieval clock.' };
+  if (sourceMs > observedMs || sourceMs > now.getTime()) return { state: 'unavailable', reason: 'Quote source time is ahead of the retrieval or comparison clock.' };
   const ageMs = now.getTime() - sourceMs;
   if (ageMs > QUOTE_FRESHNESS_MS) return { state: 'stale', reason: `Selected-book quote is ${Math.max(0, Math.round(ageMs / 1000))} seconds old; freshness limit is 900 seconds.` };
   return { state: 'current', reason: null };

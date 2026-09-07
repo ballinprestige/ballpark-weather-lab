@@ -8,7 +8,7 @@
   export let game: BallparkGame;
   export let geometry: GeometryArtifact | null;
 
-  $: venueGeometry = findVenueGeometry(geometry, game.home_team);
+  $: venueGeometry = findVenueGeometry(geometry, game.venue);
   $: diagramPath = venueGeometry && geometry ? wallPath(geometry.angles_deg, venueGeometry.wall_distance_ft) : '';
   $: vector = venueGeometry ? parkWindVector(game.weather, venueGeometry.cf_azimuth) : null;
   // Geometry drives the drawing; published components drive the displayed
@@ -61,12 +61,12 @@
           <marker id={markerId} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="wind-arrow-head"></path></marker>
         </defs>
         <rect x="18" y="18" width="384" height="248" class="park-grid" fill={`url(#${gridId})`}></rect>
-        {#each [250, 300, 350, 400] as range}<path d={`M ${x(-45, range)} ${y(-45, range)} Q 210 ${y(0, range)} ${x(45, range)} ${y(45, range)}`} class="range-arc"></path>{/each}
+        {#each [250, 300, 350, 400] as range}<path d={`M ${x(-45, range)} ${y(-45, range)} Q 210 ${y(0, range)} ${x(45, range)} ${y(45, range)}`} class="range-arc"></path><text x="218" y={y(0, range) + 4} class="field-label">{range} ft</text>{/each}
         <path d={diagramPath} class="field-fill"></path><path d={diagramPath} class="field-wall"></path>
         <path d="M210 264 L132 186 M210 264 L288 186" class="foul-lines"></path><path d="M210 254 l10 10 -10 10 -10 -10 z" class="infield-mark"></path><circle cx="210" cy="224" r="3.5" class="mound-mark"></circle>
         {#if canStream}<g class="wind-streams" aria-hidden="true">{#each [-27, -9, 9, 27] as offset, index}<path d={streamPath(offset)} class="wind-stream" style={`animation-delay:-${(index * 0.44).toFixed(2)}s`}></path>{/each}</g>{/if}
-        <text x="45" y="265" class="field-label">LF {lf ? Math.round(lf) : '—'}</text><text x="210" y="35" text-anchor="middle" class="field-label">CF {cf ? Math.round(cf) : '—'}</text><text x="375" y="265" text-anchor="end" class="field-label">RF {rf ? Math.round(rf) : '—'}</text>
-        <g class="north-compass" transform="translate(355 65)"><circle r="23"></circle><path d="M 0 17 V -17" marker-end={`url(#${markerId})`}></path><text y="-29" text-anchor="middle">N</text></g>
+        <text x="45" y="265" class="field-label">LF {lf ? `${Math.round(lf)} ft` : '—'}</text><text x="210" y="35" text-anchor="middle" class="field-label">CF {cf ? `${Math.round(cf)} ft` : '—'}</text><text x="375" y="265" text-anchor="end" class="field-label">RF {rf ? `${Math.round(rf)} ft` : '—'}</text>
+        <g class="north-compass" transform={`translate(355 65) rotate(${-venueGeometry.cf_azimuth})`}><circle r="23"></circle><path d="M 0 17 V -17" marker-end={`url(#${markerId})`}></path><text y="-29" text-anchor="middle">N</text></g>
         {#if vector && !roofSuppressed}<line x1="210" y1="224" x2={210 + vector.svgX * 48} y2={224 + vector.svgY * 48} class="wind-vector" marker-end={`url(#${markerId})`}></line>{/if}
         {#if roofSuppressed}<text x="210" y="155" text-anchor="middle" class="diagram-hold">Roof active · outdoor wind withheld</text>
         {:else if unknownRoof}<text x="210" y="155" text-anchor="middle" class="diagram-note">Roof status unconfirmed · outdoor scenario</text>
