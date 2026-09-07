@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 from ballpark.http import HttpClient
 
 COVERS_ODDS_URL = "https://www.covers.com/sport/baseball/mlb/odds"
+ODDS_API_URL = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds"
 COVERS_SCHEMA_VERSION = "covers-html-total-table-v1"
 DEFAULT_BOOK_ID = "bet365"
 FRESHNESS_SECONDS = 15 * 60
@@ -257,3 +258,48 @@ class CoversOddsProvider:
                 int(game["game_pk"]): unavailable_market(int(game["game_pk"]), target_date, f"Covers full-game-total source unavailable: {type(exc).__name__}: {exc}", observed_at=observed_at)
                 for game in schedule
             }
+
+
+class TheOddsApiProvider:
+    """Runtime-key-only adapter; never reads files, logs, or persists a credential.
+
+    Official v4 bulk responses are replayed through :meth:`normalize`. One
+    region/one totals market/one named book is requested.  A bookmaker
+    ``last_update`` is retained only as evidence: its quote-level granularity
+    is not assumed, therefore normal output is unavailable until documented
+    provider semantics establish a trustworthy quote timestamp.
+    """
+
+    def __init__(self, client: HttpClient, *, api_key: str | None, book_id: str) -> None:
+        self.client, self.api_key, self.book_id = client, api_key, book_id
+
+    def fetch(self, target_date: date, schedule: list[dict[str, Any]], *, observed_at: datetime) -> dict[int, dict[str, Any]]:
+        if not self.api_key:
+            return {int(g["game_pk"]): unavailable_market(int(g["game_pk"]), target_date, "The Odds API runtime key is not configured", observed_at=observed_at) for g in schedule}
+        try:
+            # Deliberately one request; caller scheduling/quota policy owns any later retry.
+            query = urlencode({"apiKey": self.api_key, "regions": "us", "markets": "totals", "oddsFormat": "american", "dateFormat": "iso", "bookmakers": self.book_id})
+            body = self.client.get_bytes(f"{ODDS_API_URL}?{query}")
+            return self.normalize(json.loads(body), target_date=target_date, schedule=schedule, observed_at=observed_at)
+        except Exception as exc:
+            return {int(g["game_pk"]): unavailable_market(int(g["game_pk"]), target_date, f"The Odds API unavailable: {type(exc).__name__}", observed_at=observed_at) for g in schedule}
+
+    def normalize(self, events: Any, *, target_date: date, schedule: list[dict[str, Any]], observed_at: datetime) -> dict[int, dict[str, Any]]:
+        result = {int(g["game_pk"]): unavailable_market(int(g["game_pk"]), target_date, "no matching selected-book full-game total", observed_at=observed_at) for g in schedule}
+        if not isinstance(events, list):
+            return result
+        for event in events:
+            if not isinstance(event, dict): continue
+            matches = [g for g in schedule if g.get("home_team") == event.get("home_team") and g.get("away_team") == event.get("away_team")]
+            if len(matches) != 1: continue
+            game_pk = int(matches[0]["game_pk"])
+            books = [b for b in event.get("bookmakers", []) if isinstance(b, dict) and b.get("key") == self.book_id]
+            if len(books) != 1: continue
+            totals = [m for m in books[0].get("markets", []) if isinstance(m, dict) and m.get("key") == "totals"]
+            if len(totals) != 1: continue
+            outcomes = {o.get("name"): o for o in totals[0].get("outcomes", []) if isinstance(o, dict)}
+            over, under = outcomes.get("Over"), outcomes.get("Under")
+            if not over or not under or over.get("point") != under.get("point") or not isinstance(over.get("price"), int) or not isinstance(under.get("price"), int): continue
+            raw = hashlib.sha256(json.dumps(event, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            result[game_pk] = {**unavailable_market(game_pk, target_date, "bookmaker last_update granularity is not certified as this total quote update", observed_at=_utc(observed_at)), "provider_event_id": str(event.get("id") or "") or None, "provider": "The Odds API", "source_url": "https://the-odds-api.com/liveapi/guides/v4/", "sportsbook_id": self.book_id, "sportsbook_name": str(books[0].get("title") or self.book_id), "line": over["point"], "over_price": over["price"], "under_price": under["price"], "raw_sha256": raw, "snapshot_id": hashlib.sha256(f"{raw}:{game_pk}".encode()).hexdigest(), "source_schema_version": "the-odds-api-v4-totals"}
+        return result
