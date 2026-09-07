@@ -256,7 +256,7 @@
           onAction={showHealth}
         />
       {:else}
-        <SlateView {payload} geometry={bundle.geometry} onOpenGame={openGame} now={currentInstant} />
+        <SlateView {payload} onOpenGame={openGame} now={currentInstant} />
       {/if}
     {:else if route === 'game'}
       {#if routedGame}

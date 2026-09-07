@@ -2783,3 +2783,38 @@ body::before {
   .wind-decomposition > div { padding-inline: .38rem; }
   .wind-decomposition dd { font-size: .72rem; }
 }
+
+/* CEO totals-board correction: scanning the slate comes before explanations. */
+.ledger-wrap { border-radius: 0; }
+.ledger { min-width: 0; font-size: clamp(.68rem, 1.45vw, .8rem); }
+.ledger th { padding: .48rem .42rem; font-size: .61rem; letter-spacing: .04em; text-transform: uppercase; }
+.ledger td { padding: .55rem .42rem; vertical-align: middle; white-space: normal; }
+.ledger td strong { font-size: .9rem; }
+.ledger td small { color: var(--ink-faint); line-height: 1.25; }
+.ledger td:nth-child(1) { width: 25%; }
+.ledger td:nth-child(2) { width: 31%; font-variant-numeric: tabular-nums; }
+.ledger td:nth-child(3) { width: 15%; }
+.ledger td:nth-child(4) { width: 21%; }
+.ledger .inspect-button { min-height: 2.25rem; padding-inline: .45rem; }
+.compact-game-row { min-height: 0; border-radius: 0; box-shadow: none; }
+.compact-game-row > a { display: grid; grid-template-columns: minmax(7rem, 1fr) minmax(7rem, auto) minmax(6rem, .7fr); gap: .7rem; align-items: center; min-height: 4.6rem; padding: .7rem .8rem; color: inherit; text-decoration: none; border-bottom: 1px solid var(--rule); }
+.compact-game-row > a:hover { background: var(--paper-sunk); }
+.compact-matchup, .compact-market, .compact-weather { display: grid; gap: .12rem; min-width: 0; }
+.compact-matchup { grid-template-columns: auto auto auto; align-items: baseline; column-gap: .24rem; font-size: 1rem; }
+.compact-matchup i { color: var(--ink-faint); font-style: normal; }
+.compact-matchup small, .compact-market small, .compact-weather small { grid-column: 1 / -1; color: var(--ink-faint); font-size: .69rem; overflow-wrap: anywhere; }
+.compact-market { color: var(--ink); font-variant-numeric: tabular-nums; }
+.compact-market strong { font-size: 1.1rem; }
+.compact-weather { color: var(--ink-soft); font-size: .76rem; }
+@media (max-width: 43.99rem) {
+  .slate-intro { padding-block: 1.2rem; }
+  .slate-station, .slate-counts { display: none; }
+  .slate-controls { gap: .35rem; padding-block: .65rem; }
+  .compact-game-row > a { grid-template-columns: minmax(0, 1fr) auto; gap: .25rem .6rem; min-height: 0; padding: .7rem 0; }
+  .compact-matchup { font-size: .96rem; }
+  .compact-market { grid-column: 1; grid-row: 2; font-size: .85rem; }
+  .compact-market strong { font-size: .9rem; }
+  .compact-weather { grid-column: 2; grid-row: 2; text-align: right; font-size: .68rem; }
+  .compact-weather small { display: none; }
+  .game-grid { gap: 0; }
+}
