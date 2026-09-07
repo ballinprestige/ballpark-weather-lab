@@ -34,7 +34,7 @@
   <a href={`#game/${game.game_pk}`} data-game-key={game.game_pk} aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} details, ${formatTime(game.game_time)}`} on:click={openDetails}>
     <span class="compact-matchup"><strong>{game.away_team}</strong><i>at</i><strong>{game.home_team}</strong><small>{formatTime(game.game_time)} · {game.venue}</small></span>
     <span class="compact-market">
-      {#if exchange}<strong>{exchange.line}</strong><small>Over {formatContractCents(exchange.over_ask_cents)} · Under {formatContractCents(exchange.under_ask_cents)}</small><small class="market-secondary">Kalshi contract ask · {exchange.game_phase.replaceAll('_', ' ')} · source age unknown</small>
+      {#if exchange}<strong>{exchange.line}</strong><small>Over {formatContractCents(exchange.over_ask_cents)} · Under {formatContractCents(exchange.under_ask_cents)}</small><small class="market-secondary">Kalshi contract ask · {exchange.game_phase.replaceAll('_', ' ')} · source age unknown · captured {formatTime(exchange.observed_at)}</small>{#if exchange.failure_reason}<small class="market-failure">Update failed: {exchange.failure_reason}</small>{/if}
       {:else if market.state === 'unavailable'}<strong>Sportsbook unavailable</strong>
       {:else}<strong>{game.odds.line}</strong><small>O {american(game.odds.over_price)} · U {american(game.odds.under_price)} · {game.odds.sportsbook_name}{market.state === 'observed' ? ' · observed, age unverified' : ''}</small>{/if}
     </span>

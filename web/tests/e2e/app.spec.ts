@@ -467,3 +467,14 @@ test('retained Kalshi asks show the provider failure without becoming current', 
   await expect(page.getByRole('heading', { name: 'Kalshi update failed' })).toBeVisible();
   await expect(page.getByText('Kalshi public market-data request returned 503.')).toBeVisible();
 });
+
+test('319px retained Kalshi row preserves capture time and update failure', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('mobile'));
+  await page.setViewportSize({ width: 319, height: 480 });
+  await mockPublication(page, retainedExchangePayload());
+  await page.goto('/#slate');
+  const row = page.locator('.compact-game-row').first();
+  await expect(row).toContainText('Over 49¢ · Under 52¢');
+  await expect(row).toContainText('captured');
+  await expect(row).toContainText('Update failed: Kalshi public market-data request returned 503.');
+});
