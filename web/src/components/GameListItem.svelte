@@ -30,6 +30,8 @@
     event.preventDefault();
     onOpen();
   }
+
+  const american = (price: number | null): string => price === null ? '—' : `${price > 0 ? '+' : ''}${price}`;
 </script>
 
 <article class="game-card" data-tone={held ? 'hold' : movement != null && movement >= 3 ? 'lift' : movement != null && movement <= -3 ? 'drag' : 'neutral'}>
@@ -100,6 +102,15 @@
         <small>{game.weather.dome_active ? 'roof — wind suspended' : 'carry component'}</small>
       </div>
     </dl>
+
+    <div class="market-strip" data-state={game.odds.state} aria-label="Full-game total market">
+      {#if game.odds.state === 'unavailable'}
+        <strong>Full-game total unavailable</strong><span>{game.odds.reason ?? 'No verified quote.'}</span>
+      {:else}
+        <strong>Total {game.odds.line}</strong><span>O {american(game.odds.over_price)} · U {american(game.odds.under_price)} · {game.odds.sportsbook_name}</span>
+        {#if game.odds.state === 'stale'}<small>Stale — {game.odds.reason}</small>{/if}
+      {/if}
+    </div>
 
     <footer class="card-evidence">
       <span class="ledger-state" data-tone={held ? 'hold' : 'good'}>{held ? 'Weather hold' : 'Verified'}</span>

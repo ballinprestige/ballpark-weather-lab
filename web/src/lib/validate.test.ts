@@ -53,4 +53,19 @@ describe('validatePayload', () => {
     payload.games[1].game_pk = payload.games[0].game_pk;
     expect(() => validatePayload(payload)).toThrow(/duplicates game ID/);
   });
+
+  it('keeps legacy releases readable while labeling their market unavailable', () => {
+    const payload = readyPayload();
+    delete (payload.games[0] as unknown as Record<string, unknown>).odds;
+    delete (payload.health as unknown as Record<string, unknown>).odds;
+    const validated = validatePayload(payload);
+    expect(validated.games[0].odds.state).toBe('unavailable');
+    expect(validated.games[0].odds.reason).toMatch(/predates quoted full-game totals/i);
+  });
+
+  it('fails closed if a purported current quote omits an actual side price', () => {
+    const payload = readyPayload();
+    payload.games[0].odds.over_price = null;
+    expect(() => validatePayload(payload)).toThrow(/quoted market must include the line, both prices/i);
+  });
 });

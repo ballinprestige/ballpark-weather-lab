@@ -14,7 +14,32 @@ export interface PublicationHealth {
   schedule: HealthLane;
   weather: HealthLane;
   lineups: HealthLane;
+  odds: HealthLane;
   artifacts: HealthLane;
+}
+
+export interface GameOdds {
+  game_pk: number;
+  slate_date: string;
+  state: 'current' | 'stale' | 'unavailable';
+  reason: string | null;
+  provider_event_id: string | null;
+  sport: 'MLB';
+  market_type: 'total';
+  period: 'full_game';
+  eligibility: 'pregame' | 'live' | 'final';
+  sportsbook_id: string | null;
+  sportsbook_name: string | null;
+  provider: string;
+  source_url: string | null;
+  line: number | null;
+  over_price: number | null;
+  under_price: number | null;
+  source_updated_at: string | null;
+  observed_at: string | null;
+  raw_sha256: string | null;
+  snapshot_id: string | null;
+  source_schema_version: string;
 }
 
 export interface GameWeather {
@@ -109,6 +134,7 @@ export interface BallparkGame {
   lineup: GameLineup;
   approach_c: ApproachC;
   trajectory: GameTrajectory;
+  odds: GameOdds;
 }
 
 export interface BallparkPayload {

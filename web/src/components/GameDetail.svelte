@@ -15,6 +15,7 @@
   $: weatherHeld = !isReadyState(game.weather.state);
   $: titleId = `game-detail-title-${game.game_pk}`;
   $: lineupReady = isReadyState(game.lineup.state);
+  const american = (price: number | null): string => price === null ? '—' : `${price > 0 ? '+' : ''}${price}`;
 </script>
 
 <article class="game-detail" aria-labelledby={titleId} data-testid="game-detail">
@@ -79,6 +80,25 @@
       <span>Basis: {game.weather.basis ?? 'not reported'}</span>
       <span>Valid {formatTimestamp(game.weather.valid_at)}</span>
     </p>
+  </section>
+
+  <section class="market-section" aria-labelledby={`market-${game.game_pk}`} data-state={game.odds.state}>
+    <div class="section-heading">
+      <div><p class="eyebrow">Quoted sportsbook market</p><h3 id={`market-${game.game_pk}`}>Full-game total</h3></div>
+      <StateBadge state={game.odds.state} />
+    </div>
+    {#if game.odds.state === 'unavailable'}
+      <p class="market-unavailable">{game.odds.reason ?? 'No verified full-game total is available. No line or price is substituted.'}</p>
+    {:else}
+      <dl class="market-grid">
+        <div><dt>Total</dt><dd>{game.odds.line}</dd></div>
+        <div><dt>Over</dt><dd>{american(game.odds.over_price)}</dd></div>
+        <div><dt>Under</dt><dd>{american(game.odds.under_price)}</dd></div>
+        <div><dt>Sportsbook</dt><dd>{game.odds.sportsbook_name}</dd></div>
+      </dl>
+      {#if game.odds.state === 'stale'}<p class="market-warning">Stale quote: {game.odds.reason}. It is not current.</p>{/if}
+      <p class="source-line"><span>{game.odds.provider}</span><span>Source updated {formatTimestamp(game.odds.source_updated_at)}</span><span>Retrieved {formatTimestamp(game.odds.observed_at)}</span></p>
+    {/if}
   </section>
 
   <ParkWindDiagram {game} {geometry} />

@@ -71,6 +71,7 @@
         "schedule": { "$ref": "#/$defs/scheduleHealth" },
         "weather": { "$ref": "#/$defs/weatherHealth" },
         "lineups": { "$ref": "#/$defs/lineupHealth" },
+        "odds": { "$ref": "#/$defs/oddsHealth" },
         "artifacts": { "$ref": "#/$defs/artifactHealth" }
       }
     },
@@ -110,6 +111,19 @@
         "source": { "type": "string", "minLength": 1 },
         "confirmed_games": { "type": "integer", "minimum": 0, "maximum": 30 },
         "optional": { "const": true }
+      }
+    },
+    "oddsHealth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "source", "current_games", "stale_games", "unavailable_games", "optional"],
+      "properties": {
+        "state": { "enum": ["available", "partial", "unavailable", "not_applicable"] },
+        "source": { "type": "string", "minLength": 1 },
+        "current_games": { "type": "integer", "minimum": 0, "maximum": 30 },
+        "stale_games": { "type": "integer", "minimum": 0, "maximum": 30 },
+        "unavailable_games": { "type": "integer", "minimum": 0, "maximum": 30 },
+        "optional": { "const": false }
       }
     },
     "artifactHealth": {
@@ -254,7 +268,34 @@
             }
           }
         }
+        ,"odds": { "$ref": "#/$defs/odds" }
       }
+    },
+    "odds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["game_pk", "slate_date", "state", "reason", "provider_event_id", "sport", "market_type", "period", "eligibility", "sportsbook_id", "sportsbook_name", "provider", "source_url", "line", "over_price", "under_price", "source_updated_at", "observed_at", "raw_sha256", "snapshot_id", "source_schema_version"],
+      "properties": {
+        "game_pk": { "type": "integer", "minimum": 1 },
+        "slate_date": { "type": "string", "format": "date" },
+        "state": { "enum": ["current", "stale", "unavailable"] },
+        "reason": { "type": ["string", "null"] },
+        "provider_event_id": { "type": ["string", "null"] },
+        "sport": { "const": "MLB" }, "market_type": { "const": "total" }, "period": { "const": "full_game" },
+        "eligibility": { "enum": ["pregame", "live", "final"] },
+        "sportsbook_id": { "type": ["string", "null"] }, "sportsbook_name": { "type": ["string", "null"] },
+        "provider": { "type": "string", "minLength": 1 }, "source_url": { "type": ["string", "null"], "format": "uri" },
+        "line": { "type": ["number", "null"], "minimum": 0, "maximum": 40 },
+        "over_price": { "type": ["integer", "null"], "minimum": -20000, "maximum": 20000 },
+        "under_price": { "type": ["integer", "null"], "minimum": -20000, "maximum": 20000 },
+        "source_updated_at": { "type": ["string", "null"], "format": "date-time" }, "observed_at": { "type": ["string", "null"], "format": "date-time" },
+        "raw_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }, "snapshot_id": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "source_schema_version": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [{
+        "if": { "properties": { "state": { "enum": ["current", "stale"] } } },
+        "then": { "properties": { "line": { "type": "number" }, "over_price": { "type": "integer" }, "under_price": { "type": "integer" }, "source_updated_at": { "type": "string" }, "observed_at": { "type": "string" }, "raw_sha256": { "type": "string" }, "snapshot_id": { "type": "string" }, "sportsbook_id": { "type": "string" }, "sportsbook_name": { "type": "string" }, "provider_event_id": { "type": "string" } } }
+      }]
     },
     "trajectoryPoint": {
       "type": "array",

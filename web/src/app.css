@@ -2190,6 +2190,41 @@ body::before {
 .card-support .wind dd { color: var(--wind); }
 .card-support small { color: var(--ink-faint); font-size: 0.6875rem; }
 
+.market-strip {
+  display: grid;
+  gap: 0.2rem;
+  margin-block: var(--space-4) var(--space-3);
+  padding: var(--space-3);
+  border-inline-start: 3px solid var(--signal-deep);
+  background: var(--paper-sunken);
+  font-size: 0.8125rem;
+}
+
+.market-strip[data-state="stale"], .market-section[data-state="stale"] { border-color: var(--warning, #a15f00); }
+.market-strip[data-state="unavailable"] { border-color: var(--rule-strong); }
+.market-strip span, .market-strip small { color: var(--ink-soft); }
+
+.market-section {
+  margin-block: var(--space-6);
+  padding: var(--space-5);
+  border: 1px solid var(--rule);
+  border-inline-start: 4px solid var(--signal-deep);
+  background: var(--paper-raised);
+}
+
+.market-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-block: var(--space-4);
+  border-block: 1px solid var(--rule);
+}
+.market-grid > div { min-width: 0; padding: var(--space-3); border-inline-start: 1px solid var(--rule); }
+.market-grid > div:first-child { border-inline-start: 0; }
+.market-grid dt { color: var(--ink-faint); font-size: 0.7rem; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
+.market-grid dd { margin: var(--space-1) 0 0; font-family: var(--font-display); font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.market-unavailable, .market-warning { color: var(--ink-soft); }
+.market-warning { font-weight: 700; }
+
 .card-evidence {
   display: flex;
   align-items: center;
@@ -2674,6 +2709,7 @@ body::before {
   .wind-field-heading { display: grid; }
   .wind-key { display: none; }
   .receipt-grid { grid-template-columns: 1fr; }
+  .market-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .game-detail-header h1,
   .game-detail-header h2,
   .game-detail-header > h3 { font-size: clamp(2.25rem, 14vw, 3.75rem); }

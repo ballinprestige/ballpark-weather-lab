@@ -1,0 +1,73 @@
+from __future__ import annotations
+
+from datetime import UTC, date, datetime
+
+from ballpark.odds import normalize_covers_html
+
+
+TARGET = date(2026, 9, 6)
+OBSERVED = datetime(2026, 9, 6, 17, 10, tzinfo=UTC)
+
+
+def _row(*, event: str = "c1", at: int = 1788714000, over: str = "o 8.5", over_price: str = "-105", under: str = "u 8.5", under_price: str = "-115", board_time: str = "13:05") -> str:
+    return f'''<tr class="oddsGameRow"><td class="left-cell"><div class="game-time"><span>Today,</span><span>{board_time}</span></div><div class="td-cell away-cell"><strong>NYY</strong></div><div class="td-cell home-cell"><strong>BOS</strong></div></td><td class="liveOddsCell" data-book="bet365" data-game="{event}" data-date="{at}"><div class="td-cell away-cell">{over}<span class="American __american">{over_price}</span></div><div class="td-cell home-cell">{under}<span class="American __american">{under_price}</span></div></td></tr>'''
+
+
+def _document(*rows: str) -> str:
+    return '<table id="total-table"><tbody>' + ''.join(rows) + '</tbody></table>'
+
+
+def _schedule() -> list[dict[str, object]]:
+    return [{"game_pk": 11, "home_team": "BOS", "away_team": "NYY", "game_time": "2026-09-06T17:05:00Z"}]
+
+
+def test_normalizes_actual_two_sided_full_game_quote() -> None:
+    # 17:00Z is the source's per-book update timestamp, not inferred from retrieval.
+    markets = normalize_covers_html(_document(_row(at=1788714000)), target_date=TARGET, schedule=_schedule(), observed_at=OBSERVED, trust_source_timestamp=True)
+    market = markets[11]
+    assert market["state"] == "current"
+    assert market["line"] == 8.5
+    assert market["over_price"] == -105
+    assert market["under_price"] == -115
+    assert market["period"] == "full_game"
+    assert market["source_updated_at"] == "2026-09-06T17:00:00Z"
+    assert market["observed_at"] == "2026-09-06T17:10:00Z"
+    assert market["sportsbook_id"] == "bet365"
+    assert len(str(market["raw_sha256"])) == 64
+    assert len(str(market["snapshot_id"])) == 64
+
+
+def test_rejects_missing_side_mismatched_line_and_ambiguous_doubleheader() -> None:
+    missing_side = normalize_covers_html(_document(_row(under="")), target_date=TARGET, schedule=_schedule(), observed_at=OBSERVED)[11]
+    mismatched_line = normalize_covers_html(_document(_row(under="u 9.0")), target_date=TARGET, schedule=_schedule(), observed_at=OBSERVED)[11]
+    doubleheader = _schedule() + [{"game_pk": 12, "home_team": "BOS", "away_team": "NYY", "game_time": "2026-09-06T17:05:00Z"}]
+    ambiguous = normalize_covers_html(_document(_row()), target_date=TARGET, schedule=doubleheader, observed_at=OBSERVED)
+    assert missing_side["state"] == "unavailable"
+    assert mismatched_line["state"] == "unavailable"
+    assert all(value["state"] == "unavailable" for value in ambiguous.values())
+
+
+def test_stale_out_of_order_and_conflicting_duplicate_handling() -> None:
+    stale = normalize_covers_html(_document(_row(at=1788710400)), target_date=TARGET, schedule=_schedule(), observed_at=OBSERVED, trust_source_timestamp=True)[11]
+    newer = _row(event="new", at=1788714000, over_price="-104", under_price="-116")
+    older = _row(event="old", at=1788713700, over_price="-110", under_price="-110")
+    selected = normalize_covers_html(_document(newer, older), target_date=TARGET, schedule=_schedule(), observed_at=OBSERVED, trust_source_timestamp=True)[11]
+    conflict = normalize_covers_html(_document(newer, _row(event="conflict", at=1788714000, over_price="-110", under_price="-110")), target_date=TARGET, schedule=_schedule(), observed_at=OBSERVED, trust_source_timestamp=True)[11]
+    assert stale["state"] == "stale"
+    assert selected["state"] == "current"
+    assert selected["over_price"] == -104
+    assert conflict["state"] == "unavailable"
+
+
+def test_wrong_book_or_provider_schema_change_is_unavailable() -> None:
+    wrong_book = _document(_row()).replace('data-book="bet365"', 'data-book="other"')
+    malformed = '<table id="total-table"><tr class="oddsGameRow"><td>changed provider shape</td></tr></table>'
+    assert normalize_covers_html(wrong_book, target_date=TARGET, schedule=_schedule(), observed_at=OBSERVED)[11]["state"] == "unavailable"
+    assert normalize_covers_html(malformed, target_date=TARGET, schedule=_schedule(), observed_at=OBSERVED)[11]["state"] == "unavailable"
+
+
+def test_unverified_book_cell_timestamp_never_certifies_current() -> None:
+    market = normalize_covers_html(_document(_row(at=1788714000)), target_date=TARGET, schedule=_schedule(), observed_at=OBSERVED)[11]
+    assert market["state"] == "unavailable"
+    assert market["source_updated_at"] is None
+    assert market["line"] == 8.5

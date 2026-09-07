@@ -5,6 +5,7 @@ import type {
   BallparkPayload,
   GameFactors,
   GameLineup,
+  GameOdds,
   GameTrajectory,
   GameWeather,
   GeometryArtifact,
@@ -225,6 +226,39 @@ function validateTrajectory(value: unknown, path: string): GameTrajectory {
   };
 }
 
+function nullableNumberAt(value: unknown, path: string, minimum: number, maximum: number): number | null {
+  return value === null ? null : numberAt(value, path, minimum, maximum);
+}
+
+function validateOdds(value: unknown, path: string, gamePk: number, gameDate: string): GameOdds {
+  if (value === undefined) return {
+    game_pk: gamePk, slate_date: gameDate, state: 'unavailable', reason: 'This legacy release predates quoted full-game totals.',
+    provider_event_id: null, sport: 'MLB', market_type: 'total', period: 'full_game', eligibility: 'pregame',
+    sportsbook_id: null, sportsbook_name: null, provider: 'Not recorded', source_url: null, line: null, over_price: null, under_price: null,
+    source_updated_at: null, observed_at: null, raw_sha256: null, snapshot_id: null, source_schema_version: 'legacy-without-markets'
+  };
+  const row = objectAt(value, path);
+  const state = enumAt(row.state, `${path}.state`, ['current', 'stale', 'unavailable']);
+  const market: GameOdds = {
+    game_pk: integerAt(row.game_pk, `${path}.game_pk`, 1), slate_date: isoDateAt(row.slate_date, `${path}.slate_date`), state,
+    reason: nullableStringAt(row.reason, `${path}.reason`), provider_event_id: nullableStringAt(row.provider_event_id, `${path}.provider_event_id`),
+    sport: enumAt(row.sport, `${path}.sport`, ['MLB']), market_type: enumAt(row.market_type, `${path}.market_type`, ['total']),
+    period: enumAt(row.period, `${path}.period`, ['full_game']), eligibility: enumAt(row.eligibility, `${path}.eligibility`, ['pregame', 'live', 'final']),
+    sportsbook_id: nullableStringAt(row.sportsbook_id, `${path}.sportsbook_id`), sportsbook_name: nullableStringAt(row.sportsbook_name, `${path}.sportsbook_name`),
+    provider: stringAt(row.provider, `${path}.provider`) as string, source_url: nullableStringAt(row.source_url, `${path}.source_url`),
+    line: nullableNumberAt(row.line, `${path}.line`, 0, 40), over_price: row.over_price === null ? null : integerAt(row.over_price, `${path}.over_price`, -20000, 20000), under_price: row.under_price === null ? null : integerAt(row.under_price, `${path}.under_price`, -20000, 20000),
+    source_updated_at: timestampAt(row.source_updated_at, `${path}.source_updated_at`, true), observed_at: timestampAt(row.observed_at, `${path}.observed_at`, true),
+    raw_sha256: nullableStringAt(row.raw_sha256, `${path}.raw_sha256`), snapshot_id: nullableStringAt(row.snapshot_id, `${path}.snapshot_id`), source_schema_version: stringAt(row.source_schema_version, `${path}.source_schema_version`) as string
+  };
+  if (market.game_pk !== gamePk || market.slate_date !== gameDate) fail(path, 'must identify this exact scheduled game and slate date');
+  if (state !== 'unavailable') {
+    if ([market.line, market.over_price, market.under_price, market.source_updated_at, market.observed_at, market.raw_sha256, market.snapshot_id, market.sportsbook_id, market.sportsbook_name, market.provider_event_id].some((entry) => entry === null)) {
+      fail(path, 'quoted market must include the line, both prices, book, source/retrieval times, hash, and snapshot');
+    }
+  }
+  return market;
+}
+
 function validateGame(value: unknown, index: number): BallparkGame {
   const path = `games[${index}]`;
   const row = objectAt(value, path);
@@ -236,9 +270,11 @@ function validateGame(value: unknown, index: number): BallparkGame {
   if (!/^[A-Z]{2,3}$/.test(awayTeam)) fail(`${path}.away_team`, 'must be a canonical team code');
   const homePitcher = nullableStringAt(row.home_pitcher, `${path}.home_pitcher`);
   const awayPitcher = nullableStringAt(row.away_pitcher, `${path}.away_pitcher`);
+  const gamePk = integerAt(row.game_pk, `${path}.game_pk`, 1);
+  const gameDate = isoDateAt(row.game_date, `${path}.game_date`);
   return {
-    game_pk: integerAt(row.game_pk, `${path}.game_pk`, 1),
-    game_date: isoDateAt(row.game_date, `${path}.game_date`),
+    game_pk: gamePk,
+    game_date: gameDate,
     game_time: gameTime,
     game_status: stringAt(row.game_status, `${path}.game_status`) as string,
     game_number: integerAt(row.game_number, `${path}.game_number`, 1),
@@ -252,7 +288,8 @@ function validateGame(value: unknown, index: number): BallparkGame {
     factors: validateFactors(row.factors, `${path}.factors`),
     lineup: validateLineup(row.lineup, `${path}.lineup`),
     approach_c: validateApproachC(row.approach_c, `${path}.approach_c`),
-    trajectory: validateTrajectory(row.trajectory, `${path}.trajectory`)
+    trajectory: validateTrajectory(row.trajectory, `${path}.trajectory`),
+    odds: validateOdds(row.odds, `${path}.odds`, gamePk, gameDate)
   };
 }
 
@@ -272,6 +309,13 @@ function validateHealth(value: unknown): PublicationHealth {
     const record = objectAt(health[lane], `health.${lane}`);
     stringAt(record.state, `health.${lane}.state`);
     result[lane] = record;
+  }
+  if (health.odds !== undefined) {
+    const odds = objectAt(health.odds, 'health.odds');
+    enumAt(odds.state, 'health.odds.state', ['available', 'partial', 'unavailable', 'not_applicable']);
+    result.odds = odds;
+  } else {
+    result.odds = { state: 'unavailable', source: 'Not recorded', reason: 'This legacy release predates quoted full-game totals.' };
   }
   return result;
 }
@@ -305,7 +349,10 @@ export function validatePayload(value: unknown): BallparkPayload {
   if (root.product !== 'ballpark-weather-lab') fail('product', 'must identify ballpark-weather-lab');
   const date = isoDateAt(root.date, 'date');
   const status = publicationStatusAt(root.status, 'status');
-  const games = arrayAt(root.games, 'games').map(validateGame);
+  const rawGames = arrayAt(root.games, 'games');
+  const rawIds = rawGames.map((game, index) => integerAt(objectAt(game, `games[${index}]`).game_pk, `games[${index}].game_pk`, 1));
+  if (new Set(rawIds).size !== rawIds.length) fail('games', 'duplicates game ID');
+  const games = rawGames.map(validateGame);
   const seen = new Set<number>();
   for (const [index, game] of games.entries()) {
     if (seen.has(game.game_pk)) fail(`games[${index}].game_pk`, `duplicates game ID ${game.game_pk}`);

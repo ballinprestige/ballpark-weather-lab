@@ -74,6 +74,8 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
             or health["lineups"].get("confirmed_games") != 0
         ):
             raise DataContractError("no-slate lineup health must be not applicable")
+        if "odds" in health and health["odds"].get("state") != "not_applicable":
+            raise DataContractError("no-slate odds health must be not applicable")
         return
     if payload.get("no_slate_reason") is not None:
         raise DataContractError("scheduled-slate payload cannot contain a no-slate explanation")
@@ -81,6 +83,7 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
     verified_weather = 0
     confirmed_lineups = 0
     unavailable_lineups = 0
+    odds_states: list[str] = []
     for game in games:
         weather_state = game["weather"]["state"]
         factor_state = game["factors"]["state"]
@@ -132,8 +135,22 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
                 "home_profile_coverage",
                 "away_profile_coverage",
             )
-        ):
-            raise DataContractError("experimental lineup physics requires complete metrics")
+            ):
+                raise DataContractError("experimental lineup physics requires complete metrics")
+        if "odds" in game:
+            odds = game["odds"]
+            if odds.get("game_pk") != game.get("game_pk") or odds.get("slate_date") != payload.get("date"):
+                raise DataContractError("payload contains odds attached to the wrong game or date")
+            if odds.get("sport") != "MLB" or odds.get("market_type") != "total" or odds.get("period") != "full_game":
+                raise DataContractError("payload contains a non-MLB full-game-total market")
+            state = odds.get("state")
+            odds_states.append(state)
+            if state in {"current", "stale"}:
+                required = ("line", "over_price", "under_price", "source_updated_at", "observed_at", "raw_sha256", "snapshot_id", "sportsbook_id", "sportsbook_name", "provider_event_id")
+                if any(odds.get(key) is None for key in required):
+                    raise DataContractError("quoted market is missing line, both prices, provenance, or timestamps")
+            elif state != "unavailable":
+                raise DataContractError("odds market has an unknown state")
 
     expected_status = "ready" if verified_weather == len(games) else "degraded"
     if payload.get("status") != expected_status:
@@ -164,3 +181,12 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
     )
     if health["lineups"].get("state") != expected_lineup_state:
         raise DataContractError("lineup health state does not match the slate")
+    if "odds" in health:
+        if len(odds_states) != len(games):
+            raise DataContractError("odds health exists but one or more games have no market state")
+        counts = {state: odds_states.count(state) for state in ("current", "stale", "unavailable")}
+        if any(health["odds"].get(f"{state}_games") != count for state, count in counts.items()):
+            raise DataContractError("odds health counts do not match game market states")
+        expected_odds_state = "available" if counts["current"] == len(games) else "partial" if counts["current"] else "unavailable"
+        if health["odds"].get("state") != expected_odds_state:
+            raise DataContractError("odds health state does not match game market states")

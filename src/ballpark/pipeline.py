@@ -12,6 +12,7 @@ from ballpark.errors import DataContractError
 from ballpark.http import HttpClient
 from ballpark.lineups import fetch_lineup
 from ballpark.model import ParkFactorModel
+from ballpark.odds import unavailable_market
 from ballpark.paths import ProjectPaths
 from ballpark.physics import PhysicsEngine, trajectory_theater
 from ballpark.publication import publish_payload
@@ -39,6 +40,8 @@ def load_fixture(path: Path, target_date: date) -> dict[str, Any]:
         raise DataContractError("fixture weather_by_game must be an object")
     if not isinstance(value.get("lineups_by_game", {}), dict):
         raise DataContractError("fixture lineups_by_game must be an object")
+    if not isinstance(value.get("odds_by_game", {}), dict):
+        raise DataContractError("fixture odds_by_game must be an object")
     return value
 
 
@@ -92,6 +95,27 @@ class DailyPipeline:
             )
             validate_payload(payload, self.paths.schemas / "slate.schema.json")
             return payload
+
+        observed_at = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+        if fixture and isinstance(fixture.get("odds_by_game"), dict):
+            odds_by_game = {
+                int(game["game_pk"]): fixture["odds_by_game"].get(
+                    str(game["game_pk"]),
+                    unavailable_market(int(game["game_pk"]), target_date, "fixture omits market", observed_at=observed_at),
+                )
+                for game in schedule
+            }
+        else:
+            # A public Covers page supplied a useful parser sample but its terms do not authorize
+            # republication. Do not silently turn accessibility into a production source grant.
+            odds_by_game = {
+                int(game["game_pk"]): unavailable_market(
+                    int(game["game_pk"]), target_date,
+                    "no authorized live sportsbook provider is configured; public Covers data is not republished",
+                    observed_at=observed_at,
+                )
+                for game in schedule
+            }
 
         model = ParkFactorModel(self.paths.models, self.paths.data)
         physics: PhysicsEngine | None = None
@@ -198,6 +222,7 @@ class DailyPipeline:
                     "lineup": _public_lineup(lineup),
                     "approach_c": approach_c,
                     "trajectory": trajectory_theater(venue, weather),
+                    "odds": odds_by_game[game_pk],
                 }
             )
 
@@ -236,6 +261,7 @@ class DailyPipeline:
                     "confirmed_games": lineups_confirmed,
                     "optional": True,
                 },
+                "odds": self._odds_health(odds_by_game),
                 "artifacts": receipt.as_dict(),
             },
             "games": games,
@@ -257,6 +283,18 @@ class DailyPipeline:
             generated_at=generated_at,
         )
         return payload, publish_payload(output_root, payload)
+
+    @staticmethod
+    def _odds_health(odds_by_game: dict[int, dict[str, Any]]) -> dict[str, Any]:
+        states = [str(value.get("state")) for value in odds_by_game.values()]
+        return {
+            "state": "available" if states and all(state == "current" for state in states) else "partial" if "current" in states else "unavailable",
+            "source": "No authorized live sportsbook provider configured",
+            "current_games": states.count("current"),
+            "stale_games": states.count("stale"),
+            "unavailable_games": states.count("unavailable"),
+            "optional": False,
+        }
 
     @staticmethod
     def _model_receipt(receipt: ArtifactReceipt) -> dict[str, Any]:
@@ -312,6 +350,14 @@ class DailyPipeline:
                     "source": "fixture" if source == "fixture" else "MLB Stats API game feeds",
                     "confirmed_games": 0,
                     "optional": True,
+                },
+                "odds": {
+                    "state": "not_applicable",
+                    "source": "No authorized live sportsbook provider configured",
+                    "current_games": 0,
+                    "stale_games": 0,
+                    "unavailable_games": 0,
+                    "optional": False,
                 },
                 "artifacts": receipt.as_dict(),
             },

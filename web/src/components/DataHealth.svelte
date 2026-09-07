@@ -47,9 +47,9 @@
     <div class="section-heading">
       <div>
         <p class="eyebrow">Dependency state</p>
-        <h2 id="lanes-title">Four publication lanes</h2>
+        <h2 id="lanes-title">Five publication lanes</h2>
       </div>
-      <span class="section-note">Optional never blocks core</span>
+      <span class="section-note">Market failures remain explicit</span>
     </div>
     <div class="health-lane-list">
       {#each lanes as [name, lane], index}

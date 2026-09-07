@@ -23,10 +23,12 @@
   let payloadHash = '';
   let loading = true;
   let error: string | null = null;
+  let refreshError: string | null = null;
   let archiveError: string | null = null;
   let loadingArchiveDate: string | null = null;
   let isArchive = false;
   let loadSequence = 0;
+  let loadingPublication = false;
   let currentInstant = new Date();
   let slateReturn: { gameKey: string; scrollY: number } | null = null;
 
@@ -44,10 +46,18 @@
     routeFromHash(false);
     window.addEventListener('hashchange', handleHashChange);
     const freshnessTimer = window.setInterval(() => currentInstant = new Date(), 60_000);
+    const refreshTimer = window.setInterval(() => void refreshLive(), 5 * 60_000);
+    const refreshOnResume = () => { if (document.visibilityState === 'visible') void refreshLive(); };
+    const refreshOnOnline = () => void refreshLive();
+    document.addEventListener('visibilitychange', refreshOnResume);
+    window.addEventListener('online', refreshOnOnline);
     void loadPublication();
     return () => {
       window.removeEventListener('hashchange', handleHashChange);
       window.clearInterval(freshnessTimer);
+      window.clearInterval(refreshTimer);
+      document.removeEventListener('visibilitychange', refreshOnResume);
+      window.removeEventListener('online', refreshOnOnline);
     };
   });
 
@@ -112,10 +122,11 @@
     if (route !== 'game') slateReturn = null;
   }
 
-  async function loadPublication(): Promise<void> {
+  async function loadPublication(background = false): Promise<void> {
+    if (loadingPublication) return;
+    loadingPublication = true;
     const sequence = ++loadSequence;
-    loading = true;
-    error = null;
+    if (!background || !payload) { loading = true; error = null; }
     try {
       const loaded = await loadCurrentPublication();
       if (sequence !== loadSequence) return;
@@ -123,12 +134,21 @@
       payload = loaded.payload;
       payloadHash = loaded.payloadHash;
       isArchive = false;
+      refreshError = null;
     } catch (reason) {
       if (sequence !== loadSequence) return;
-      error = reason instanceof Error ? reason.message : 'The publication could not be loaded.';
+      const message = reason instanceof Error ? reason.message : 'The publication could not be loaded.';
+      if (payload) refreshError = message;
+      else error = message;
     } finally {
       if (sequence === loadSequence) loading = false;
+      loadingPublication = false;
     }
+  }
+
+  function refreshLive(): Promise<void> {
+    if (isArchive) return Promise.resolve();
+    return loadPublication(true);
   }
 
   async function openArchive(entry: ArchiveEntry): Promise<void> {
@@ -193,7 +213,7 @@
       <strong>{isArchive ? 'ARCHIVE' : publicationIsStale ? 'STALE' : payload.status === 'ready' ? 'READY' : payload.status === 'degraded' ? 'DEGRADED' : 'NO SLATE'}</strong>
       <span>{formatDate(payload.date)}</span>
     </div>
-    <p>{isArchive ? 'Historical snapshot' : publicationIsStale && freshness ? `Showing ${formatDate(payload.date)} while the current MLB date is ${formatDate(freshness.currentDate)} (America/New_York). Do not treat this slate as current.${payload.status === 'degraded' ? ' The dated release also contains held data.' : payload.status === 'no_slate' ? ' The no-slate result applies only to the displayed date.' : ''}` : payload.status === 'degraded' ? 'Some games or optional context are held; ready games remain visible.' : payload.status === 'no_slate' ? (payload.no_slate_reason ?? 'No games are scheduled for this date.') : 'Validated daily park-weather slate.'}</p>
+    <p>{isArchive ? 'Historical snapshot' : refreshError ? `Refresh failed: ${refreshError} Showing the last verified release.` : publicationIsStale && freshness ? `Showing ${formatDate(payload.date)} while the current MLB date is ${formatDate(freshness.currentDate)} (America/New_York). Do not treat this slate as current.${payload.status === 'degraded' ? ' The dated release also contains held data.' : payload.status === 'no_slate' ? ' The no-slate result applies only to the displayed date.' : ''}` : payload.status === 'degraded' ? 'Some games or optional context are held; ready games remain visible.' : payload.status === 'no_slate' ? (payload.no_slate_reason ?? 'No games are scheduled for this date.') : 'Validated daily park-weather slate.'}</p>
     <div class="ribbon-receipt">
       <span>Updated {formatTimestamp(payload.generated_at)}</span>
       <code title={payloadHash}>SHA {shortHash(payloadHash)}</code>

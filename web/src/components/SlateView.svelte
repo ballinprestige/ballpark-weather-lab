@@ -66,6 +66,7 @@
     if (game.weather.dome_active) return 'Roof';
     return game.weather.basis === 'observation' ? 'Observed' : 'Verified';
   };
+  const american = (price: number | null): string => price === null ? '—' : `${price > 0 ? '+' : ''}${price}`;
 
   onMount(() => {
     const media = window.matchMedia('(min-width: 66rem)');
@@ -136,7 +137,7 @@
     <div class="ledger-wrap">
       <table class="ledger">
         <thead>
-          <tr><th>Game</th><th>Time</th><th>Venue</th><th class="num">Factor Δ</th><th class="num">Run PF</th><th class="num">HR PF</th><th class="num">Carry</th><th class="num">Cross</th><th class="num">Temp</th><th class="num">Air</th><th>State</th><th>Action</th></tr>
+          <tr><th>Game</th><th>Time</th><th>Venue</th><th class="num">Factor Δ</th><th class="num">Run PF</th><th class="num">HR PF</th><th class="num">Total</th><th>Over / Under</th><th>Book / market state</th><th>State</th><th>Action</th></tr>
         </thead>
         <tbody>
           {#each games as game (game.game_pk)}
@@ -149,10 +150,9 @@
               <td class="num movement-cell">{movement == null ? '—' : formatDelta(movement, 0) + '%'}</td>
               <td class="num">{isGameHeld(game) ? '—' : formatFactor(game.factors.game_pf_runs)}</td>
               <td class="num">{isGameHeld(game) ? '—' : formatFactor(game.factors.game_pf_hr)}</td>
-              <td class="num wind-derived">{isGameHeld(game) ? '—' : formatDelta(game.weather.wind_carry_mph, 1)}</td>
-              <td class="num wind-derived">{isGameHeld(game) ? '—' : formatDelta(game.weather.wind_cross_mph, 1)}</td>
-              <td class="num">{isGameHeld(game) ? '—' : `${Math.round(game.weather.temperature_f)}°`}</td>
-              <td class="num">{isGameHeld(game) ? '—' : game.weather.air_density_index.toFixed(1)}</td>
+              <td class="num">{game.odds.line ?? '—'}</td>
+              <td>{game.odds.state === 'unavailable' ? 'Unavailable' : `O ${american(game.odds.over_price)} / U ${american(game.odds.under_price)}`}</td>
+              <td><span class="ledger-state" data-tone={game.odds.state === 'current' ? 'good' : 'hold'}>{game.odds.state === 'unavailable' ? 'Unavailable' : `${game.odds.sportsbook_name} · ${game.odds.state}`}</span></td>
               <td><span class="ledger-state" data-tone={isGameHeld(game) ? 'hold' : 'good'}>{statusLabel(game)}</span></td>
               <td><button class="inspect-button" data-game-key={game.game_pk} type="button" aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} details`} on:click={() => onOpenGame(key)}>Inspect</button></td>
             </tr>

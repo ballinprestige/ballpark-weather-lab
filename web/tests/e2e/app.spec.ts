@@ -25,6 +25,8 @@ function fifteenGamePayload(): BallparkPayload {
     const game = structuredClone(payload.games[index % payload.games.length]);
     game.game_pk = 8_200_000 + index;
     game.weather.game_pk = game.game_pk;
+    game.odds.game_pk = game.game_pk;
+    game.odds.provider_event_id = `covers-${game.game_pk}`;
     game.away_team = away;
     game.home_team = home;
     game.venue = venue;
@@ -57,7 +59,7 @@ async function mockPublication(
   if (!archivePayload) {
     archive.date = '2026-08-26';
     archive.generated_at = '2026-08-26T16:05:00Z';
-    archive.games.forEach((game) => game.game_date = archive.date);
+    archive.games.forEach((game) => { game.game_date = archive.date; game.odds.slate_date = archive.date; });
   }
   const archiveText = jsonText(archive);
 
@@ -128,7 +130,7 @@ test('desktop employer path exposes the complete evidence chain', async ({ page 
 
   await page.getByRole('link', { name: 'Data Health' }).click();
   await expect(page.getByRole('link', { name: 'Data Health' })).toHaveAttribute('aria-current', 'page');
-  await expect(page.getByRole('heading', { name: 'Four publication lanes' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Five publication lanes' })).toBeVisible();
   await expect(page.getByText('Payload SHA-256')).toBeVisible();
   await expect(page.getByText('Publication state').locator('..')).toContainText('Ready');
   await expect(page.getByText('Freshness').locator('..')).toContainText('Current');
@@ -143,6 +145,25 @@ test('desktop employer path exposes the complete evidence chain', async ({ page 
   await expect(page.getByText('Historical snapshot')).toBeVisible();
   await page.getByRole('link', { name: 'Data Health' }).click();
   await expect(page.getByText('Freshness').locator('..')).toContainText('Historical snapshot');
+});
+
+test('quoted full-game totals show both actual prices and stale or missing markets are explicit', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('desktop'));
+  const payload = readyPayload();
+  payload.games[1].odds = {
+    ...payload.games[1].odds,
+    state: 'stale', reason: 'selected-book quote is 1200 seconds old; freshness limit is 900 seconds', line: 9,
+    over_price: 105, under_price: -125
+  };
+  payload.health.odds = { state: 'partial', source: 'fixture Covers total table', current_games: 1, stale_games: 1, unavailable_games: 0, optional: false };
+  await mockPublication(page, payload);
+  await page.goto('/#slate');
+  await expect(page.getByRole('row', { name: /SEA at BOS/i })).toContainText('O -105 / U -115');
+  await expect(page.getByRole('row', { name: /SD at SF/i })).toContainText('bet365 · stale');
+  await page.getByRole('button', { name: /Open San Diego Padres.*San Francisco Giants.*details/i }).click();
+  await expect(page.getByRole('heading', { name: 'Full-game total' })).toBeVisible();
+  await expect(page.getByText('Stale quote:', { exact: false })).toContainText('not current');
+  await expect(page.getByText('Source updated', { exact: false })).toBeVisible();
 });
 
 test('mobile slate and game details remain compact and touch safe', async ({ page }, testInfo) => {
