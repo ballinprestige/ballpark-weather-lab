@@ -25,24 +25,6 @@ jobs:
     env:
       PYTHONPATH: src
     steps:
-      - name: Record untrusted pull-request receipt
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
-          PULL_REQUEST_REF: ${{ github.event.pull_request.head.ref }}
-          PULL_REQUEST_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          {
-            echo "### PR verification receipt"
-            echo "- Event: \`$EVENT_NAME\`"
-            echo "- Pull request: \`#$PULL_REQUEST_NUMBER\`"
-            echo "- Proposed ref: \`$PULL_REQUEST_REF\`"
-            echo "- Proposed SHA: \`$PULL_REQUEST_SHA\`"
-            echo "- Runner started (UTC): \`$(date -u +'%Y-%m-%dT%H:%M:%SZ')\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Check out the exact proposed revision without persisted credentials
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -64,17 +46,38 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Record runtime and lock identities
+      - name: Assert exact checkout and record event, runtime, and lock identities
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_MERGE_SHA: ${{ github.sha }}
+          PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+          PULL_REQUEST_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          REQUESTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          actual_checkout_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_checkout_sha" != "$REQUESTED_HEAD_SHA" ]]; then
+            echo "Checked-out SHA does not match requested PR head SHA" >&2
+            echo "requested=$REQUESTED_HEAD_SHA actual=$actual_checkout_sha" >&2
+            exit 1
+          fi
           node_version="$(node --version)"
           if [[ ! "$node_version" =~ ^v22\.(1[2-9]|[2-9][0-9])\. ]]; then
             echo "Unsupported Node runtime: $node_version (need >=22.12, <23)" >&2
             exit 1
           fi
           {
-            echo "### Runtime and lock receipt"
+            echo "### PR verification receipt"
+            echo "- Event: \`$EVENT_NAME\`"
+            echo "- Event ref: \`$EVENT_REF\`"
+            echo "- Event merge SHA: \`$EVENT_MERGE_SHA\`"
+            echo "- Pull request: \`#$PULL_REQUEST_NUMBER\`"
+            echo "- Proposed ref: \`$PULL_REQUEST_HEAD_REF\`"
+            echo "- Requested head SHA: \`$REQUESTED_HEAD_SHA\`"
+            echo "- Actual checkout SHA: \`$actual_checkout_sha\`"
+            echo "- Runner accepted trigger at: \`$(date -u +'%Y-%m-%dT%H:%M:%SZ')\`"
             echo "- Python: \`$(python --version)\`"
             echo "- Node: \`$node_version\`"
             echo "- requirements.lock SHA-256: \`$(sha256sum requirements.lock | awk '{print $1}')\`"
@@ -94,6 +97,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m ruff check src tests scripts
+          python scripts/check_verify_workflow.py
           python -m pytest
           python -m ballpark verify-artifacts
 

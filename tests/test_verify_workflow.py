@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from scripts.check_verify_workflow import validate
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "verify.yml"
@@ -62,7 +64,40 @@ def test_validator_command_fails_nonzero_for_an_unsafe_workflow(tmp_path: Path) 
     )
 
     assert completed.returncode == 1
-    assert "dynamic Python test discovery" in completed.stderr
+    assert "run body differs" in completed.stderr
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda text: text.replace(
+            "    name: PR verification", "    if: false\n    name: PR verification", 1
+        ),
+        lambda text: text.replace(
+            "          python -m pytest",
+            "          if false; then\n            python -m pytest\n          fi",
+            1,
+        ),
+        lambda text: text.replace(
+            "        shell: bash\n        run: |\n          set -euo pipefail\n"
+            "          python -m ruff",
+            "        shell: bash\n        continue-on-error: ${{ true }}\n        run: |\n"
+            "          set -euo pipefail\n          python -m ruff",
+            1,
+        ),
+        lambda text: text
+        + "\n  privileged-bypass:\n    runs-on: ubuntu-latest\n    permissions: write-all\n"
+        + "    steps:\n      - run: gh api --method POST /repos/example/example/issues\n",
+    ],
+    ids=("skipped-job", "conditional-pytest", "expression-continue-on-error", "write-all-job"),
+)
+def test_contract_rejects_semantic_bypass_mutations(tmp_path: Path, mutation: object) -> None:
+    unsafe = tmp_path / "verify.yml"
+    unsafe.write_text(mutation(WORKFLOW.read_text(encoding="utf-8")), encoding="utf-8")
+
+    errors = validate(unsafe)
+
+    assert errors
 
 
 def test_fail_closed_command_stops_after_an_intentional_failure() -> None:
