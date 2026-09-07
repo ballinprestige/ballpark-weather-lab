@@ -2723,6 +2723,8 @@ body::before {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0;
     width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
   }
 
   .site-header nav a {
@@ -2736,7 +2738,7 @@ body::before {
 
   .view.slate-view { padding-block: .35rem; }
   .slate-intro { margin-bottom: .3rem; padding-block: .45rem; }
-  .slate-intro h1 { font-size: 1.82rem; }
+  .slate-intro h1 { display: none; }
   .slate-intro .eyebrow { margin-block-end: .24rem; font-size: .7rem; }
   .slate-meta { font-size: .68rem; line-height: 1.25; }
   .slate-controls { display: grid; grid-template-columns: minmax(0, 1fr) 6.35rem; gap: .3rem; margin-bottom: .35rem; padding-block: 0; }
@@ -2755,6 +2757,8 @@ body::before {
   gap: 0.45rem;
   padding-block: clamp(1rem, 2.8vw, 2.25rem);
 }
+.detail-exchange-line { margin: .15rem 0 0; color: var(--ink); font: 600 .78rem var(--font-ui); font-variant-numeric: tabular-nums; }
+.detail-exchange-line span { color: var(--ink-faint); font-weight: 500; }
 
 .game-detail { display: flex; flex-direction: column; }
 .game-detail-header { order: 0; }

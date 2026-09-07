@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { BallparkGame, GeometryArtifact } from '../lib/types';
-  import { displayValue, formatFactor, formatTime, formatTimestamp, gameHoldReason, isGameHeld, pitcherName, stateTone, teamLabel, windLabel } from '../lib/format';
+  import { displayValue, formatContractCents, formatFactor, formatTime, formatTimestamp, gameHoldReason, isGameHeld, pitcherName, stateTone, teamLabel, windLabel } from '../lib/format';
   import { isReadyState } from '../lib/validate';
   import { assessOddsFreshness } from '../lib/freshness';
   import StateBadge from './StateBadge.svelte';
@@ -43,6 +43,9 @@
       <StateBadge state={game.game_status} />
       <span>{pitcherName(game, 'away')} vs {pitcherName(game, 'home')}</span>
     </div>
+    {#if exchangeAvailable}
+      <p class="detail-exchange-line"><strong>{game.exchange_market?.line}</strong> · Over {formatContractCents(game.exchange_market?.over_ask_cents)} · Under {formatContractCents(game.exchange_market?.under_ask_cents)} <span>Kalshi · captured {formatTimestamp(game.exchange_market?.observed_at ?? null)}</span></p>
+    {/if}
   </header>
 
   <ParkWindDiagram {game} {geometry} />
@@ -91,6 +94,7 @@
     </p>
   </section>
 
+  {#if !exchangeAvailable || marketFreshness.state !== 'unavailable'}
   <section class="market-section" aria-labelledby={`market-${game.game_pk}`} data-state={marketFreshness.state}>
     <div class="section-heading">
       <div><p class="eyebrow">Full-game market evidence</p><h3 id={`market-${game.game_pk}`}>Total, Over &amp; Under</h3></div>
@@ -110,6 +114,7 @@
       <p class="source-line"><span>{game.odds.provider}</span><span>Source updated {formatTimestamp(game.odds.source_updated_at)}</span><span>Retrieved {formatTimestamp(game.odds.observed_at)}</span></p>
     {/if}
   </section>
+  {/if}
 
   {#if exchangeAvailable}
     <section class="exchange-market" aria-labelledby={`exchange-${game.game_pk}`}>
@@ -119,8 +124,8 @@
       </div>
       <dl class="market-grid exchange-grid">
         <div><dt>Total condition</dt><dd>Over {game.exchange_market?.line}</dd></div>
-        <div><dt>YES ask</dt><dd>{game.exchange_market?.over_ask_cents}c <small>({game.exchange_market?.over_ask_dollars})</small></dd></div>
-        <div><dt>NO ask</dt><dd>{game.exchange_market?.under_ask_cents}c <small>({game.exchange_market?.under_ask_dollars})</small></dd></div>
+        <div><dt>YES ask</dt><dd>{formatContractCents(game.exchange_market?.over_ask_cents)} <small>({game.exchange_market?.over_ask_dollars})</small></dd></div>
+        <div><dt>NO ask</dt><dd>{formatContractCents(game.exchange_market?.under_ask_cents)} <small>({game.exchange_market?.under_ask_dollars})</small></dd></div>
         <div><dt>Market phase</dt><dd>{game.exchange_market?.game_phase?.replaceAll('_', ' ')}</dd></div>
       </dl>
       <p class="market-warning">Contract asks are quoted in cents, not American sportsbook odds. Source update age is unknown; fees are excluded.</p>

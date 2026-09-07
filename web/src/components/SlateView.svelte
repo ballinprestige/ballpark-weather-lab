@@ -7,7 +7,7 @@
   import { assessOddsFreshness } from '../lib/freshness';
 
   type SlateFilter = 'all' | 'open' | 'roof' | 'incomplete';
-  type SlateSort = 'movement' | 'time' | 'wind' | 'venue';
+  type SlateSort = 'upcoming' | 'movement' | 'time' | 'wind' | 'venue';
 
   export let payload: BallparkPayload;
   export let onOpenGame: (key: string) => void;
@@ -15,7 +15,7 @@
 
   let desktop = false;
   let filter: SlateFilter = 'all';
-  let sort: SlateSort = 'movement';
+  let sort: SlateSort = 'upcoming';
 
   const movementPercent = (game: BallparkGame): number | null => {
     if (isGameHeld(game)) return null;
@@ -30,6 +30,16 @@
   };
 
   const sorted = (games: BallparkGame[], activeSort: SlateSort): BallparkGame[] => [...games].sort((left, right) => {
+    if (activeSort === 'upcoming') {
+      const rank = (game: BallparkGame): number => {
+        const phase = game.exchange_market?.game_phase;
+        if (phase === 'pregame' || Date.parse(game.game_time) > now.getTime()) return 0;
+        if (phase === 'final' || /final|completed/i.test(game.game_status)) return 2;
+        return 1;
+      };
+      const rankDifference = rank(left) - rank(right);
+      return rankDifference || Date.parse(left.game_time) - Date.parse(right.game_time);
+    }
     const leftHeld = isGameHeld(left);
     const rightHeld = isGameHeld(right);
     if (leftHeld !== rightHeld) return leftHeld ? 1 : -1;
@@ -81,6 +91,9 @@
   $: marketSummary = knownSportsbook === 0
     ? `Sportsbook totals unavailable ${payload.games.length}/${payload.games.length}`
     : `Current sportsbook totals ${currentSportsbook}/${payload.games.length}`;
+  $: observedExchange = payload.games.filter((game) => game.exchange_market?.state === 'observed_unknown_age').length;
+  $: upcomingExchange = payload.games.filter((game) => game.exchange_market?.state === 'observed_unknown_age' && game.exchange_market.game_phase === 'pregame').length;
+  $: exchangeCapture = payload.games.find((game) => game.exchange_market?.state === 'observed_unknown_age')?.exchange_market?.observed_at ?? null;
 </script>
 
 <section class="view slate-view" aria-labelledby="slate-title">
@@ -88,7 +101,7 @@
     <div>
       <p class="eyebrow">{formatDate(payload.date)} · {payload.games.length} {payload.games.length === 1 ? 'game' : 'games'}</p>
       <h1 id="slate-title">Ballpark board</h1>
-      <p class="slate-meta">Weather ready {verified}/{payload.games.length} · {marketSummary} · Updated {formatTimestamp(payload.generated_at)}</p>
+      <p class="slate-meta">{#if observedExchange}{observedExchange} observed exchange totals · {upcomingExchange} upcoming · Kalshi capture {formatTimestamp(exchangeCapture)}{:else}Weather ready {verified}/{payload.games.length} · {marketSummary} · Updated {formatTimestamp(payload.generated_at)}{/if}</p>
     </div>
   </section>
 
@@ -104,6 +117,7 @@
     <label class="sort-control">
       <span class="control-label">Sort</span>
       <select bind:value={sort}>
+        <option value="upcoming">Upcoming first</option>
         <option value="movement">Largest movement</option>
         <option value="time">First pitch</option>
         <option value="wind">Carry wind</option>
