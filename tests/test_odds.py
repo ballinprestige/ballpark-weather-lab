@@ -127,8 +127,8 @@ def test_kalshi_exchange_asks_are_cents_not_american_odds() -> None:
     game = {"game_pk": 11, "home_team": "LAD", "away_team": "CIN", "game_time": "2026-09-08T01:10:00Z", "game_status": "Scheduled"}
     observed = datetime(2026, 9, 7, 20, 0, tzinfo=UTC)
     quote = normalize_markets(game, {"status": "open", "event_ticker": "KXMLBTOTAL-26SEP072110CINLAD"}, [{"event_ticker": "KXMLBTOTAL-26SEP072110CINLAD", "ticker": "KXMLBTOTAL-26SEP072110CINLAD-9", "status": "active", "title": "Over 8.5 runs scored", "strike_type": "greater", "floor_strike": "8.5", "yes_ask_dollars": "0.4900", "no_ask_dollars": "0.5200", "yes_ask_size_fp": "12.5", "yes_bid_size_fp": "8.5"}], observed_at=observed)
-    assert quote["state"] == "available"
-    assert quote["over_ask_cents"] == 49 and quote["under_ask_cents"] == 52
+    assert quote["state"] == "observed_unknown_age"
+    assert quote["over_ask_cents"] == "49.0000" and quote["under_ask_cents"] == "52.0000"
     assert quote["price_format"] == "contract_cents" and quote["source_updated_at"] is None
 
 

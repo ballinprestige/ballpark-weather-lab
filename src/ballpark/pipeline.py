@@ -319,10 +319,9 @@ class DailyPipeline:
     def _exchange_health(exchange_by_game: dict[int, dict[str, Any]]) -> dict[str, Any]:
         states = [str(value.get("state")) for value in exchange_by_game.values()]
         return {
-            "state": "available" if states and all(state == "available" for state in states) else "partial" if "available" in states else "unavailable",
+            "state": "available" if states and all(state == "observed_unknown_age" for state in states) else "partial" if "observed_unknown_age" in states else "unavailable",
             "source": "Kalshi public market-data API",
-            "available_games": states.count("available"),
-            "unknown_age_games": states.count("available"),
+            "observed_unknown_age_games": states.count("observed_unknown_age"),
             "unavailable_games": states.count("unavailable"),
             "optional": True,
         }
@@ -393,8 +392,7 @@ class DailyPipeline:
                 "exchange_markets": {
                     "state": "not_applicable",
                     "source": "Kalshi public market-data API",
-                    "available_games": 0,
-                    "unknown_age_games": 0,
+                    "observed_unknown_age_games": 0,
                     "unavailable_games": 0,
                     "optional": True,
                 },

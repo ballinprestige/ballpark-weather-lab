@@ -8,7 +8,7 @@ import re
 import tempfile
 import time
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -19,10 +19,15 @@ from ballpark.http import HttpClient
 API = "https://external-api.kalshi.com/trade-api/v2"
 SERIES = "KXMLBTOTAL"
 _ET = ZoneInfo("America/New_York")
-_EVENT = re.compile(r"^KXMLBTOTAL-(\d{2})([A-Z]{3})(\d{2})(\d{2})(\d{2})([A-Z]{3})([A-Z]{3})$")
+_EVENT = re.compile(r"^KXMLBTOTAL-(\d{2}[A-Z]{3}\d{2})(\d{4})([A-Z]+)$")
 _TITLE = re.compile(r"^Over\s+(\d+\.5)\s+runs scored$", re.I)
-_MONTHS = {name: number for number, name in enumerate(("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"), 1)}
-_KALSHI_TEAM = {"ARI": "AZ", "OAK": "ATH"}
+_KALSHI_TEAM = {
+    "ARI": "AZ", "ATL": "ATL", "BAL": "BAL", "BOS": "BOS", "CHC": "CHC", "CIN": "CIN",
+    "CLE": "CLE", "COL": "COL", "CWS": "CWS", "DET": "DET", "HOU": "HOU", "KC": "KC",
+    "LAA": "LAA", "LAD": "LAD", "MIA": "MIA", "MIL": "MIL", "MIN": "MIN", "NYM": "NYM",
+    "NYY": "NYY", "OAK": "ATH", "PHI": "PHI", "PIT": "PIT", "SD": "SD", "SEA": "SEA",
+    "SF": "SF", "STL": "STL", "TB": "TB", "TEX": "TEX", "TOR": "TOR", "WSH": "WSH",
+}
 
 
 def _utc(value: str | datetime) -> datetime:
@@ -41,17 +46,25 @@ def _event_start(ticker: Any) -> tuple[datetime, str, str] | None:
     if not match:
         return None
     try:
-        local = datetime(2000 + int(match[1]), _MONTHS[match[2]], int(match[3]), int(match[4]), int(match[5]), tzinfo=_ET)
-    except (KeyError, ValueError):
+        local = datetime.strptime(match[1], "%y%b%d").replace(
+            hour=int(match[2][:2]), minute=int(match[2][2:]), tzinfo=_ET
+        )
+    except ValueError:
         return None
-    return local.astimezone(UTC), match[6], match[7]
+    teams = match[3]
+    aliases = sorted(set(_KALSHI_TEAM.values()), key=len, reverse=True)
+    for away in aliases:
+        home = teams[len(away):] if teams.startswith(away) else ""
+        if home in aliases:
+            return local.astimezone(UTC), away, home
+    return None
 
 
 def _phase(game: dict[str, Any], at: datetime) -> tuple[str, str | None]:
     status = str(game.get("game_status") or "").lower()
     if any(word in status for word in ("postponed", "cancelled", "canceled")):
         return "unknown", "official game is postponed or cancelled"
-    if "final" in status:
+    if "final" in status or "game over" in status or "completed" in status or "closed" in status:
         return "final", "official game is final"
     if any(word in status for word in ("in progress", "live", "delayed", "suspended")):
         return "in_progress", None
@@ -107,11 +120,11 @@ def _line(event_ticker: str, market: dict[str, Any]) -> dict[str, Any] | None:
     over_size, under_size = _size(market.get("yes_ask_size_fp")), _size(market.get("yes_bid_size_fp"))
     if None in (over, under, over_size, under_size):
         return None
-    return {"market_ticker": ticker, "line": float(line), "condition": f"Over {line} runs scored", "over_ask_dollars": format(over, ".4f"), "under_ask_dollars": format(under, ".4f"), "over_ask_cents": int((over * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)), "under_ask_cents": int((under * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)), "over_ask_size": format(over_size, "f"), "under_ask_size": format(under_size, "f")}
+    return {"market_ticker": ticker, "line": float(line), "condition": f"Over {line} runs scored", "over_ask_dollars": format(over, ".4f"), "under_ask_dollars": format(under, ".4f"), "over_ask_cents": format(over * 100, "f"), "under_ask_cents": format(under * 100, "f"), "over_ask_size": format(over_size, "f"), "under_ask_size": format(under_size, "f")}
 
 
-def orderbook_validates(quote: dict[str, Any], orderbook: dict[str, Any]) -> bool:
-    """Confirm both supplied asks from positive reciprocal best bids."""
+def orderbook_validates(quote: dict[str, Any], orderbook: dict[str, Any]) -> tuple[str, str] | None:
+    """Confirm paired asks and return the matching reciprocal orderbook depths."""
     levels = orderbook.get("orderbook_fp", {}) if isinstance(orderbook, dict) else {}
 
     def best(values: Any) -> tuple[Decimal, Decimal] | None:
@@ -126,11 +139,13 @@ def orderbook_validates(quote: dict[str, Any], orderbook: dict[str, Any]) -> boo
 
     yes_bid, no_bid = best(levels.get("yes_dollars")), best(levels.get("no_dollars"))
     if yes_bid is None or no_bid is None:
-        return False
-    return (
+        return None
+    if not (
         Decimal("1") - no_bid[0] == Decimal(str(quote["over_ask_dollars"]))
         and Decimal("1") - yes_bid[0] == Decimal(str(quote["under_ask_dollars"]))
-    )
+    ):
+        return None
+    return format(no_bid[1], "f"), format(yes_bid[1], "f")
 
 
 def normalize_markets(game: dict[str, Any], event: dict[str, Any], markets: list[dict[str, Any]], *, observed_at: datetime, raw_bytes: bytes | None = None) -> dict[str, Any]:
@@ -150,14 +165,14 @@ def normalize_markets(game: dict[str, Any], event: dict[str, Any], markets: list
     line = min(
         lines,
         key=lambda value: (
-            abs(value["over_ask_cents"] - 50) + abs(value["under_ask_cents"] - 50),
+            abs(Decimal(value["over_ask_cents"]) - 50) + abs(Decimal(value["under_ask_cents"]) - 50),
             value["market_ticker"],
         ),
     )
     raw = raw_bytes if raw_bytes is not None else json.dumps({"event": event, "markets": markets}, sort_keys=True, separators=(",", ":")).encode()
     digest = hashlib.sha256(raw).hexdigest()
     return {
-        "state": "available", "reason": "source quote-update time is not supplied", "provider": "Kalshi", "provider_url": API, "slate_date": _utc(str(game["game_time"])).astimezone(_ET).date().isoformat(),
+        "state": "observed_unknown_age", "reason": "source quote-update time is not supplied", "provider": "Kalshi", "provider_url": API, "slate_date": _utc(str(game["game_time"])).astimezone(_ET).date().isoformat(),
         "event_ticker": str(event["event_ticker"]), "market_ticker": line["market_ticker"], "game_pk": int(game["game_pk"]), "game_time": game.get("game_time"),
         "market_type": "total", "period": "full_game", "game_phase": phase, "quote_type": "contract_ask", "condition": line["condition"], "price_format": "contract_cents", "currency": "USD", **line,
         "source_updated_at": None, "observed_at": _stamp(observed_at), "raw_sha256": digest,
@@ -177,7 +192,9 @@ class KalshiSnapshotCache:
 
     def get(self, game: dict[str, Any], at: datetime, reason: str) -> dict[str, Any] | None:
         quote = self.quotes.get(str(game["game_pk"]))
-        if not quote or quote.get("state") != "available":
+        if not quote or quote.get("state") != "observed_unknown_age":
+            return None
+        if quote.get("game_time") != game.get("game_time"):
             return None
         try:
             age = (_utc(at) - _utc(str(quote["observed_at"]))).total_seconds()
@@ -185,10 +202,17 @@ class KalshiSnapshotCache:
             return None
         if not 0 <= age <= 86400:
             return None
-        return {**quote, "reason": "source quote-update time is not supplied; retained after fetch failure", "failure_reason": reason}
+        phase, terminal = _phase(game, _utc(at))
+        if terminal:
+            return None
+        return {
+            **quote, "slate_date": _utc(str(game["game_time"])).astimezone(_ET).date().isoformat(),
+            "game_phase": phase, "reason": "source quote-update time is not supplied; retained after fetch failure",
+            "failure_reason": reason,
+        }
 
     def accept(self, quote: dict[str, Any]) -> None:
-        if quote.get("state") != "available":
+        if quote.get("state") != "observed_unknown_age":
             return
         existing = self.quotes.get(str(quote["game_pk"]))
         if existing and _utc(str(existing["observed_at"])) > _utc(str(quote["observed_at"])):
@@ -259,10 +283,17 @@ class KalshiExchangeProvider:
         except Exception as exc:
             reason = f"Kalshi public market request failed: {type(exc).__name__}"
             return {int(game["game_pk"]): self.cache.get(game, datetime.now(UTC), reason) or {**results[int(game["game_pk"])], "reason": reason} for game in schedule}
+        keys = [
+            (_utc(str(game.get("game_time"))), _KALSHI_TEAM.get(str(game.get("away_team")), game.get("away_team")), _KALSHI_TEAM.get(str(game.get("home_team")), game.get("home_team")))
+            for game in schedule
+        ]
         used: set[str] = set()
         for game in schedule:
             team_pair = (_KALSHI_TEAM.get(str(game.get("away_team")), game.get("away_team")), _KALSHI_TEAM.get(str(game.get("home_team")), game.get("home_team")))
-            matches = [event for event in events if isinstance(event, dict) and (parsed := _event_start(event.get("event_ticker"))) and parsed[0] == _utc(str(game.get("game_time"))) and parsed[1:] == team_pair]
+            game_key = (_utc(str(game.get("game_time"))), *team_pair)
+            matches = [event for event in events if isinstance(event, dict) and (parsed := _event_start(event.get("event_ticker"))) and parsed == game_key]
+            if keys.count(game_key) != 1:
+                continue
             if len(matches) != 1 or str(matches[0]["event_ticker"]) in used:
                 continue
             event = matches[0]; used.add(str(event["event_ticker"]))
@@ -273,11 +304,12 @@ class KalshiExchangeProvider:
                 quote = normalize_markets(game, event, markets, observed_at=observed_at, raw_bytes=events_raw + b"\n" + markets_raw)
                 if cursor and quote["state"] == "unavailable":
                     quote["failure_reason"] = "Kalshi event pagination reached its three-page safety limit"
-                if quote["state"] == "available":
+                if quote["state"] == "observed_unknown_age":
                     orderbook, orderbook_raw = self._json(
                         f"/markets/{quote['market_ticker']}/orderbook", {}
                     )
-                    if not orderbook_validates(quote, orderbook):
+                    depths = orderbook_validates(quote, orderbook)
+                    if depths is None:
                         quote = unavailable_market(
                             game, observed_at, "Kalshi orderbook does not confirm the two supplied asks"
                         )
@@ -285,6 +317,13 @@ class KalshiExchangeProvider:
                         # The public API has no quote-update timestamp.  Record completion of
                         # this paired market/orderbook retrieval, never the pipeline start time.
                         quote["observed_at"] = _stamp(datetime.now(UTC))
+                        phase, terminal = _phase(game, _utc(quote["observed_at"]))
+                        if terminal:
+                            quote = unavailable_market(game, _utc(quote["observed_at"]), terminal)
+                            results[int(game["game_pk"])] = quote
+                            continue
+                        quote["game_phase"] = phase
+                        quote["over_ask_size"], quote["under_ask_size"] = depths
                         quote["raw_sha256"] = hashlib.sha256(
                             events_raw + b"\n" + markets_raw + b"\n" + orderbook_raw
                         ).hexdigest()

@@ -1,6 +1,6 @@
 # BP004 Terra integration handoff
 
-Implementation candidate revision: `821f9bd093da910cf7de6182ede785ab94a13da6`.
+Implementation candidate revision: recorded after this correction commit.
 
 ## What is wired
 
@@ -20,13 +20,13 @@ not a scheduler or browser refresh mechanism.
 ## Final BP006 payload seam
 
 Every new non-empty release has `health.exchange_markets` and every game has
-`exchange_market`. `available` means a complete observed contract ask whose
+`exchange_market`. `observed_unknown_age` means a complete observed contract ask whose
 source age is unknown, never a verified-current sportsbook price.
 
 ```json
 {
   "exchange_market": {
-    "state": "available",
+    "state": "observed_unknown_age",
     "reason": "source quote-update time is not supplied",
     "failure_reason": null,
     "provider": "Kalshi",
@@ -46,8 +46,8 @@ source age is unknown, never a verified-current sportsbook price.
     "line": 8.5,
     "over_ask_dollars": "0.4900",
     "under_ask_dollars": "0.5200",
-    "over_ask_cents": 49,
-    "under_ask_cents": 52,
+    "over_ask_cents": "49.0000",
+    "under_ask_cents": "52.0000",
     "over_ask_size": "34685.03",
     "under_ask_size": "25686.21",
     "source_updated_at": null,
@@ -61,8 +61,7 @@ source age is unknown, never a verified-current sportsbook price.
     "exchange_markets": {
       "state": "partial",
       "source": "Kalshi public market-data API",
-      "available_games": 4,
-      "unknown_age_games": 4,
+      "observed_unknown_age_games": 4,
       "unavailable_games": 7,
       "optional": true
     }
@@ -73,8 +72,8 @@ source age is unknown, never a verified-current sportsbook price.
 `game_phase` is one of `pregame`, `in_progress`,
 `after_scheduled_start`, `final`, or `unknown`. Fresh official live status
 takes precedence over the scheduled clock; clock-only passed starts are
-`after_scheduled_start`. Decimal strings are canonical; cents are rounded
-display values and must never enter an American-odds formatter.
+`after_scheduled_start`. Decimal strings are canonical; cents retain source
+precision and must never enter an American-odds formatter.
 
 ## Evidence and validation
 

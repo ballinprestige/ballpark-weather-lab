@@ -144,10 +144,9 @@ def main(argv: list[str] | None = None) -> int:
             generated_at = args.generated_at or datetime.now(UTC).isoformat().replace("+00:00", "Z")
             payload["generated_at"] = generated_at
             payload["health"]["exchange_markets"] = {
-                "state": "available" if states and all(state == "available" for state in states) else "partial" if "available" in states else "unavailable",
+                "state": "available" if states and all(state == "observed_unknown_age" for state in states) else "partial" if "observed_unknown_age" in states else "unavailable",
                 "source": "Kalshi public market-data API",
-                "available_games": states.count("available"),
-                "unknown_age_games": states.count("available"),
+                "observed_unknown_age_games": states.count("observed_unknown_age"),
                 "unavailable_games": states.count("unavailable"),
                 "optional": True,
             }

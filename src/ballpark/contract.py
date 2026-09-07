@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -184,7 +184,27 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
             exchange_states.append(state)
             if exchange.get("provider") != "Kalshi" or exchange.get("market_type") != "total" or exchange.get("period") != "full_game" or exchange.get("quote_type") != "contract_ask" or exchange.get("price_format") != "contract_cents":
                 raise DataContractError("exchange market has an invalid provider or price domain")
-            if state == "available":
+            if (state == "observed_unknown_age") != (exchange.get("active") is True):
+                raise DataContractError("exchange active flag does not match its availability state")
+            status = str(game.get("game_status") or "").lower()
+            phase = exchange.get("game_phase")
+            if any(word in status for word in ("final", "game over", "completed", "closed")):
+                expected_phase = "final"
+            elif any(word in status for word in ("in progress", "live", "delayed", "suspended")):
+                expected_phase = "in_progress"
+            elif any(word in status for word in ("postponed", "cancelled", "canceled")):
+                expected_phase = "unknown"
+            else:
+                observed_clock = datetime.fromisoformat(
+                    str(exchange["observed_at"]).replace("Z", "+00:00")
+                ).astimezone(UTC)
+                start_clock = datetime.fromisoformat(
+                    str(game["game_time"]).replace("Z", "+00:00")
+                ).astimezone(UTC)
+                expected_phase = "pregame" if observed_clock < start_clock else "after_scheduled_start"
+            if phase != expected_phase:
+                raise DataContractError("exchange phase does not match official status and scheduled start")
+            if state == "observed_unknown_age":
                 required = ("event_ticker", "market_ticker", "condition", "line", "over_ask_dollars", "under_ask_dollars", "over_ask_cents", "under_ask_cents", "over_ask_size", "under_ask_size", "observed_at", "raw_sha256", "snapshot_id")
                 if any(exchange.get(key) is None for key in required) or exchange.get("source_updated_at") is not None:
                     raise DataContractError("observed exchange quote is missing evidence or invents a source update time")
@@ -196,10 +216,8 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
                 if not (Decimal("0") < over < Decimal("1") and Decimal("0") < under < Decimal("1") and over_size > 0 and under_size > 0):
                     raise DataContractError("exchange quote requires positive two-sided asks and depth")
                 if (
-                    int((over * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-                    != exchange["over_ask_cents"]
-                    or int((under * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-                    != exchange["under_ask_cents"]
+                    Decimal(str(exchange["over_ask_cents"])) != over * 100
+                    or Decimal(str(exchange["under_ask_cents"])) != under * 100
                 ):
                     raise DataContractError("exchange display cents do not match native dollars")
                 observed = datetime.fromisoformat(str(exchange["observed_at"]).replace("Z", "+00:00")).astimezone(UTC)
@@ -250,9 +268,9 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
     if "exchange_markets" in health:
         if len(exchange_states) != len(games):
             raise DataContractError("exchange health exists but one or more games have no exchange state")
-        observed_count = exchange_states.count("available")
+        observed_count = exchange_states.count("observed_unknown_age")
         unavailable_count = exchange_states.count("unavailable")
-        if health["exchange_markets"].get("available_games") != observed_count or health["exchange_markets"].get("unknown_age_games") != observed_count or health["exchange_markets"].get("unavailable_games") != unavailable_count:
+        if health["exchange_markets"].get("observed_unknown_age_games") != observed_count or health["exchange_markets"].get("unavailable_games") != unavailable_count:
             raise DataContractError("exchange health counts do not match game market states")
         expected_exchange_state = "available" if observed_count == len(games) else "partial" if observed_count else "unavailable"
         if health["exchange_markets"].get("state") != expected_exchange_state:

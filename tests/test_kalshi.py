@@ -33,7 +33,7 @@ def test_selects_deterministic_half_run_and_preserves_decimal_prices() -> None:
         [market(ticker="KXMLBTOTAL-26SEP072110CINLAD-8", line="7.5", over="0.7000", under="0.3500"), market()],
         observed_at=OBSERVED,
     )
-    assert quote["state"] == "available"
+    assert quote["state"] == "observed_unknown_age"
     assert quote["market_ticker"].endswith("-9")
     assert quote["over_ask_dollars"] == "0.4900"
     assert quote["under_ask_dollars"] == "0.5200"
@@ -43,6 +43,25 @@ def test_official_live_status_overrides_a_future_stored_start() -> None:
     quote = normalize_markets({**GAME, "game_status": "In Progress", "game_time": "2026-09-08T23:00:00Z"}, EVENT, [market()], observed_at=OBSERVED)
     assert quote["state"] == "unavailable"  # exact-start reconciliation wins
     assert quote["game_phase"] == "in_progress"
+
+
+def test_variable_length_kalshi_aliases_map_all_exact_starts() -> None:
+    cases = [
+        ("WSH", "SD", "2026-09-07T21:10:00Z", "KXMLBTOTAL-26SEP071710WSHSD"),
+        ("STL", "SF", "2026-09-08T00:10:00Z", "KXMLBTOTAL-26SEP072010STLSF"),
+        ("ARI", "KC", "2026-09-07T18:10:00Z", "KXMLBTOTAL-26SEP071410AZKC"),
+    ]
+    for away, home, start, ticker in cases:
+        game = {**GAME, "away_team": away, "home_team": home, "game_time": start}
+        event = {"event_ticker": ticker}
+        quote = normalize_markets(game, event, [{**market(), "event_ticker": ticker, "ticker": ticker + "-9"}], observed_at=OBSERVED)
+        assert quote["state"] == "observed_unknown_age"
+
+
+def test_game_over_is_terminal_not_a_clock_inference() -> None:
+    quote = normalize_markets({**GAME, "game_status": "Game Over"}, EVENT, [market()], observed_at=OBSERVED)
+    assert quote["state"] == "unavailable"
+    assert quote["game_phase"] == "final"
 
 
 def test_rejects_zero_depth_and_requires_reciprocal_orderbook() -> None:
@@ -71,5 +90,5 @@ def test_provider_retains_last_good_after_network_failure(tmp_path: Path) -> Non
     cache_path = tmp_path / "kalshi-cache.json"
     first = KalshiExchangeProvider(_Client(), cache_path=cache_path).fetch([GAME], observed_at=OBSERVED)
     retained = KalshiExchangeProvider(_Client(True), cache_path=cache_path).fetch([GAME], observed_at=OBSERVED)
-    assert first[823902]["state"] == retained[823902]["state"] == "available"
+    assert first[823902]["state"] == retained[823902]["state"] == "observed_unknown_age"
     assert retained[823902]["failure_reason"] == "Kalshi public market request failed: OSError"
