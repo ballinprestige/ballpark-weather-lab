@@ -25,6 +25,7 @@ COVERS_SCHEMA_VERSION = "covers-html-total-table-v1"
 DEFAULT_BOOK_ID = "bet365"
 FRESHNESS_SECONDS = 15 * 60
 FUTURE_SKEW_SECONDS = 5 * 60
+RETRYABLE_HTTP_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
 _NY = ZoneInfo("America/New_York")
 _ROW_RE = re.compile(r'<tr\b[^>]*class="[^"]*oddsGameRow[^"]*"[^>]*>(.*?)</tr>', re.I | re.S)
 _CELL_RE = re.compile(r'<td\b(?P<attrs>[^>]*)>(?P<body>.*?)</td>', re.I | re.S)
@@ -49,6 +50,34 @@ def _utc(value: datetime | str) -> datetime:
 
 def _timestamp(value: datetime) -> str:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def provider_failure_reason(status: int | None, error: BaseException | None = None) -> tuple[str, bool]:
+    """Sanitized classification; never includes a request URL or credential."""
+    if status in RETRYABLE_HTTP_STATUSES:
+        return (f"The Odds API HTTP {status}; bounded retry may be attempted", True)
+    if status is not None:
+        return (f"The Odds API HTTP {status}; not retryable", False)
+    return (f"The Odds API transport failure: {type(error).__name__ if error else 'unknown'}", True)
+
+
+class OddsSnapshotCache:
+    """In-memory restart/replay seam: newer observed evidence wins, never yesterday."""
+
+    def __init__(self) -> None:
+        self._by_game: dict[tuple[str, int], dict[str, Any]] = {}
+
+    def accept(self, market: dict[str, Any]) -> bool:
+        key = (str(market.get("slate_date")), int(market.get("game_pk")))
+        existing = self._by_game.get(key)
+        if existing and str(existing.get("observed_at") or "") >= str(market.get("observed_at") or ""):
+            return False
+        self._by_game[key] = dict(market)
+        return True
+
+    def for_slate(self, slate_date: date, game_pk: int) -> dict[str, Any] | None:
+        value = self._by_game.get((slate_date.isoformat(), game_pk))
+        return dict(value) if value else None
 
 
 def unavailable_market(game_pk: int, slate_date: date, reason: str, *, observed_at: datetime | None = None) -> dict[str, Any]:

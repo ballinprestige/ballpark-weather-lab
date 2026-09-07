@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-from ballpark.odds import TheOddsApiProvider, normalize_covers_html
+from ballpark.odds import OddsSnapshotCache, TheOddsApiProvider, normalize_covers_html, provider_failure_reason
 
 
 TARGET = date(2026, 9, 6)
@@ -94,3 +94,17 @@ def test_odds_api_missing_key_and_malformed_replay_fail_closed() -> None:
     configured = TheOddsApiProvider(object(), api_key="runtime-only", book_id="draftkings")
     assert missing.fetch(TARGET, _schedule(), observed_at=OBSERVED)[11]["state"] == "unavailable"
     assert configured.normalize({"unexpected": True}, target_date=TARGET, schedule=_schedule(), observed_at=OBSERVED)[11]["state"] == "unavailable"
+
+
+def test_provider_failure_classification_and_snapshot_order_are_bounded() -> None:
+    assert provider_failure_reason(401) == ("The Odds API HTTP 401; not retryable", False)
+    assert provider_failure_reason(429)[1] is True
+    assert provider_failure_reason(503)[1] is True
+    assert provider_failure_reason(None, TimeoutError())[1] is True
+    cache = OddsSnapshotCache()
+    first = {"slate_date": "2026-09-06", "game_pk": 11, "observed_at": "2026-09-06T17:00:00Z", "snapshot_id": "first"}
+    older = {**first, "observed_at": "2026-09-06T16:00:00Z", "snapshot_id": "older"}
+    tomorrow = {**first, "slate_date": "2026-09-07", "snapshot_id": "tomorrow"}
+    assert cache.accept(first) is True and cache.accept(older) is False and cache.accept(tomorrow) is True
+    assert cache.for_slate(TARGET, 11)["snapshot_id"] == "first"
+    assert cache.for_slate(date(2026, 9, 7), 11)["snapshot_id"] == "tomorrow"
