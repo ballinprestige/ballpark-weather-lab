@@ -234,6 +234,8 @@ test('field instrument keeps a real wind vector, roof hold, and missing directio
   await expect(page.locator('.wind-decomposition')).toContainText('FROM');
   await expect(page.locator('.wind-decomposition')).toContainText('CROSS');
   await expect(page.getByRole('heading', { name: 'Total, Over & Under' })).toBeVisible();
+  const fieldBox = await page.locator('.park-wind svg').boundingBox();
+  expect(fieldBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(400);
   const samples = page.getByRole('tab', { name: /center carry|high air/i });
   await expect(samples).toHaveCount(2);
   await samples.first().focus();
@@ -392,4 +394,76 @@ test('duplicate game IDs fail closed', async ({ page }, testInfo) => {
   await page.goto('/#slate');
   await expect(page.getByRole('heading', { name: 'Release verification failed' })).toBeVisible();
   await expect(page.getByText(/duplicates game ID/i)).toBeVisible();
+});
+
+const FENWAY_GEOMETRY = {
+  angles_deg: [-45, 0, 45],
+  venues: {
+    BOS: { venue_id: 'fenway_park', cf_azimuth: 35, dome_type: 0, wall_distance_ft: [310, 420, 380], wall_height_ft: [8, 10, 8] }
+  }
+};
+
+function retainedExchangePayload(): BallparkPayload {
+  const payload = readyPayload();
+  for (const game of payload.games) {
+    (game as unknown as Record<string, unknown>).exchange_market = {
+      state: 'observed_unknown_age', reason: 'Quote update time is not published.', failure_reason: 'Kalshi public market-data request returned 503.',
+      provider: 'Kalshi', provider_url: 'https://external-api.kalshi.com/trade-api/v2', event_ticker: `KXMLBTOTAL-${game.game_pk}`, market_ticker: `KXMLBTOTAL-${game.game_pk}-9`,
+      slate_date: payload.date, game_pk: game.game_pk, game_time: game.game_time, market_type: 'total', period: 'full_game', game_phase: 'pregame', quote_type: 'contract_ask',
+      condition: 'Over 8.5 runs scored', price_format: 'contract_cents', currency: 'USD', line: 8.5, over_ask_dollars: '0.4900', under_ask_dollars: '0.5200',
+      over_ask_cents: '49.0000', under_ask_cents: '52.0000', over_ask_size: '12', under_ask_size: '8', source_updated_at: null,
+      observed_at: '2026-08-27T16:00:00Z', raw_sha256: 'c'.repeat(64), snapshot_id: 'd'.repeat(64), active: true, source_schema_version: 'kalshi-public-total-v1'
+    };
+  }
+  (payload.health as unknown as Record<string, unknown>).exchange_markets = {
+    state: 'available', source: 'Kalshi public market-data API', optional: true, observed_unknown_age_games: 2, unavailable_games: 0
+  };
+  return payload;
+}
+
+test('cold game hydrates geometry without waiting for a delayed archive', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('desktop'));
+  await mockPublication(page, readyPayload());
+  await page.route('**/park_geometry.json', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    await route.fulfill({ contentType: 'application/json', body: jsonText(FENWAY_GEOMETRY) });
+  });
+  await page.route('**/archive/index.json', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    await route.fulfill({ status: 503, body: 'archive unavailable' });
+  });
+  await page.goto('/#game/1001');
+  await expect(page.getByTestId('game-detail')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Park wind diagram' })).toBeVisible();
+  await expect(page.locator('.field-wall')).toBeVisible();
+});
+
+test('optional updates are fenced across archive and Return Live generations', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('desktop'));
+  const payload = readyPayload();
+  await mockPublication(page, payload);
+  await page.route('**/park_geometry.json', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await route.fulfill({ contentType: 'application/json', body: jsonText(FENWAY_GEOMETRY) });
+  });
+  await page.goto('/#slate');
+  await page.getByRole('link', { name: 'History' }).click();
+  await page.getByRole('button', { name: /Open Wed, Aug 26, 2026 snapshot/i }).click();
+  await expect(page.getByText('Historical snapshot')).toBeVisible();
+  await page.getByRole('button', { name: /Return to current release/i }).click();
+  await expect(page.getByText('Current release', { exact: false })).toBeVisible();
+  await expect(page.getByText(payload.date, { exact: false })).toBeVisible();
+});
+
+test('retained Kalshi asks show the provider failure without becoming current', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('desktop'));
+  const payload = retainedExchangePayload();
+  await mockPublication(page, payload);
+  await page.goto('/#slate');
+  await expect(page.getByRole('row').nth(1)).toContainText('Over 49¢ · Under 52¢');
+  await expect(page.getByText('Update failed: Kalshi public market-data request returned 503.')).toBeVisible();
+  await expect(page.getByText(/current sportsbook totals/i)).toHaveCount(0);
+  await page.getByRole('link', { name: 'Data Health' }).click();
+  await expect(page.getByRole('heading', { name: 'Kalshi update failed' })).toBeVisible();
+  await expect(page.getByText('Kalshi public market-data request returned 503.')).toBeVisible();
 });

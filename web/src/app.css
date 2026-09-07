@@ -2756,9 +2756,10 @@ body::before {
    CEO-approved evidence while retaining the current app's truthful data states. */
 .game-detail-header {
   gap: 0.45rem;
-  padding-block: clamp(1rem, 2.8vw, 2.25rem);
+  padding-block: clamp(.65rem, 1.5vw, 1.1rem);
 }
 .detail-exchange-line { margin: .15rem 0 0; color: var(--ink); font: 600 .78rem var(--font-ui); font-variant-numeric: tabular-nums; }
+.detail-exchange-line strong { font-size: 1.3rem; }
 .detail-exchange-line span { color: var(--ink-faint); font-weight: 500; }
 
 .game-detail { display: flex; flex-direction: column; }
@@ -2783,12 +2784,12 @@ body::before {
 .park-wind .eyebrow,
 .park-wind figcaption,
 .park-wind .wind-source-line { color: #a9aaa3; }
-.park-wind h3 { color: #f0ece1; font-family: Georgia, 'Times New Roman', serif; font-size: clamp(1.85rem, 3.6vw, 3rem); }
+.park-wind h3 { color: #f0ece1; font-family: Georgia, 'Times New Roman', serif; font-size: clamp(1.3rem, 2.4vw, 1.75rem); }
 .park-wind .park-heading { align-items: end; }
 .carry-reading { display: grid; justify-items: end; gap: 0.12rem; color: #64b6cd; font-family: var(--font-code); font-variant-numeric: tabular-nums; }
 .carry-reading span { font-size: 0.68rem; font-weight: 800; letter-spacing: .16em; }
 .carry-reading strong { font-size: clamp(1rem, 2.3vw, 1.55rem); }
-.park-stage { position: relative; max-width: 58rem; margin: clamp(1rem, 2.6vw, 2rem) auto 0; }
+.park-stage { position: relative; max-width: 38rem; margin: clamp(.55rem, 1.2vw, .9rem) auto 0; }
 .park-wind svg { width: 100%; min-height: 0; border: 0; background: transparent; }
 .park-grid { opacity: .3; }
 .park-grid-line { fill: none; stroke: #385058; stroke-width: .55; }
