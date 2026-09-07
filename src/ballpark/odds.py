@@ -13,7 +13,7 @@ import html as html_lib
 import json
 import re
 from datetime import UTC, date, datetime
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
@@ -299,19 +299,35 @@ class TheOddsApiProvider:
     provider semantics establish a trustworthy quote timestamp.
     """
 
-    def __init__(self, client: HttpClient, *, api_key: str | None, book_id: str) -> None:
+    def __init__(self, client: HttpClient, *, api_key: str | None, book_id: str, requester: Callable[[str], tuple[int, dict[str, str], bytes]] | None = None, cache: OddsSnapshotCache | None = None, quota_floor: int = 1) -> None:
         self.client, self.api_key, self.book_id = client, api_key, book_id
+        self.requester, self.cache, self.quota_floor = requester, cache or OddsSnapshotCache(), quota_floor
 
     def fetch(self, target_date: date, schedule: list[dict[str, Any]], *, observed_at: datetime) -> dict[int, dict[str, Any]]:
         if not self.api_key:
             return {int(g["game_pk"]): unavailable_market(int(g["game_pk"]), target_date, "The Odds API runtime key is not configured", observed_at=observed_at) for g in schedule}
-        try:
-            # Deliberately one request; caller scheduling/quota policy owns any later retry.
-            query = urlencode({"apiKey": self.api_key, "regions": "us", "markets": "totals", "oddsFormat": "american", "dateFormat": "iso", "bookmakers": self.book_id})
-            body = self.client.get_bytes(f"{ODDS_API_URL}?{query}")
-            return self.normalize(json.loads(body), target_date=target_date, schedule=schedule, observed_at=observed_at)
-        except Exception as exc:
-            return {int(g["game_pk"]): unavailable_market(int(g["game_pk"]), target_date, f"The Odds API unavailable: {type(exc).__name__}", observed_at=observed_at) for g in schedule}
+        query = urlencode({"apiKey": self.api_key, "regions": "us", "markets": "totals", "oddsFormat": "american", "dateFormat": "iso", "bookmakers": self.book_id})
+        last_reason = "The Odds API unavailable"
+        for _attempt in range(2):
+            try:
+                status, headers, body = self.requester(f"{ODDS_API_URL}?{query}") if self.requester else (200, {}, self.client.get_bytes(f"{ODDS_API_URL}?{query}"))
+            except Exception as exc:
+                last_reason, retryable = provider_failure_reason(None, exc)
+            else:
+                remaining = headers.get("x-requests-remaining")
+                if remaining is not None and remaining.isdigit() and int(remaining) < self.quota_floor:
+                    last_reason, retryable = "The Odds API quota floor reached; no request retry", False
+                elif status == 200:
+                    try:
+                        normalized = self.normalize(json.loads(body), target_date=target_date, schedule=schedule, observed_at=observed_at)
+                        for market in normalized.values(): self.cache.accept(market)
+                        return normalized
+                    except (ValueError, TypeError) as exc:
+                        last_reason, retryable = provider_failure_reason(None, exc)
+                else:
+                    last_reason, retryable = provider_failure_reason(status)
+            if not retryable: break
+        return {int(g["game_pk"]): self.cache.for_slate(target_date, int(g["game_pk"])) or unavailable_market(int(g["game_pk"]), target_date, last_reason, observed_at=observed_at) for g in schedule}
 
     def normalize(self, events: Any, *, target_date: date, schedule: list[dict[str, Any]], observed_at: datetime) -> dict[int, dict[str, Any]]:
         result = {int(g["game_pk"]): unavailable_market(int(g["game_pk"]), target_date, "no matching selected-book full-game total", observed_at=observed_at) for g in schedule}

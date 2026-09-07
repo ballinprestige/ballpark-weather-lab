@@ -108,3 +108,14 @@ def test_provider_failure_classification_and_snapshot_order_are_bounded() -> Non
     assert cache.accept(first) is True and cache.accept(older) is False and cache.accept(tomorrow) is True
     assert cache.for_slate(TARGET, 11)["snapshot_id"] == "first"
     assert cache.for_slate(date(2026, 9, 7), 11)["snapshot_id"] == "tomorrow"
+
+
+def test_odds_api_execution_retries_once_then_uses_same_date_cache_on_401() -> None:
+    events = [{"id": "event-1", "home_team": "BOS", "away_team": "NYY", "bookmakers": [{"key": "draftkings", "title": "DraftKings", "markets": [{"key": "totals", "outcomes": [{"name": "Over", "point": 8.5, "price": -105}, {"name": "Under", "point": 8.5, "price": -115}]}]}]}]
+    responses = [(429, {}, b"[]"), (200, {"x-requests-remaining": "5"}, __import__("json").dumps(events).encode())]
+    provider = TheOddsApiProvider(object(), api_key="runtime-only", book_id="draftkings", requester=lambda _url: responses.pop(0))
+    first = provider.fetch(TARGET, _schedule(), observed_at=OBSERVED)
+    assert first[11]["line"] == 8.5
+    provider.requester = lambda _url: (401, {}, b"{}")
+    recovered = provider.fetch(TARGET, _schedule(), observed_at=OBSERVED)
+    assert recovered[11]["snapshot_id"] == first[11]["snapshot_id"]
