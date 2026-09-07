@@ -66,7 +66,9 @@ def _phase(game: dict[str, Any], at: datetime) -> tuple[str, str | None]:
         return "unknown", "official game is postponed or cancelled"
     if "final" in status or "game over" in status or "completed" in status or "closed" in status:
         return "final", "official game is final"
-    if any(word in status for word in ("in progress", "live", "delayed", "suspended")):
+    if "delayed" in status:
+        return "unknown", "official game is delayed"
+    if any(word in status for word in ("in progress", "live", "suspended")):
         return "in_progress", None
     try:
         return ("pregame" if at < _utc(str(game["game_time"])) else "after_scheduled_start"), None
@@ -155,13 +157,13 @@ def normalize_markets(game: dict[str, Any], event: dict[str, Any], markets: list
     phase, reason = _phase(game, observed_at)
     parsed = _event_start(event.get("event_ticker"))
     if reason:
-        return {**missing, "reason": reason}
+        return {**missing, "event_ticker": str(event.get("event_ticker") or "") or None, "reason": reason}
     team_pair = (_KALSHI_TEAM.get(str(game.get("away_team")), game.get("away_team")), _KALSHI_TEAM.get(str(game.get("home_team")), game.get("home_team")))
     if not parsed or parsed[0] != _utc(str(game.get("game_time"))) or parsed[1:] != team_pair:
         return {**missing, "reason": "Kalshi event does not exactly match official teams and scheduled start"}
     lines = [line for market in markets if isinstance(market, dict) if (line := _line(str(event["event_ticker"]), market))]
     if not lines:
-        return {**missing, "reason": "no active two-sided Kalshi half-run market"}
+        return {**missing, "event_ticker": str(event["event_ticker"]), "reason": "no active two-sided Kalshi half-run market"}
     line = min(
         lines,
         key=lambda value: (
@@ -195,6 +197,13 @@ class KalshiSnapshotCache:
         if not quote or quote.get("state") != "observed_unknown_age":
             return None
         if quote.get("game_time") != game.get("game_time"):
+            return None
+        parsed = _event_start(quote.get("event_ticker"))
+        expected_teams = (
+            _KALSHI_TEAM.get(str(game.get("away_team")), game.get("away_team")),
+            _KALSHI_TEAM.get(str(game.get("home_team")), game.get("home_team")),
+        )
+        if not parsed or parsed[0] != _utc(str(game.get("game_time"))) or parsed[1:] != expected_teams:
             return None
         try:
             age = (_utc(at) - _utc(str(quote["observed_at"]))).total_seconds()
@@ -302,8 +311,6 @@ class KalshiExchangeProvider:
                 markets = body.get("markets") if isinstance(body, dict) else None
                 if not isinstance(markets, list): raise ValueError("markets response has no market list")
                 quote = normalize_markets(game, event, markets, observed_at=observed_at, raw_bytes=events_raw + b"\n" + markets_raw)
-                if cursor and quote["state"] == "unavailable":
-                    quote["failure_reason"] = "Kalshi event pagination reached its three-page safety limit"
                 if quote["state"] == "observed_unknown_age":
                     orderbook, orderbook_raw = self._json(
                         f"/markets/{quote['market_ticker']}/orderbook", {}
@@ -313,6 +320,7 @@ class KalshiExchangeProvider:
                         quote = unavailable_market(
                             game, observed_at, "Kalshi orderbook does not confirm the two supplied asks"
                         )
+                        quote["event_ticker"] = str(event["event_ticker"])
                     else:
                         # The public API has no quote-update timestamp.  Record completion of
                         # this paired market/orderbook retrieval, never the pipeline start time.
@@ -335,4 +343,8 @@ class KalshiExchangeProvider:
             except Exception as exc:
                 reason = f"Kalshi public market request failed: {type(exc).__name__}"
                 results[int(game["game_pk"])] = self.cache.get(game, datetime.now(UTC), reason) or {**results[int(game["game_pk"])], "reason": reason}
+        if cursor:
+            for quote in results.values():
+                if quote.get("event_ticker") is None:
+                    quote["failure_reason"] = "Kalshi event pagination reached its three-page safety limit"
         return results

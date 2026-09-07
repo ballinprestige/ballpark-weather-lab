@@ -10,6 +10,7 @@ from typing import Any
 from jsonschema import Draft202012Validator, FormatChecker
 
 from ballpark.errors import DataContractError
+from ballpark.kalshi import _KALSHI_TEAM, _event_start
 
 RFC3339_DATETIME = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
@@ -186,20 +187,21 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
                 raise DataContractError("exchange market has an invalid provider or price domain")
             if (state == "observed_unknown_age") != (exchange.get("active") is True):
                 raise DataContractError("exchange active flag does not match its availability state")
+            start_clock = datetime.fromisoformat(
+                str(game["game_time"]).replace("Z", "+00:00")
+            ).astimezone(UTC)
             status = str(game.get("game_status") or "").lower()
             phase = exchange.get("game_phase")
             if any(word in status for word in ("final", "game over", "completed", "closed")):
                 expected_phase = "final"
-            elif any(word in status for word in ("in progress", "live", "delayed", "suspended")):
+            elif any(word in status for word in ("in progress", "live", "suspended")):
                 expected_phase = "in_progress"
-            elif any(word in status for word in ("postponed", "cancelled", "canceled")):
+            elif any(word in status for word in ("postponed", "cancelled", "canceled", "delayed")):
                 expected_phase = "unknown"
             else:
+                assessment_time = payload["generated_at"] if exchange.get("failure_reason") else exchange["observed_at"]
                 observed_clock = datetime.fromisoformat(
-                    str(exchange["observed_at"]).replace("Z", "+00:00")
-                ).astimezone(UTC)
-                start_clock = datetime.fromisoformat(
-                    str(game["game_time"]).replace("Z", "+00:00")
+                    str(assessment_time).replace("Z", "+00:00")
                 ).astimezone(UTC)
                 expected_phase = "pregame" if observed_clock < start_clock else "after_scheduled_start"
             if phase != expected_phase:
@@ -208,6 +210,13 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
                 required = ("event_ticker", "market_ticker", "condition", "line", "over_ask_dollars", "under_ask_dollars", "over_ask_cents", "under_ask_cents", "over_ask_size", "under_ask_size", "observed_at", "raw_sha256", "snapshot_id")
                 if any(exchange.get(key) is None for key in required) or exchange.get("source_updated_at") is not None:
                     raise DataContractError("observed exchange quote is missing evidence or invents a source update time")
+                parsed = _event_start(exchange.get("event_ticker"))
+                teams = (
+                    _KALSHI_TEAM.get(str(game.get("away_team")), game.get("away_team")),
+                    _KALSHI_TEAM.get(str(game.get("home_team")), game.get("home_team")),
+                )
+                if not parsed or parsed[0] != start_clock or parsed[1:] != teams:
+                    raise DataContractError("exchange ticker does not match the official game identity")
                 try:
                     over, under = Decimal(str(exchange["over_ask_dollars"])), Decimal(str(exchange["under_ask_dollars"]))
                     over_size, under_size = Decimal(str(exchange["over_ask_size"])), Decimal(str(exchange["under_ask_size"]))

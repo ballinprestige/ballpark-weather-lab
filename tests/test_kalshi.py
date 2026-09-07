@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ballpark.kalshi import KalshiExchangeProvider, normalize_markets, orderbook_validates
+from ballpark.kalshi import KalshiExchangeProvider, KalshiSnapshotCache, normalize_markets, orderbook_validates
 
 
 OBSERVED = datetime(2026, 9, 7, 20, 0, tzinfo=UTC)
@@ -64,6 +64,12 @@ def test_game_over_is_terminal_not_a_clock_inference() -> None:
     assert quote["game_phase"] == "final"
 
 
+def test_delayed_game_is_unknown_not_in_progress() -> None:
+    quote = normalize_markets({**GAME, "game_status": "Delayed"}, EVENT, [market()], observed_at=OBSERVED)
+    assert quote["state"] == "unavailable"
+    assert quote["game_phase"] == "unknown"
+
+
 def test_rejects_zero_depth_and_requires_reciprocal_orderbook() -> None:
     assert normalize_markets(GAME, EVENT, [market(depth="0")], observed_at=OBSERVED)["state"] == "unavailable"
     quote = normalize_markets(GAME, EVENT, [market()], observed_at=OBSERVED)
@@ -92,3 +98,15 @@ def test_provider_retains_last_good_after_network_failure(tmp_path: Path) -> Non
     retained = KalshiExchangeProvider(_Client(True), cache_path=cache_path).fetch([GAME], observed_at=OBSERVED)
     assert first[823902]["state"] == retained[823902]["state"] == "observed_unknown_age"
     assert retained[823902]["failure_reason"] == "Kalshi public market request failed: OSError"
+
+
+def test_cached_quote_rebinds_phase_and_rejects_corrected_teams(tmp_path: Path) -> None:
+    game = {**GAME, "game_pk": 55, "away_team": "WSH", "home_team": "SD", "game_time": "2026-09-07T22:40:00Z"}
+    event = {"event_ticker": "KXMLBTOTAL-26SEP071840WSHSD"}
+    quote = normalize_markets(game, event, [{**market(), "event_ticker": event["event_ticker"], "ticker": event["event_ticker"] + "-9"}], observed_at=OBSERVED)
+    cache = KalshiSnapshotCache(tmp_path / "cache.json")
+    cache.accept(quote)
+    after_start = datetime(2026, 9, 7, 23, 0, tzinfo=UTC)
+    retained = cache.get(game, after_start, "offline")
+    assert retained is not None and retained["game_phase"] == "after_scheduled_start"
+    assert cache.get({**game, "away_team": "TOR", "home_team": "OAK"}, after_start, "offline") is None
