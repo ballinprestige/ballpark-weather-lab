@@ -91,4 +91,13 @@ describe('validatePayload', () => {
     delete (payload.health as unknown as Record<string, unknown>).odds;
     expect(() => validatePayload(payload)).toThrow(/must accompany every quoted-market game/i);
   });
+
+  it('accepts complete observed evidence with unknown update age only as unavailable', () => {
+    const payload = readyPayload();
+    payload.games[0].odds = { ...payload.games[0].odds, state: 'unavailable', reason: 'Source does not document quote-update granularity.', source_updated_at: null };
+    payload.health.odds = { state: 'partial', source: 'documented public source', current_games: 1, stale_games: 0, unavailable_games: 1, optional: false };
+    expect(validatePayload(payload).games[0].odds.source_updated_at).toBeNull();
+    payload.games[0].odds.state = 'current';
+    expect(() => validatePayload(payload)).toThrow(/trustworthy source update time/i);
+  });
 });

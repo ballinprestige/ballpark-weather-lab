@@ -25,7 +25,7 @@
     <span class="compact-matchup"><strong>{game.away_team}</strong><i>at</i><strong>{game.home_team}</strong><small>{formatTime(game.game_time)} · {game.venue}</small></span>
     <span class="compact-market">
       {#if market.state === 'unavailable'}<strong>Market unavailable</strong><small>{market.reason ?? 'No verified quote.'}</small>
-      {:else}<strong>{game.odds.line}</strong><small>O {american(game.odds.over_price)} · U {american(game.odds.under_price)} · {game.odds.sportsbook_name}</small>{/if}
+      {:else}<strong>{game.odds.line}</strong><small>O {american(game.odds.over_price)} · U {american(game.odds.under_price)} · {game.odds.sportsbook_name}{market.state === 'observed' ? ' · observed, age unverified' : ''}</small>{/if}
     </span>
     <span class="compact-weather"><strong>{wind}</strong><small>{weather}</small></span>
   </a>

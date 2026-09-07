@@ -251,8 +251,10 @@ function validateOdds(value: unknown, path: string, gamePk: number, gameDate: st
     raw_sha256: nullableStringAt(row.raw_sha256, `${path}.raw_sha256`), snapshot_id: nullableStringAt(row.snapshot_id, `${path}.snapshot_id`), source_schema_version: stringAt(row.source_schema_version, `${path}.source_schema_version`) as string
   };
   if (market.game_pk !== gamePk || market.slate_date !== gameDate) fail(path, 'must identify this exact scheduled game and slate date');
-  if (state !== 'unavailable') {
-    if ([market.line, market.over_price, market.under_price, market.source_updated_at, market.observed_at, market.raw_sha256, market.snapshot_id, market.sportsbook_id, market.sportsbook_name, market.provider_event_id].some((entry) => entry === null)) {
+  const populated = [market.line, market.over_price, market.under_price, market.raw_sha256, market.snapshot_id].some((entry) => entry !== null);
+  if (state !== 'unavailable' || populated) {
+    const requiredObserved = [market.line, market.over_price, market.under_price, market.observed_at, market.raw_sha256, market.snapshot_id, market.sportsbook_id, market.sportsbook_name, market.provider_event_id];
+    if (requiredObserved.some((entry) => entry === null)) {
       fail(path, 'quoted market must include the line, both prices, book, source/retrieval times, hash, and snapshot');
     }
     for (const [label, price] of [['over_price', market.over_price], ['under_price', market.under_price]] as const) {
@@ -261,8 +263,12 @@ function validateOdds(value: unknown, path: string, gamePk: number, gameDate: st
     if (!/^[a-f0-9]{64}$/.test(market.raw_sha256 ?? '') || !/^[a-f0-9]{64}$/.test(market.snapshot_id ?? '')) {
       fail(path, 'quoted market provenance must use lowercase SHA-256 digests');
     }
-    const sourceMs = Date.parse(market.source_updated_at!);
     const observedMs = Date.parse(market.observed_at!);
+    if (market.source_updated_at === null) {
+      if (state !== 'unavailable') fail(path, 'current or stale quote must include a trustworthy source update time');
+      return market;
+    }
+    const sourceMs = Date.parse(market.source_updated_at);
     if (sourceMs > observedMs + 5 * 60_000) fail(path, 'source update cannot be more than five minutes after retrieval');
     if (state === 'current' && (sourceMs < observedMs - 15 * 60_000 || sourceMs > observedMs + 5 * 60_000)) {
       fail(path, 'current quote must be within the canonical 15-minute freshness window');

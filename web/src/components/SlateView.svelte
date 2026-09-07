@@ -142,7 +142,7 @@
             {@const market = assessOddsFreshness(game.odds, now)}
             <tr data-tone={isGameHeld(game) ? 'hold' : 'ready'}>
               <td><strong>{game.away_team} <i>at</i> {game.home_team}</strong><br /><small>{formatTime(game.game_time)} · {game.venue}</small></td>
-              <td>{#if market.state === 'unavailable'}<strong>Unavailable</strong><br /><small>{market.reason}</small>{:else}<strong>{game.odds.line}</strong> <span>O {american(game.odds.over_price)} · U {american(game.odds.under_price)}</span><br /><small>{game.odds.sportsbook_name} · {market.state}</small>{/if}</td>
+              <td>{#if market.state === 'unavailable'}<strong>Unavailable</strong><br /><small>{market.reason}</small>{:else}<strong>{game.odds.line}</strong> <span>O {american(game.odds.over_price)} · U {american(game.odds.under_price)}</span><br /><small>{game.odds.sportsbook_name} · {market.state === 'observed' ? 'observed, age unverified' : market.state}</small>{/if}</td>
               <td>{isGameHeld(game) ? 'Held' : game.weather.dome_active ? 'Roof active' : `${formatDelta(game.weather.wind_carry_mph, 1)} mph carry`}</td>
               <td>{movement == null ? 'Held' : `${formatDelta(movement, 0)}% runs`}<br /><small>{isGameHeld(game) ? gameHoldReason(game) : `${Math.round(game.weather.temperature_f)}°F · ${Math.round(game.weather.humidity_pct)}%`}</small></td>
               <td><button class="inspect-button" data-game-key={game.game_pk} type="button" aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} details`} on:click={() => onOpenGame(key)}>Inspect</button></td>

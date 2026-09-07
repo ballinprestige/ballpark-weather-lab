@@ -38,4 +38,9 @@ describe('publication freshness', () => {
     expect(assessOddsFreshness({ state: 'current', reason: null, source_updated_at: '2026-09-07T19:44:59Z', observed_at: '2026-09-07T19:44:59Z' }, now).state).toBe('stale');
     expect(assessOddsFreshness({ state: 'current', reason: null, source_updated_at: '2026-09-07T20:06:00Z', observed_at: '2026-09-07T20:00:00Z' }, now).state).toBe('unavailable');
   });
+
+  it('keeps complete observed evidence distinct from no quote when source age is unknown', () => {
+    expect(assessOddsFreshness({ state: 'unavailable', reason: 'source update time not documented', line: 8.5, over_price: -110, under_price: -110, source_updated_at: null, observed_at: '2026-09-07T20:00:00Z' }).state).toBe('observed');
+    expect(assessOddsFreshness({ state: 'unavailable', reason: 'no verified quote', line: null, over_price: null, under_price: null, source_updated_at: null, observed_at: null }).state).toBe('unavailable');
+  });
 });

@@ -89,7 +89,7 @@
 
   <section class="market-section" aria-labelledby={`market-${game.game_pk}`} data-state={marketFreshness.state}>
     <div class="section-heading">
-      <div><p class="eyebrow">Quoted sportsbook market</p><h3 id={`market-${game.game_pk}`}>Full-game total</h3></div>
+      <div><p class="eyebrow">Full-game market evidence</p><h3 id={`market-${game.game_pk}`}>Total, Over &amp; Under</h3></div>
       <StateBadge state={marketFreshness.state} />
     </div>
     {#if marketFreshness.state === 'unavailable'}
@@ -102,6 +102,7 @@
         <div><dt>Sportsbook</dt><dd>{game.odds.sportsbook_name}</dd></div>
       </dl>
       {#if marketFreshness.state === 'stale'}<p class="market-warning">Stale quote: {marketFreshness.reason}. It is not current.</p>{/if}
+      {#if marketFreshness.state === 'observed'}<p class="market-warning">Observed quote: {marketFreshness.reason} It does not satisfy the current sportsbook freshness requirement.</p>{/if}
       <p class="source-line"><span>{game.odds.provider}</span><span>Source updated {formatTimestamp(game.odds.source_updated_at)}</span><span>Retrieved {formatTimestamp(game.odds.observed_at)}</span></p>
     {/if}
   </section>

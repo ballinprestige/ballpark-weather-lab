@@ -7,7 +7,7 @@ export interface PublicationFreshness {
 }
 
 export interface OddsFreshness {
-  state: 'current' | 'stale' | 'unavailable';
+  state: 'current' | 'stale' | 'observed' | 'unavailable';
   reason: string | null;
 }
 
@@ -50,10 +50,16 @@ export function assessPublicationFreshness(publicationDate: string, now = new Da
 
 /** Mirrors the BP-004 canonical 15-minute / five-minute-skew contract in the UI clock. */
 export function assessOddsFreshness(
-  odds: { state: OddsFreshness['state']; reason: string | null; source_updated_at: string | null; observed_at: string | null },
+  odds: { state: 'current' | 'stale' | 'unavailable'; reason: string | null; source_updated_at: string | null; observed_at: string | null; line?: number | null; over_price?: number | null; under_price?: number | null },
   now = new Date()
 ): OddsFreshness {
-  if (odds.state !== 'current') return { state: odds.state, reason: odds.reason };
+  if (odds.state === 'unavailable') {
+    const completeObserved = odds.line !== null && odds.line !== undefined && odds.over_price !== null && odds.over_price !== undefined && odds.under_price !== null && odds.under_price !== undefined && odds.observed_at !== null;
+    return completeObserved
+      ? { state: 'observed', reason: odds.reason ?? 'Observed complete market; source update age is unverified.' }
+      : { state: 'unavailable', reason: odds.reason };
+  }
+  if (odds.state === 'stale') return { state: 'stale', reason: odds.reason };
   const sourceMs = odds.source_updated_at ? Date.parse(odds.source_updated_at) : NaN;
   const observedMs = odds.observed_at ? Date.parse(odds.observed_at) : NaN;
   if (!Number.isFinite(sourceMs) || !Number.isFinite(observedMs)) return { state: 'unavailable', reason: 'Current quote is missing a trustworthy source or retrieval time.' };
