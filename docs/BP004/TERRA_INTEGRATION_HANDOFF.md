@@ -1,6 +1,6 @@
 # BP004 Terra integration handoff
 
-Implementation candidate revision: `fdb6c3652aef4c9e1d4e6f2560bc2d75831a94db`.
+Implementation candidate revision: `f5da5d8956bda4395047293528cbd93b9f277974`.
 
 ## What is wired
 
@@ -14,7 +14,10 @@ the selected reciprocal orderbook. It keeps native decimal dollars and records
 the retrieval completion instant because the source does not provide a
 quote-update instant. A bounded, fenced local last-good cache retains an
 observed quote through an outage for at most 24 hours and includes a failure
-reason. `refresh-exchange` is an on-demand, bounded publisher command; it is
+reason. A retained quote preserves its capture time, identifies the failure,
+and derives its current phase from the publication assessment time. The cache
+requires the current official start and teams to match its ticker identity.
+`refresh-exchange` is an on-demand, bounded publisher command; it is
 not a scheduler or browser refresh mechanism.
 
 ## Final BP006 payload seam
