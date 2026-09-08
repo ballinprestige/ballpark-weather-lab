@@ -33,14 +33,17 @@ def _stamp() -> str:
 
 
 def _snapshot(context: JobContext, name: str, value: Any) -> None:
-    raw = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    raw = canonical_json_bytes(value)
     target = context.cache_dir / "sources" / f"{name}.json"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(
-        json.dumps(
-            {"observed_at": _stamp(), "sha256": hashlib.sha256(raw).hexdigest(), "value": value},
-            sort_keys=True,
-        ).encode()
+    atomic_write(
+        target,
+        canonical_json_bytes(
+            {
+                "observed_at": _stamp(),
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "value": value,
+            }
+        ),
     )
 
 
@@ -48,11 +51,16 @@ def _load_snapshot(cache_dir: Path, name: str, target_date: date) -> Any:
     path = cache_dir / "sources" / f"{name}.json"
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
-        value = document["value"]
+        value, digest = document["value"], document["sha256"]
     except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"durable {name} receipt is unavailable") from exc
     if not isinstance(value, dict) or value.get("date") != target_date.isoformat():
         raise RuntimeError(f"durable {name} receipt belongs to another slate date")
+    if (
+        not isinstance(digest, str)
+        or hashlib.sha256(canonical_json_bytes(value)).hexdigest() != digest
+    ):
+        raise RuntimeError(f"durable {name} receipt digest is invalid")
     return value
 
 
@@ -170,7 +178,11 @@ def run_live_worker(
                 client: HttpClient = client,
                 receipt: dict[str, Any] = receipt,
             ) -> None:
-                value = fetch_schedule(target_date, client)
+                try:
+                    value = fetch_schedule(target_date, client)
+                except Exception:
+                    receipt["schedule_failed"] = True
+                    raise
                 _snapshot(context, "schedule", {"date": target_date.isoformat(), "games": value})
                 receipt["schedule"] = value
 
@@ -217,6 +229,8 @@ def run_live_worker(
                 target_date: date = target_date,
                 receipt: dict[str, Any] = receipt,
             ) -> None:
+                if receipt.get("schedule_failed"):
+                    raise RuntimeError("required schedule refresh failed in this pass")
                 schedule_value = _load_snapshot(cache_dir, "schedule", target_date).get("games")
                 weather_value = _load_snapshot(cache_dir, "weather", target_date).get("games")
                 market_value = _load_snapshot(cache_dir, "markets", target_date).get("exchange")
