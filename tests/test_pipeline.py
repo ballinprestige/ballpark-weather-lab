@@ -4,6 +4,7 @@ import json
 from datetime import date, datetime
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 import ballpark.pipeline as pipeline_module
@@ -11,6 +12,7 @@ from ballpark.artifacts import ArtifactReceipt
 from ballpark.errors import ArtifactError, DataContractError
 from ballpark.espn_odds import EspnAcquisitionOutcome
 from ballpark.paths import ProjectPaths
+from ballpark.physics import PhysicsEngine
 from ballpark.pipeline import DailyPipeline
 from ballpark.publication import canonical_json_bytes, sha256_bytes
 from ballpark.weather import build_model_source_receipts
@@ -63,6 +65,53 @@ def test_normal_slate_builds_valid_payload_and_publishes(
     assert FakePhysicsEngine.loads == 1
     assert release["payload_sha256"] == sha256_bytes(canonical_json_bytes(payload))
     assert json.loads((tmp_path / "site" / "data" / "data.json").read_text()) == payload
+
+
+def test_event_budget_holds_only_approach_c_while_the_slate_publishes(
+    monkeypatch: pytest.MonkeyPatch,
+    project_paths: ProjectPaths,
+    fixture_root: Path,
+    verified_receipt: ArtifactReceipt,
+    tmp_path: Path,
+) -> None:
+    _stub_pipeline(monkeypatch, verified_receipt)
+    profiles = pd.read_parquet(project_paths.data / "batter_profiles.parquet")
+    batter_id = int(profiles.iloc[0]["batter_id"])
+    exhausted = PhysicsEngine(
+        profiles[profiles["batter_id"] == batter_id],
+        pd.read_parquet(project_paths.data / "park_geometry.parquet"),
+        None,
+        event_limit=0,
+    )
+
+    class ExhaustedPhysics:
+        @classmethod
+        def load(cls, _data_dir: Path) -> PhysicsEngine:
+            return exhausted
+
+    monkeypatch.setattr(pipeline_module, "PhysicsEngine", ExhaustedPhysics)
+    replay = json.loads((fixture_root / "normal_slate.json").read_text(encoding="utf-8"))
+    lineup = replay["lineups_by_game"]["810001"]
+    lineup["home_batter_ids"] = [batter_id] * 9
+    lineup["away_batter_ids"] = [batter_id] * 9
+    fixture = tmp_path / "budget-exhausted.json"
+    fixture.write_text(json.dumps(replay), encoding="utf-8")
+
+    payload, _release = DailyPipeline(project_paths).build_and_publish(
+        TARGET_DATE,
+        tmp_path / "site",
+        fixture_path=fixture,
+        generated_at=GENERATED_AT,
+    )
+    game = payload["games"][0]
+    assert payload["status"] == "ready"
+    assert game["weather"]["state"] == "verified"
+    assert game["factors"]["state"] == "modeled"
+    assert game["odds"]["state"] == "unavailable"  # Fixture's independent odds lane remains intact.
+    assert game["approach_c"]["state"] == "not_available"
+    assert "budget was exhausted" in game["approach_c"]["reason"]
+    assert game["approach_c"]["used_in_headline"] is False
+    assert (tmp_path / "site" / "data" / "data.json").is_file()
 
 
 def test_trusted_runtime_bundle_keeps_live_provenance_and_private_model_receipt(
