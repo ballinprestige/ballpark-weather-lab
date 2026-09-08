@@ -37,6 +37,11 @@ def _deadline(context: JobContext) -> float:
     return time.monotonic() + max(0, (context.deadline_at - datetime.now(UTC)).total_seconds())
 
 
+def _require_time(context: JobContext) -> None:
+    if datetime.now(UTC) >= context.deadline_at:
+        raise TimeoutError(f"{context.name} attempt deadline elapsed")
+
+
 def _snapshot(context: JobContext, name: str, value: Any) -> None:
     raw = canonical_json_bytes(value)
     target = context.cache_dir / "sources" / f"{name}.json"
@@ -225,13 +230,16 @@ def run_live_worker(
                 client: HttpClient = client,
                 receipt: dict[str, Any] = receipt,
             ) -> None:
+                receipt["schedule_due"] = True
                 try:
                     value = fetch_schedule(target_date, client, deadline_at=_deadline(context))
                 except Exception:
                     receipt["schedule_failed"] = True
                     raise
+                _require_time(context)
                 _snapshot(context, "schedule", {"date": target_date.isoformat(), "games": value})
                 receipt["schedule"] = value
+                receipt["schedule_succeeded"] = True
 
             def weather(
                 context: JobContext,
@@ -239,6 +247,7 @@ def run_live_worker(
                 client: HttpClient = client,
                 receipt: dict[str, Any] = receipt,
             ) -> None:
+                receipt["weather_due"] = True
                 schedule_value = _load_snapshot(cache_dir, "schedule", target_date).get("games")
                 if not isinstance(schedule_value, list):
                     raise RuntimeError("schedule acquisition is unavailable for this pass")
@@ -248,14 +257,17 @@ def run_live_worker(
                     )
                     for game in schedule_value
                 }
+                _require_time(context)
                 _snapshot(context, "weather", {"date": target_date.isoformat(), "games": value})
                 receipt["weather"] = value
+                receipt["weather_succeeded"] = True
 
             def lineups(
                 context: JobContext,
                 target_date: date = target_date,
                 client: HttpClient = client,
             ) -> None:
+                receipt["lineups_due"] = True
                 schedule_value = _load_snapshot(cache_dir, "schedule", target_date).get("games")
                 if not isinstance(schedule_value, list):
                     raise RuntimeError("schedule acquisition is unavailable for lineups")
@@ -265,7 +277,9 @@ def run_live_worker(
                     )
                     for game in schedule_value
                 }
+                _require_time(context)
                 _snapshot(context, "lineups", {"date": target_date.isoformat(), "games": value})
+                receipt["lineups_succeeded"] = True
 
             def markets(
                 context: JobContext,
@@ -274,6 +288,7 @@ def run_live_worker(
                 receipt: dict[str, Any] = receipt,
                 cache_dir: Path = cache_dir,
             ) -> None:
+                receipt["markets_due"] = True
                 schedule_value = _load_snapshot(cache_dir, "schedule", target_date).get("games")
                 if not isinstance(schedule_value, list):
                     raise RuntimeError("schedule acquisition is unavailable for this pass")
@@ -294,16 +309,19 @@ def run_live_worker(
                     )
                     if not expected_empty:
                         raise RuntimeError("Kalshi provider failed without usable market evidence")
+                _require_time(context)
                 _snapshot(context, "markets", {"date": target_date.isoformat(), "exchange": quotes})
                 receipt["markets"] = quotes
+                receipt["markets_succeeded"] = True
 
             def publish(
                 context: JobContext,
                 target_date: date = target_date,
                 receipt: dict[str, Any] = receipt,
             ) -> None:
-                if receipt.get("schedule_failed"):
-                    raise RuntimeError("required schedule refresh failed in this pass")
+                for name in ("schedule", "weather", "lineups", "markets"):
+                    if receipt.get(f"{name}_due") and not receipt.get(f"{name}_succeeded"):
+                        raise RuntimeError(f"required {name} refresh failed in this pass")
                 schedule_value = _load_snapshot(cache_dir, "schedule", target_date).get("games")
                 weather_value = _load_snapshot(cache_dir, "weather", target_date).get("games")
                 lineup_value = _load_snapshot(cache_dir, "lineups", target_date).get("games")

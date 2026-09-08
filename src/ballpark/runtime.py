@@ -209,6 +209,15 @@ class RuntimeWorker:
                 job["batch_deadline_at"] = utc_stamp(
                     scheduled + timedelta(seconds=spec.timeout_seconds)
                 )
+                if parse_stamp(job["batch_deadline_at"]) <= now:
+                    # A coalesced slot may be older than its entire batch budget
+                    # after downtime. Count it as missed, then begin one bounded
+                    # recovery batch instead of starting already-expired I/O.
+                    job["missed_slots"] += 1
+                    scheduled = now
+                    job["batch_deadline_at"] = utc_stamp(
+                        now + timedelta(seconds=spec.timeout_seconds)
+                    )
             else:
                 scheduled = parse_stamp(job["last_scheduled_slot_at"])
             attempt, token = int(job["attempt"]) + 1, uuid.uuid4().hex
