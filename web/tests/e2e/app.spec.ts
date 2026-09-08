@@ -623,8 +623,8 @@ test('retained Kalshi asks show the provider failure without becoming current', 
   const marketRow = page.locator('.ledger tbody tr').filter({ has: page.locator('[data-game-key="1001"]') });
   await expect(marketRow).toContainText('Over 49¢ · Under 52¢');
   await expect(marketRow).toContainText('Update failed: Kalshi public market-data request returned 503.');
-  await expect(marketRow).toContainText('observed Aug 27, 9:00 AM PDT');
-  await expect(page.getByText(/current sportsbook totals/i)).toHaveCount(0);
+  await expect(marketRow).toContainText('captured Aug 27, 9:00 AM PDT');
+  await expect(page.getByText(/current sportsbook totals 2\/2/i)).toHaveCount(1);
   await marketRow.getByRole('link').click();
   const exchangeDetail = page.locator('section.exchange-market');
   await expect(exchangeDetail).toContainText('YES ask49¢');
@@ -643,7 +643,8 @@ test('retained pregame exchange evidence becomes after-scheduled-start at the co
   payload.games[0].exchange_market!.game_time = payload.games[0].game_time;
   await mockPublication(page, payload);
   await page.goto('/#slate');
-  await expect(page.locator('.slate-meta')).toContainText('2 observed exchange totals · 1 upcoming');
+  await expect(page.locator('.slate-meta')).toContainText('Current sportsbook totals 2/2');
+  await expect(page.locator('.slate-meta')).toContainText('Kalshi supplemental 2 observed / 1 upcoming');
   const elapsed = page.locator('.ledger tbody tr').filter({ has: page.locator('[data-game-key="1001"]') });
   await expect(elapsed).toContainText('after scheduled start');
   await elapsed.getByRole('link').click();
@@ -658,7 +659,7 @@ test('319px retained Kalshi row preserves capture time and update failure', asyn
   await mockPublication(page, retainedExchangePayload());
   await page.goto('/#slate');
   const row = page.locator('.compact-game-row').first();
-  await expect(row).toContainText('Over 49¢ · Under 52¢');
+  await expect(row).toContainText('Over 49¢ / Under 52¢');
   await expect(row).toContainText('captured 9:00 AM PDT');
   await expect(row).toContainText('Update failed: Kalshi public market-data request returned 503.');
   await row.getByRole('link').click();
