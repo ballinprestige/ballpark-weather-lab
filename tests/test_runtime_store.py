@@ -14,9 +14,10 @@ from pathlib import Path
 
 import pytest
 
+import ballpark.runtime_app as runtime_app
 from ballpark.publication import canonical_json_bytes
 from ballpark.runtime import JobContext
-from ballpark.runtime_app import _accept_stage, _cleanup_store
+from ballpark.runtime_app import _accept_stage, _cleanup_store, _read_object
 from ballpark.runtime_server import RuntimeHandler
 
 
@@ -35,22 +36,52 @@ def _context(root: Path, token: str) -> JobContext:
     )
 
 
+def _payload(publication_date: str) -> dict[str, object]:
+    return {
+        "date": publication_date,
+        "generated_at": f"{publication_date}T04:00:00Z",
+        "games": [],
+        "status": "ready",
+    }
+
+
+def _release(payload: dict[str, object], digest: str) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "date": payload["date"],
+        "generated_at": payload["generated_at"],
+        "payload_sha256": digest,
+        "status": payload["status"],
+        "game_count": len(payload["games"]),
+    }
+
+
+def _index_row(payload: dict[str, object], digest: str) -> dict[str, object]:
+    return {
+        "date": payload["date"],
+        "generated_at": payload["generated_at"],
+        "payload_sha256": digest,
+        "status": payload["status"],
+        "game_count": len(payload["games"]),
+    }
+
+
 def _stage(root: Path, token: str, publication_date: str) -> None:
     stage = root / "publication" / ".staged" / token
-    payload = canonical_json_bytes({"date": publication_date, "games": [], "status": "ready"})
+    document = _payload(publication_date)
+    payload = canonical_json_bytes(document)
     digest = hashlib.sha256(payload).hexdigest()
     (stage / "data").mkdir(parents=True)
     (stage / "archive").mkdir(parents=True)
     (stage / "data" / "data.json").write_bytes(payload)
-    (stage / "data" / "release.json").write_bytes(
-        canonical_json_bytes({"date": publication_date, "payload_sha256": digest})
-    )
+    (stage / "data" / "release.json").write_bytes(canonical_json_bytes(_release(document, digest)))
     (stage / "archive" / f"{publication_date}.json").write_bytes(payload)
     (stage / "archive" / "index.json").write_bytes(
         canonical_json_bytes(
             {
                 "schema_version": 1,
-                "dates": [{"date": publication_date, "payload_sha256": digest}],
+                "updated_at": document["generated_at"],
+                "dates": [_index_row(document, digest)],
             }
         )
     )
@@ -216,26 +247,24 @@ def test_store_imports_all_indexed_archive_objects_into_empty_store(
     stage = publication / ".staged" / token
     (stage / "data").mkdir(parents=True)
     (stage / "archive").mkdir(parents=True)
-    payloads = {
-        "2026-09-02": canonical_json_bytes({"date": "2026-09-02", "games": [], "status": "ready"}),
-        "2026-09-01": canonical_json_bytes({"date": "2026-09-01", "games": [], "status": "ready"}),
-    }
+    documents = {day: _payload(day) for day in ("2026-09-02", "2026-09-01")}
+    payloads = {day: canonical_json_bytes(document) for day, document in documents.items()}
     for day, raw in payloads.items():
         (stage / "archive" / f"{day}.json").write_bytes(raw)
     current = payloads["2026-09-02"]
+    current_digest = hashlib.sha256(current).hexdigest()
     (stage / "data" / "data.json").write_bytes(current)
     (stage / "data" / "release.json").write_bytes(
-        canonical_json_bytes(
-            {"date": "2026-09-02", "payload_sha256": hashlib.sha256(current).hexdigest()}
-        )
+        canonical_json_bytes(_release(documents["2026-09-02"], current_digest))
     )
     (stage / "archive" / "index.json").write_bytes(
         canonical_json_bytes(
             {
                 "schema_version": 1,
+                "updated_at": documents["2026-09-02"]["generated_at"],
                 "dates": [
-                    {"date": day, "payload_sha256": hashlib.sha256(raw).hexdigest()}
-                    for day, raw in payloads.items()
+                    _index_row(document, hashlib.sha256(payloads[day]).hexdigest())
+                    for day, document in documents.items()
                 ],
             }
         )
@@ -254,3 +283,138 @@ def test_store_imports_all_indexed_archive_objects_into_empty_store(
         (publication / "objects" / f"{row['object_sha256']}.json.gz").is_file()
         for row in imported["dates"]
     )
+
+
+def _mutate_archive_row(stage: Path) -> None:
+    path = stage / "archive" / "index.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["dates"][0]["game_count"] = 999
+    path.write_bytes(canonical_json_bytes(value))
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda stage: _mutate_json(stage / "data" / "release.json", {"game_count": 999}),
+            "receipt",
+        ),
+        (
+            _mutate_archive_row,
+            "archive",
+        ),
+    ],
+)
+def test_store_rejects_full_candidate_metadata_forgeries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutate: object, message: str
+) -> None:
+    monkeypatch.setenv("BALLPARK_MIN_FREE_BYTES", "0")
+    token = f"{1:032x}"
+    _stage(tmp_path, token, "2026-09-02")
+    stage = tmp_path / "publication" / ".staged" / token
+    assert callable(mutate)
+    mutate(stage)
+    with pytest.raises(RuntimeError, match=message):
+        _accept_stage(_context(tmp_path, token))
+    assert not (tmp_path / "publication" / "pointer.json").exists()
+    assert not (tmp_path / "publication" / "releases" / token).exists()
+
+
+def _mutate_json(path: Path, update: dict[str, object]) -> None:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value.update(update)
+    path.write_bytes(canonical_json_bytes(value))
+
+
+def test_store_reclaims_expired_unaccepted_candidate_without_touching_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BALLPARK_STORE_GRACE_SECONDS", "0")
+    monkeypatch.setenv("BALLPARK_MIN_FREE_BYTES", "0")
+    first = _accept(tmp_path, monkeypatch, 1)
+    publication = tmp_path / "publication"
+    pointer_before = (publication / "pointer.json").read_bytes()
+    failed = f"{2:032x}"
+    _stage(tmp_path, failed, "2026-09-03")
+    calls = 0
+
+    def disk_usage(_path: Path) -> object:
+        nonlocal calls
+        calls += 1
+        return type("Usage", (), {"free": 0 if calls >= 3 else 1_000})()
+
+    monkeypatch.setenv("BALLPARK_MIN_FREE_BYTES", "100")
+    monkeypatch.setattr("ballpark.runtime_app.shutil.disk_usage", disk_usage)
+    with pytest.raises(RuntimeError, match="reserve"):
+        _accept_stage(_context(tmp_path, failed))
+    assert (publication / "pointer.json").read_bytes() == pointer_before
+    assert (publication / "releases" / failed / "manifest.json").is_file()
+    assert not (publication / "releases" / failed / "accepted.json").exists()
+    monkeypatch.undo()
+    monkeypatch.setenv("BALLPARK_STORE_GRACE_SECONDS", "0")
+    monkeypatch.setenv("BALLPARK_MIN_FREE_BYTES", "0")
+    third = _accept(tmp_path, monkeypatch, 3)
+    assert not (publication / "releases" / failed).exists()
+    assert (publication / "releases" / first / "accepted.json").is_file()
+    assert (publication / "releases" / third / "accepted.json").is_file()
+
+
+def test_read_object_enforces_compressed_and_decoded_limits(tmp_path: Path) -> None:
+    objects = tmp_path / "objects"
+    objects.mkdir()
+    raw = b"{}\n"
+    digest = hashlib.sha256(raw).hexdigest()
+    (objects / f"{digest}.json.gz").write_bytes(
+        gzip.compress(raw, mtime=0) + gzip.compress(b"", mtime=0) * 200
+    )
+    with pytest.raises(RuntimeError, match="size limit"):
+        _read_object(objects, digest, 128)
+    oversized = b"x" * 129
+    oversized_digest = hashlib.sha256(oversized).hexdigest()
+    (objects / f"{oversized_digest}.json.gz").write_bytes(gzip.compress(oversized, mtime=0))
+    with pytest.raises(RuntimeError, match="size limit"):
+        _read_object(objects, oversized_digest, 128)
+
+
+@pytest.mark.parametrize("failed_name", ["pointer.json", "accepted.json"])
+def test_pointer_authority_recovers_marker_and_pointer_write_interruptions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed_name: str
+) -> None:
+    monkeypatch.setenv("BALLPARK_MIN_FREE_BYTES", "0")
+    monkeypatch.setenv("BALLPARK_STORE_GRACE_SECONDS", "0")
+    first = _accept(tmp_path, monkeypatch, 1)
+    publication = tmp_path / "publication"
+    interrupted = f"{2:032x}"
+    _stage(tmp_path, interrupted, "2026-09-03")
+    original_write = runtime_app.atomic_write
+
+    def interrupt(path: Path, content: bytes) -> None:
+        if path.name == failed_name:
+            raise OSError("simulated interruption")
+        original_write(path, content)
+
+    monkeypatch.setattr(runtime_app, "atomic_write", interrupt)
+    with pytest.raises(OSError, match="interruption"):
+        _accept_stage(_context(tmp_path, interrupted))
+    monkeypatch.setattr(runtime_app, "atomic_write", original_write)
+
+    if failed_name == "pointer.json":
+        assert first in (publication / "pointer.json").read_text(encoding="utf-8")
+        assert not (publication / "releases" / interrupted / "accepted.json").exists()
+    else:
+        assert interrupted in (publication / "pointer.json").read_text(encoding="utf-8")
+        assert not (publication / "releases" / interrupted / "accepted.json").exists()
+
+    third = _accept(tmp_path, monkeypatch, 3)
+    assert (publication / "releases" / third / "accepted.json").is_file()
+    if failed_name == "pointer.json":
+        assert not (publication / "releases" / interrupted).exists()
+    else:
+        assert (publication / "releases" / interrupted / "manifest.json").is_file()
+        _cleanup_store(
+            publication,
+            current=third,
+            previous=None,
+            maximum=32 * 1024 * 1024,
+        )
+        assert (publication / "releases" / interrupted / "manifest.json").is_file()
