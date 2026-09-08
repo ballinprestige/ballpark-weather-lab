@@ -1,8 +1,7 @@
-"""Portable fixture-backed runtime application layer.
+"""Portable runtime application layer with authorized public-source adapters.
 
-Live adapters can be supplied only after source authorization.  The worker still
-uses the same independent durable job contracts in fixture mode, which makes
-restart, no-slate and calendar tests executable without waiting for a slate.
+Fixture mode uses the same independent durable job contracts for deterministic
+restart, no-slate, and calendar testing without waiting for a future slate.
 """
 
 from __future__ import annotations
