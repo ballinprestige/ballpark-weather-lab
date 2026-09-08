@@ -50,9 +50,9 @@
     </div>
     {#if marketFreshness.state !== 'unavailable'}
       <p class="detail-exchange-line"><strong>{game.odds.line}</strong> · Over {american(game.odds.over_price)} · Under {american(game.odds.under_price)} <span>{game.odds.sportsbook_name} via {game.odds.provider} · captured {formatTimestamp(game.odds.observed_at)}</span></p>
-      {#if exchangeAvailable}<p class="detail-exchange-line">Kalshi total {game.exchange_market?.line} · Over {formatContractCents(game.exchange_market?.over_ask_cents)} · Under {formatContractCents(game.exchange_market?.under_ask_cents)} <span>captured {formatTimestamp(game.exchange_market?.observed_at ?? null)}</span></p>{/if}
+      {#if exchangeAvailable}<p class="detail-exchange-line">Kalshi total {game.exchange_market?.line} · Over {formatContractCents(game.exchange_market?.over_ask_cents)} · Under {formatContractCents(game.exchange_market?.under_ask_cents)} <span>source age unknown · captured {formatTimestamp(game.exchange_market?.observed_at ?? null)}</span>{#if game.exchange_market?.failure_reason}<span>Update failed: {game.exchange_market.failure_reason}</span>{/if}</p>{/if}
     {:else if exchangeAvailable}
-      <p class="detail-exchange-line"><strong>{game.exchange_market?.line}</strong> · Over {formatContractCents(game.exchange_market?.over_ask_cents)} · Under {formatContractCents(game.exchange_market?.under_ask_cents)} <span>Kalshi contract ask · captured {formatTimestamp(game.exchange_market?.observed_at ?? null)}</span></p>
+      <p class="detail-exchange-line"><strong>{game.exchange_market?.line}</strong> · Over {formatContractCents(game.exchange_market?.over_ask_cents)} · Under {formatContractCents(game.exchange_market?.under_ask_cents)} <span>Kalshi contract ask · captured {formatTimestamp(game.exchange_market?.observed_at ?? null)}</span>{#if game.exchange_market?.failure_reason}<span>Update failed: {game.exchange_market.failure_reason}</span>{/if}</p>
     {/if}
   </header>
 
