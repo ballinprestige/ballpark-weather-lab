@@ -179,9 +179,9 @@ jobs:
               "http_requests": 40,
               "parallelism": 8,
               "samples": samples,
-              "peak_memory_bytes": max(values),
+              "sample_max_memory_bytes": max(values),
               "sustained_last_memory_bytes": values[-1],
-          }, sort_keys=True, indent=2) + "\\n")
+          }, sort_keys=True, indent=2) + "\n")
           PY
           docker logs "$name" > .ci-runtime/synthetic-15-service.log 2>&1
           docker stop --time 12 "$name"
