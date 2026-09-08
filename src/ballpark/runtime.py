@@ -116,6 +116,7 @@ class RuntimeLedger:
 
 JobHandler = Callable[[JobContext], None]
 JobAcceptor = Callable[[JobContext], None]
+JobAcceptanceReconciler = Callable[[JobContext], bool]
 
 
 class RuntimeWorker:
@@ -129,6 +130,7 @@ class RuntimeWorker:
         publication_dir: Path,
         clock: Callable[[], datetime] | None = None,
         acceptors: dict[str, JobAcceptor] | None = None,
+        acceptance_reconcilers: dict[str, JobAcceptanceReconciler] | None = None,
     ) -> None:
         self.specs = {spec.name: spec for spec in specs}
         if set(handlers) != set(self.specs):
@@ -137,6 +139,9 @@ class RuntimeWorker:
         self.acceptors = acceptors or {}
         if not set(self.acceptors).issubset(self.specs):
             raise ValueError("acceptors must name expected jobs")
+        self.acceptance_reconcilers = acceptance_reconcilers or {}
+        if not set(self.acceptance_reconcilers).issubset(self.acceptors):
+            raise ValueError("acceptance reconcilers must name accepted jobs")
         self.cache_dir, self.publication_dir = cache_dir, publication_dir
         self.clock = clock or (lambda: datetime.now(UTC))
 
@@ -281,6 +286,21 @@ class RuntimeWorker:
                     try:
                         acceptor(context)
                     except Exception as exc:
+                        reconciler = self.acceptance_reconcilers.get(context.name)
+                        try:
+                            reconciled = reconciler is not None and reconciler(context)
+                        except Exception:
+                            reconciled = False
+                        if reconciled:
+                            job.update(
+                                {
+                                    "attempt": 0,
+                                    "last_error": None,
+                                    "last_success_at": utc_stamp(finished),
+                                    "last_success_token": context.token,
+                                }
+                            )
+                            return "succeeded"
                         job["last_error"] = f"{type(exc).__name__}: {exc}"
                         job["attempt"] = 0
                         return "failed_exhausted"

@@ -13,10 +13,12 @@ import os
 import re
 import shutil
 import signal
+import stat
 import time
-from collections.abc import Mapping
+import uuid
+from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -38,6 +40,8 @@ _HEX64 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _TOKEN = re.compile(r"[0-9a-f]{32}\Z", re.ASCII)
 _DEFAULT_MIN_FREE_BYTES = 64 * 1024 * 1024
 _DEFAULT_MAX_OBJECT_BYTES = 32 * 1024 * 1024
+_DEFAULT_CLEANUP_MAX_BYTES = 64 * 1024 * 1024
+_DEFAULT_CLEANUP_MAX_SECONDS = 1
 
 
 def _environment_limit(name: str, default: int) -> int:
@@ -67,6 +71,99 @@ def _safe_child(root: Path, name: str) -> Path:
     if child.parent != base:
         raise RuntimeError("runtime storage path escapes its owned directory")
     return child
+
+
+def _catalog_stamp(value: datetime) -> str:
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _is_reparse(path: Path) -> bool:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return False
+    return path.is_symlink() or bool(getattr(metadata, "st_file_attributes", 0) & 0x400)
+
+
+def _owned_path(root: Path, relative: str) -> Path:
+    """Build a deletion target without following links or reparse points."""
+    parsed = PurePosixPath(relative)
+    if (
+        not relative
+        or parsed.is_absolute()
+        or ".." in parsed.parts
+        or "." in parsed.parts
+        or parsed.as_posix() != relative
+        or _is_reparse(root)
+    ):
+        raise RuntimeError("runtime storage owned path is invalid")
+    base = root.resolve()
+    candidate = base
+    for part in parsed.parts:
+        candidate = candidate / part
+        if _is_reparse(candidate):
+            raise RuntimeError("runtime storage owned path contains a reparse point")
+    try:
+        candidate.relative_to(base)
+    except ValueError as exc:
+        raise RuntimeError("runtime storage path escapes its owned directory") from exc
+    return candidate
+
+
+def _fsync_directory(directory: Path) -> None:
+    """Force replacement metadata on Linux; Windows has no directory fsync API."""
+    if os.name == "nt":
+        return
+    descriptor = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _durable_object_write(
+    objects: Path,
+    target: Path,
+    content: bytes,
+    *,
+    token: str,
+    catalog: PublicationCatalog,
+) -> None:
+    """Write immutable bytes only after their temporary ownership is recorded."""
+    temporary = objects / f".{target.name}.{token}.{uuid.uuid4().hex}.tmp"
+    catalog.register_object_temp(token, temporary.name, _stamp())
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+        _fsync_directory(objects)
+    except Exception:
+        # The registered name is intentionally retained for bounded cleanup.
+        raise
+    catalog.complete_object_temp(token, temporary.name)
+
+
+def _registered_pipeline_candidate(
+    context: JobContext, candidate: Path, publication_date: date
+) -> None:
+    catalog = PublicationCatalog(context.publication_dir)
+    created_at = _stamp()
+    catalog.register_candidate(
+        context.token, candidate, created_at, _catalog_stamp(context.deadline_at)
+    )
+    catalog.register_stage_paths(
+        context.token,
+        {
+            "data/data.json",
+            "data/release.json",
+            f"archive/{publication_date.isoformat()}.json",
+            "archive/index.json",
+        },
+        created_at,
+    )
 
 
 def _read_bounded(path: Path, maximum: int) -> bytes:
@@ -337,7 +434,11 @@ def _accept_stage_impl(context: JobContext) -> None:
     staged = _safe_child(publication / ".staged", context.token)
     if not staged.is_dir():
         raise RuntimeError("staged publication is incomplete")
-    catalog.register_candidate(context.token, staged, _stamp())
+    # Normal publishers register before stage writes. This idempotent fallback
+    # keeps the supported manual/import acceptance entry point recoverable.
+    catalog.register_candidate(
+        context.token, staged, _stamp(), _catalog_stamp(context.deadline_at)
+    )
     catalog.begin_accept(context.token)
     data_path, release_path, index_path = (
         staged / "data" / "data.json",
@@ -375,15 +476,22 @@ def _accept_stage_impl(context: JobContext) -> None:
             raise RuntimeError("runtime storage object exceeds its size limit")
         object_digest = hashlib.sha256(raw).hexdigest()
         target = _safe_child(objects, f"{object_digest}.json.gz")
+        # A reused object still gains a reference from this candidate. The
+        # original writer is never treated as the only owner of its digest.
+        catalog.register_object(object_digest, context.token, target.name, _stamp())
         if target.exists():
             if _read_object(objects, object_digest, maximum) != raw:
                 raise RuntimeError("immutable object corruption")
             return object_digest
         objects.mkdir(parents=True, exist_ok=True)
-        # Register the owned pending name before the durable replacement. A crash
-        # after this point is discoverable by indexed maintenance.
-        catalog.register_object(object_digest, context.token, target.name, _stamp())
-        atomic_write(target, gzip.compress(raw, mtime=0))
+        _fsync_directory(objects.parent)
+        _durable_object_write(
+            objects,
+            target,
+            gzip.compress(raw, mtime=0),
+            token=context.token,
+            catalog=catalog,
+        )
         if _read_object(objects, object_digest, maximum) != raw:
             raise RuntimeError("immutable object write verification failed")
         created.add(object_digest)
@@ -418,14 +526,6 @@ def _accept_stage_impl(context: JobContext) -> None:
         "archive_index_sha256": store(canonical_json_bytes(merged)),
         "input_receipts": inputs,
     }
-    existing = catalog.accepted(context.token)
-    if existing is not None:
-        if canonical_json_bytes(existing) != canonical_json_bytes(manifest):
-            raise RuntimeError("publication token conflicts with accepted content")
-        return
-    _require_time(context)
-    if shutil.disk_usage(publication).free < minimum_free:
-        raise RuntimeError("publication disk reserve fell below minimum")
     digests = {
         manifest["data_sha256"],
         manifest["release_sha256"],
@@ -433,56 +533,103 @@ def _accept_stage_impl(context: JobContext) -> None:
         *inputs.values(),
         *(row["object_sha256"] for row in indexed.values()),
     }
-    catalog.commit(context.token, manifest, digests, _stamp())
+    existing = catalog.accepted(context.token)
+    if existing is not None:
+        if canonical_json_bytes(existing) != canonical_json_bytes(manifest):
+            raise RuntimeError("publication token conflicts with accepted content")
+        catalog.set_candidate_manifest(context.token, manifest)
+        catalog.commit(context.token, manifest, digests, _stamp())
+        return
+    _require_time(context)
+    if shutil.disk_usage(publication).free < minimum_free:
+        raise RuntimeError("publication disk reserve fell below minimum")
+    catalog.set_candidate_manifest(context.token, manifest)
+    try:
+        catalog.commit(context.token, manifest, digests, _stamp())
+    except Exception:
+        # A durable catalog commit is success even when a later local action
+        # raises. The stored candidate manifest proves this is the same content.
+        if catalog.candidate_matches_accepted(context.token):
+            return
+        raise
 
 
-def maintain_publication_store(publication: Path) -> None:
-    """Run a bounded catalog-confirmed cleanup outside the publisher transaction."""
+def maintain_publication_store(
+    publication: Path,
+    *,
+    now: datetime | None = None,
+    monotonic: Callable[[], float] | None = None,
+) -> dict[str, Any]:
+    """Run bounded catalog-fenced cleanup outside the publisher critical path."""
     catalog = PublicationCatalog(publication)
     objects = publication / "objects"
+    staging = publication / ".staged"
     limit = _environment_limit("BALLPARK_CLEANUP_BATCH", 8)
+    byte_limit = _environment_limit("BALLPARK_CLEANUP_MAX_BYTES", _DEFAULT_CLEANUP_MAX_BYTES)
+    time_limit = _environment_limit("BALLPARK_CLEANUP_MAX_SECONDS", _DEFAULT_CLEANUP_MAX_SECONDS)
     grace = _environment_limit("BALLPARK_STORE_GRACE_SECONDS", 3600)
-    cutoff = (datetime.now(UTC) - timedelta(seconds=grace)).isoformat().replace("+00:00", "Z")
-    for object_digest, _token, relative in catalog.maintenance(cutoff, limit):
-        target = _safe_child(objects, relative)
-        catalog.delete_pending_if_unprotected(
-            object_digest, lambda target=target: target.unlink() if target.is_file() else None
-        )
-    for pending_token, stage_path in catalog.pending_candidates(cutoff, limit):
-        candidate = Path(stage_path)
-        staging_root = (publication / ".staged").resolve()
-        if (
-            not candidate.is_symlink()
-            and candidate.parent.resolve() == staging_root
-            and candidate.is_dir()
-        ):
-            # Stages have a fixed owned layout; remove only registered contents.
-            for relative in (
-                "data/data.json",
-                "data/release.json",
-                "archive/index.json",
-            ):
-                path = candidate / relative
-                if path.is_file() and not path.is_symlink():
-                    path.unlink()
-            for archive in (candidate / "archive").glob("????-??-??.json"):
-                if archive.is_file() and not archive.is_symlink():
-                    archive.unlink()
-            for directory in (candidate / "data", candidate / "archive"):
-                if directory.is_dir() and not directory.is_symlink():
-                    directory.rmdir()
-            candidate.rmdir()
-            catalog.remove_pending_candidate(pending_token)
+    observed = (now or datetime.now(UTC)).astimezone(UTC)
+    cutoff = _catalog_stamp(observed - timedelta(seconds=grace))
+
+    def remove(kind: str, key: str, relative: str, remaining: int) -> tuple[bool, int, str | None]:
+        try:
+            if kind in {"object", "temp"}:
+                target = _owned_path(objects, relative)
+            elif kind == "stage" and _is_token(key):
+                target = _owned_path(staging, f"{key}/{relative}")
+            elif kind == "stage_dir" and _is_token(key):
+                candidate = _owned_path(staging, key)
+                for directory in (candidate / "data", candidate / "archive", candidate):
+                    if _is_reparse(directory):
+                        return False, 0, "unknown_or_reparse_path"
+                    try:
+                        directory.rmdir()
+                    except FileNotFoundError:
+                        continue
+                    except OSError:
+                        return True, 0, "unknown_stage_entries"
+                return True, 0, None
+            else:
+                return False, 0, "invalid_owned_path"
+            try:
+                metadata = target.lstat()
+            except FileNotFoundError:
+                return True, 0, None
+            if _is_reparse(target) or not stat.S_ISREG(metadata.st_mode):
+                return False, 0, "unknown_or_reparse_path"
+            size = int(metadata.st_size)
+            if size > remaining:
+                return False, 0, "byte_budget"
+            target.unlink()
+            _fsync_directory(target.parent)
+            return True, size, None
+        except (OSError, RuntimeError):
+            return False, 0, "owned_path_unavailable"
+
+    return catalog.maintain(
+        now=_catalog_stamp(observed),
+        cutoff=cutoff,
+        entry_limit=limit,
+        byte_limit=byte_limit,
+        time_limit_seconds=float(time_limit),
+        remove=remove,
+        monotonic=monotonic or time.monotonic,
+    )
 
 
 def _accept_stage(context: JobContext) -> None:
     try:
         _accept_stage_impl(context)
     except Exception as exc:
-        PublicationCatalog(context.publication_dir).record_error(
-            context.token, f"{type(exc).__name__}: {exc}", _stamp()
-        )
+        catalog = PublicationCatalog(context.publication_dir)
+        if catalog.candidate_matches_accepted(context.token):
+            return
+        catalog.fail_candidate(context.token, f"{type(exc).__name__}: {exc}", _stamp())
         raise
+
+
+def _catalog_acceptance_reconciled(context: JobContext) -> bool:
+    return PublicationCatalog(context.publication_dir).candidate_matches_accepted(context.token)
 
 
 def run_fixture_worker(
@@ -518,9 +665,7 @@ def run_fixture_worker(
             if not (context.cache_dir / "sources" / f"{name}.json").is_file():
                 raise RuntimeError(f"cannot publish before {name} source snapshot")
         candidate = context.publication_dir / ".staged" / context.token
-        PublicationCatalog(context.publication_dir).register_candidate(
-            context.token, candidate, _stamp()
-        )
+        _registered_pipeline_candidate(context, candidate, target_date)
         DailyPipeline(paths).build_and_publish(
             target_date, candidate, fixture_path=fixture, generated_at=_stamp()
         )
@@ -539,6 +684,7 @@ def run_fixture_worker(
         cache_dir=cache_dir,
         publication_dir=publication_dir,
         acceptors={"publish": _accept_stage},
+        acceptance_reconcilers={"publish": _catalog_acceptance_reconciled},
     )
     if once:
         result = worker.run_once()
@@ -721,9 +867,7 @@ def run_live_worker(
                     "model_source_receipts": weather_receipt.get("model_source_receipts", {}),
                 }
                 candidate = context.publication_dir / ".staged" / context.token
-                PublicationCatalog(context.publication_dir).register_candidate(
-                    context.token, candidate, _stamp()
-                )
+                _registered_pipeline_candidate(context, candidate, target_date)
                 DailyPipeline(paths).build_and_publish(
                     target_date,
                     candidate,
@@ -750,6 +894,7 @@ def run_live_worker(
                 cache_dir=cache_dir,
                 publication_dir=publication_dir,
                 acceptors={"publish": _accept_stage},
+                acceptance_reconcilers={"publish": _catalog_acceptance_reconciled},
             )
             try:
                 try:
