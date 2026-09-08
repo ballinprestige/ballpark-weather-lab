@@ -104,6 +104,12 @@ def _accept_stage(context: JobContext) -> None:
     if accepted.exists():
         raise RuntimeError("publication token was already accepted")
     objects = context.publication_dir / "objects"
+    minimum_free = int(os.environ.get("BALLPARK_MIN_FREE_BYTES", "0"))
+    free_before = shutil.disk_usage(context.publication_dir).free
+    if free_before < minimum_free:
+        raise RuntimeError(
+            f"publication disk reserve is below minimum: {free_before} < {minimum_free} bytes"
+        )
 
     def store(raw: bytes) -> str:
         digest = hashlib.sha256(raw).hexdigest()
@@ -147,12 +153,18 @@ def _accept_stage(context: JobContext) -> None:
         "schema_version": 2,
         "dates": sorted(rows.values(), key=lambda row: row["date"], reverse=True),
     }
+    input_receipts = {
+        path.stem: store(path.read_bytes())
+        for path in sorted((context.cache_dir / "sources").glob("*.json"))
+        if path.is_file()
+    }
     manifest = {
         "schema_version": 2,
         "token": context.token,
         "data_sha256": store(data_raw),
         "release_sha256": store(release_raw),
         "archive_index_sha256": store(canonical_json_bytes(merged_index)),
+        "input_receipts": input_receipts,
         "accepted_at": _stamp(),
     }
     atomic_write(staged / "manifest.json", canonical_json_bytes(manifest))
@@ -163,6 +175,17 @@ def _accept_stage(context: JobContext) -> None:
         pointer_path,
         canonical_json_bytes(
             {"schema_version": 2, "current": {"token": context.token}, "previous": previous}
+        ),
+    )
+    atomic_write(
+        context.publication_dir / "receipts" / f"{context.token}.json",
+        canonical_json_bytes(
+            {
+                "token": context.token,
+                "free_before_bytes": free_before,
+                "free_after_bytes": shutil.disk_usage(context.publication_dir).free,
+                "input_receipt_count": len(input_receipts),
+            }
         ),
     )
 
