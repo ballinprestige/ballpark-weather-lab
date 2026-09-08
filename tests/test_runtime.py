@@ -6,8 +6,24 @@ from pathlib import Path
 import pytest
 
 from ballpark.runtime import JobSpec, RuntimeBusyError, RuntimeLedger, RuntimeWorker, probe_runtime
+from ballpark.runtime_app import _market_check_complete
 
 NOW = datetime(2026, 9, 8, 2, 0, tzinfo=UTC)
+
+
+def test_market_check_accepts_terminal_or_no_contract_evidence_only() -> None:
+    assert _market_check_complete(
+        {
+            1: {"state": "unavailable", "reason": "official game is final", "game_phase": "final"},
+            2: {"state": "unavailable", "reason": "no exact Kalshi event"},
+        }
+    )
+    assert not _market_check_complete(
+        {
+            1: {"state": "unavailable", "reason": "official game is final", "game_phase": "final"},
+            2: {"state": "unavailable", "reason": "public request failed TimeoutError"},
+        }
+    )
 
 
 def worker(tmp_path: Path, calls: list[object], handler: object) -> RuntimeWorker:

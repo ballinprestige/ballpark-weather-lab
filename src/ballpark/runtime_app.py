@@ -42,6 +42,22 @@ def _require_time(context: JobContext) -> None:
         raise TimeoutError(f"{context.name} attempt deadline elapsed")
 
 
+def _market_check_complete(quotes: dict[int, dict[str, Any]]) -> bool:
+    """Recognize explicit no-contract evidence without treating provider failure as fresh."""
+    for quote in quotes.values():
+        state, reason = quote.get("state"), str(quote.get("reason") or "")
+        if state == "observed_unknown_age":
+            continue
+        if state != "unavailable":
+            return False
+        if "no exact Kalshi event" in reason or "no active two-sided Kalshi" in reason:
+            continue
+        if quote.get("game_phase") == "final" and reason == "official game is final":
+            continue
+        return False
+    return True
+
+
 def _snapshot(context: JobContext, name: str, value: Any) -> None:
     raw = canonical_json_bytes(value)
     target = context.cache_dir / "sources" / f"{name}.json"
@@ -310,16 +326,8 @@ def run_live_worker(
                     observed_at=datetime.now(UTC),
                     deadline_at=_deadline(context),
                 )
-                if schedule_value and all(
-                    quote.get("state") == "unavailable" for quote in quotes.values()
-                ):
-                    reasons = [str(quote.get("reason") or "") for quote in quotes.values()]
-                    expected_empty = all(
-                        "no exact Kalshi event" in reason or "no active two-sided Kalshi" in reason
-                        for reason in reasons
-                    )
-                    if not expected_empty:
-                        raise RuntimeError("Kalshi provider failed without usable market evidence")
+                if schedule_value and not _market_check_complete(quotes):
+                    raise RuntimeError("Kalshi provider failed without usable market evidence")
                 _require_time(context)
                 _snapshot(context, "markets", {"date": target_date.isoformat(), "exchange": quotes})
                 receipt["markets"] = quotes
