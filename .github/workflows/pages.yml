@@ -98,12 +98,13 @@ jobs:
         id: pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
 
-      - name: Restore already-published Ballpark history when available
+      - name: Require and restore all already-published Ballpark history
         run: >-
           python -m ballpark restore-history
           --url "${{ steps.pages.outputs.base_url }}"
           --output web/public
           --maximum-dates 120
+          --strict
 
       - name: Run the one-command daily build
         shell: bash

@@ -57,6 +57,8 @@ def _build_parser() -> argparse.ArgumentParser:
     restore.add_argument("--url", required=True)
     restore.add_argument("--output", type=Path)
     restore.add_argument("--maximum-dates", type=int, default=120)
+    restore.add_argument("--strict", action="store_true")
+    restore.add_argument("--allow-empty-history", action="store_true")
 
     reliability = commands.add_parser("verify-reliability")
     reliability.add_argument("--url", required=True)
@@ -277,6 +279,8 @@ def main(argv: list[str] | None = None) -> int:
                     output,
                     client=HttpClient(),
                     maximum_dates=args.maximum_dates,
+                    strict=args.strict,
+                    allow_empty_history=args.allow_empty_history,
                 )
             )
             return 0
