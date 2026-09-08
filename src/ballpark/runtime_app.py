@@ -44,6 +44,18 @@ def _snapshot(context: JobContext, name: str, value: Any) -> None:
     )
 
 
+def _load_snapshot(cache_dir: Path, name: str, target_date: date) -> Any:
+    path = cache_dir / "sources" / f"{name}.json"
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        value = document["value"]
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"durable {name} receipt is unavailable") from exc
+    if not isinstance(value, dict) or value.get("date") != target_date.isoformat():
+        raise RuntimeError(f"durable {name} receipt belongs to another slate date")
+    return value
+
+
 def _accept_stage(context: JobContext) -> None:
     staged = context.publication_dir / ".staged" / context.token
     if (
@@ -168,7 +180,7 @@ def run_live_worker(
                 client: HttpClient = client,
                 receipt: dict[str, Any] = receipt,
             ) -> None:
-                schedule_value = receipt.get("schedule")
+                schedule_value = _load_snapshot(cache_dir, "schedule", target_date).get("games")
                 if not isinstance(schedule_value, list):
                     raise RuntimeError("schedule acquisition is unavailable for this pass")
                 value = {
@@ -187,7 +199,7 @@ def run_live_worker(
                 receipt: dict[str, Any] = receipt,
                 cache_dir: Path = cache_dir,
             ) -> None:
-                schedule_value = receipt.get("schedule")
+                schedule_value = _load_snapshot(cache_dir, "schedule", target_date).get("games")
                 if not isinstance(schedule_value, list):
                     raise RuntimeError("schedule acquisition is unavailable for this pass")
                 quotes = KalshiExchangeProvider(
@@ -205,11 +217,9 @@ def run_live_worker(
                 target_date: date = target_date,
                 receipt: dict[str, Any] = receipt,
             ) -> None:
-                schedule_value, weather_value, market_value = (
-                    receipt.get("schedule"),
-                    receipt.get("weather"),
-                    receipt.get("markets"),
-                )
+                schedule_value = _load_snapshot(cache_dir, "schedule", target_date).get("games")
+                weather_value = _load_snapshot(cache_dir, "weather", target_date).get("games")
+                market_value = _load_snapshot(cache_dir, "markets", target_date).get("exchange")
                 if (
                     not isinstance(schedule_value, list)
                     or not isinstance(weather_value, dict)
