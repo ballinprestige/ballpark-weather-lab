@@ -424,17 +424,19 @@ def _accept_stage_impl(context: JobContext) -> None:
         *(row["object_sha256"] for row in indexed.values()),
     }
     catalog.commit(context.token, manifest, digests, _stamp())
-    # Bounded post-commit maintenance touches only catalog-confirmed pending objects.
-    for object_digest, _token, relative in catalog.maintenance(
-        _environment_limit("BALLPARK_CLEANUP_BATCH", 8)
-    ):
+
+
+def maintain_publication_store(publication: Path) -> None:
+    """Run a bounded catalog-confirmed cleanup outside the publisher transaction."""
+    catalog = PublicationCatalog(publication)
+    objects = publication / "objects"
+    limit = _environment_limit("BALLPARK_CLEANUP_BATCH", 8)
+    for object_digest, _token, relative in catalog.maintenance(limit):
         target = _safe_child(objects, relative)
         if target.is_file():
             target.unlink()
         catalog.remove_pending_object(object_digest)
-    for pending_token, stage_path in catalog.pending_candidates(
-        _environment_limit("BALLPARK_CLEANUP_BATCH", 8)
-    ):
+    for pending_token, stage_path in catalog.pending_candidates(limit):
         candidate = Path(stage_path)
         staging_root = (publication / ".staged").resolve()
         if (
@@ -509,7 +511,9 @@ def run_fixture_worker(
         acceptors={"publish": _accept_stage},
     )
     if once:
-        return worker.run_once()
+        result = worker.run_once()
+        maintain_publication_store(publication_dir)
+        return result
     stopping = False
 
     def stop(_signal: int, _frame: object) -> None:
