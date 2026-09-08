@@ -23,6 +23,10 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def list_directory(self, _path: str) -> None:
+        self.send_error(404, "directory listing disabled")
+        return None
+
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         if path == "/healthz":
@@ -32,7 +36,7 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
             result = runtime_readiness(self.state_dir, heartbeat_seconds=180, job_lag_seconds=30)
             self._json(200 if result["state"] == "ready" else 503, result)
             return
-        if path.startswith("/data/"):
+        if path in {"/data/data.json", "/data/release.json"}:
             try:
                 pointer = json.loads(
                     (self.publication_dir / "current.json").read_text(encoding="utf-8")
@@ -47,6 +51,7 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
                 return
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
