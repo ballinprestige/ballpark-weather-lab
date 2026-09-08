@@ -338,6 +338,7 @@ def _accept_stage_impl(context: JobContext) -> None:
     if not staged.is_dir():
         raise RuntimeError("staged publication is incomplete")
     catalog.register_candidate(context.token, staged, _stamp())
+    catalog.begin_accept(context.token)
     data_path, release_path, index_path = (
         staged / "data" / "data.json",
         staged / "data" / "release.json",
@@ -444,9 +445,9 @@ def maintain_publication_store(publication: Path) -> None:
     cutoff = (datetime.now(UTC) - timedelta(seconds=grace)).isoformat().replace("+00:00", "Z")
     for object_digest, _token, relative in catalog.maintenance(cutoff, limit):
         target = _safe_child(objects, relative)
-        if target.is_file():
-            target.unlink()
-        catalog.remove_pending_object(object_digest)
+        catalog.delete_pending_if_unprotected(
+            object_digest, lambda target=target: target.unlink() if target.is_file() else None
+        )
     for pending_token, stage_path in catalog.pending_candidates(cutoff, limit):
         candidate = Path(stage_path)
         staging_root = (publication / ".staged").resolve()
