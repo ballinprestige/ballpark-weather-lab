@@ -7,19 +7,23 @@ publish a release. Those are operator actions after a reviewed image is availabl
 ## Service configuration
 
 `render.yaml` defines one Docker web service with the `1c-2g` plan, `autoDeployTrigger: off`, and
-a persistent disk mounted at `/var/lib/ballpark`. The image persists all mutable state there:
+a persistent disk mounted at `/var/lib/ballpark`. Its runtime is deliberately a child directory,
+`/var/lib/ballpark/runtime`, because `runtime-restore` atomically replaces its destination through a
+sibling temporary directory and must never target the persistent-disk mount root itself. The Render
+environment overrides the image defaults to persist mutable state in that child:
 
-- `state/`: `runtime-state.sqlite3`, SQLite sidecars, and bounded maintenance history.
-- `cache/`: durable source snapshots, private ESPN raw-response receipts, official bindings,
+- `runtime/state/`: `runtime-state.sqlite3`, SQLite sidecars, and bounded maintenance history.
+- `runtime/cache/`: durable source snapshots, private ESPN raw-response receipts, official bindings,
   normalized last-good markets, and original acquisition clocks.
-- `publication/`: `catalog.sqlite3`, accepted/rollback history, immutable CAS objects, and private
-  source/model input objects.
+- `runtime/publication/`: `catalog.sqlite3`, accepted/rollback history, immutable CAS objects, and
+  private source/model input objects.
 
 The compiled UI and `/data/*` endpoints expose only accepted public payloads, releases, and archive
 records. The raw source cache, ledger, catalog, private CAS receipts, monitor ping URL, and backup
 manifest are private operational data.
 
-The checked-in 1 GB disk value is not a retention guarantee. A live-mount sample at
+The checked-in 10 GB disk value is a pending capacity proposal, not a provisioned spend or retention
+guarantee. A live-mount sample at
 2026-09-08T18:22Z was 8.74 MB (7,810,504 B publication, 919,580 B cache, 9,763 B state), after a
 2,752,264 B stopped-state sample at 09:11Z and a 7.5-hour host-sleep gap. Those observations do not
 measure active-day growth. Keep every accepted object; do not prune history to fit the disk. The
@@ -39,10 +43,16 @@ Record the final immutable image identity in the release receipt. Recovery comma
 image defaults are:
 
 ```text
+# Image defaults for local root-mounted use:
 BALLPARK_STATE_DIR=/var/lib/ballpark/state
 BALLPARK_CACHE_DIR=/var/lib/ballpark/cache
 BALLPARK_PUBLICATION_DIR=/var/lib/ballpark/publication
 BALLPARK_HOST=0.0.0.0
+
+# Render template overrides under the persistent-disk root:
+BALLPARK_STATE_DIR=/var/lib/ballpark/runtime/state
+BALLPARK_CACHE_DIR=/var/lib/ballpark/runtime/cache
+BALLPARK_PUBLICATION_DIR=/var/lib/ballpark/runtime/publication
 ```
 
 Render supplies `PORT`. Do not put a monitor ping URL in `render.yaml`, logs, a command line,
@@ -119,12 +129,12 @@ operator-controlled off-host destination is needed for recovery from host or dis
 
 ```bash
 ballpark runtime-backup --stopped \
-  --mount /var/lib/ballpark \
-  --destination /secure-backups/ballpark-2026-09-08 \
+  --mount /var/lib/ballpark/runtime \
+  --destination /tmp/ballpark-2026-09-08 \
   --image-ref 'ballpark-runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 
 ballpark runtime-verify-backup \
-  --backup /secure-backups/ballpark-2026-09-08 \
+  --backup /tmp/ballpark-2026-09-08 \
   --image-ref 'ballpark-runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 ```
 
@@ -139,20 +149,21 @@ When using the packaged image rather than an installed `ballpark` command, its e
 CLI. Mount the stopped source/backup/recovery directories deliberately; none of these modes contacts
 providers, publishes a release, or starts the worker.
 
-### Potential Render maintenance route — SSH access not yet qualified
+### Render maintenance route — packaged SSH prerequisite, remote access pending
 
 Render Cron Jobs cannot mount the web disk and an ordinary stopped web service has no shell for the
-copy. The current image runs as `root`; the exact `7930b6c` image inspection found `/bin/bash` but a
-locked root account, without reading or emitting a password/hash. Render documents that a root-run
-Dockerfile needs an unlocked account for SSH, and this image has no separately qualified key-only
-non-root account with durable-mount ownership. Therefore the remote-shell copy is **not** an operating
-procedure yet: do not rely on it or attempt an unreviewed unlock/password change. A future reviewed
-image must provide either Render's documented key-only-compatible root setup without a blank/password
-login, or a dedicated non-root key-only account that can read/write `/var/lib/ballpark`; then prove the
-final image account state and one server-only backup/restore rehearsal before using this route.
+copy. The image runs as `root` and sets root's shadow passwd field to the literal nonempty `NP` marker
+at build time. The [OpenSSH authentication documentation](https://raw.githubusercontent.com/openssh/openssh-portable/master/sshd.8) documents `NP` as a password-authentication-disabled, public-key-compatible
+field: it is neither blank nor a usable password and it does not make the account locked. Root keeps
+its UID, so `/var/lib/ballpark` mount ownership and the runtime CLI are unchanged. The image adds no
+SSH daemon, listener, public key, or secret. The image qualification checks `/bin/bash`, UID 0, the
+exact `NP` marker without printing a password/hash, write access to a mounted runtime volume, and a
+packaged stopped backup/restore rehearsal.
 
-After that prerequisite is met, the proposed route is two bounded deployments of the **same immutable
-image**: first change
+Render SSH key provisioning, the remote service shell, backup destination, and an actual server-only
+maintenance deployment remain operator-controlled remote acceptance steps; none is configured by this
+repository. Once those steps are separately approved and verified, the proposed route is two bounded
+deployments of the **same immutable image**: first change
 the web service `dockerCommand` from `service` to `server`, then deploy it. `server` runs HTTP only;
 it does not launch the worker. Keep the platform health check on `/healthz` and pause the external
 freshness monitor for the declared maintenance interval, so no readiness probe opens the SQLite
@@ -164,25 +175,34 @@ Transfer the verified private backup to the operator-selected private destinatio
 web service `dockerCommand: service` and redeploy the same digest. Wait for `/healthz`, `/readiness`,
 release/payload hash agreement, source-health clocks, and retained archive readback before ending the
 maintenance window. This is worker downtime but preserves the read-only server path during the transfer. It remains a
-proposed procedure until the SSH prerequisite above is independently proven. It is not an authorization
-to run deployments, create a destination, or upload private receipts. A recovery restore follows the
-separate empty-volume procedure below; it never overwrites the original mount.
+proposed procedure until remote SSH and the server-only deployment are independently proven. It is not
+an authorization to run deployments, create a destination, or upload private receipts. A recovery
+restore follows the separate empty-volume procedure below; it never overwrites the original mount.
 
 ## Restore and same-image rollback
 
-Keep the original mount unchanged. Create a separate empty recovery volume or directory and use the
-same immutable image digest:
+Keep the original mount unchanged. On a new empty persistent disk mounted at `/var/lib/ballpark`, use
+an absent or empty child `/var/lib/ballpark/runtime`; do not restore into `/var/lib/ballpark` itself.
+Copy the verified stopped backup into the server's ephemeral `/tmp` directory, then use the same
+immutable image digest:
 
 ```bash
 ballpark runtime-restore --stopped \
-  --backup /secure-backups/ballpark-2026-09-08 \
-  --destination /recovery-volume/ballpark \
+  --backup /tmp/ballpark-2026-09-08 \
+  --destination /var/lib/ballpark/runtime \
   --image-ref 'ballpark-runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 ```
 
-The destination must be absent or an empty real directory. Restore verifies the backup first, writes
-to a sibling temporary directory, revalidates all bytes and catalog summary, then replaces the empty
-destination. A bad backup leaves both original mount and recovery destination unchanged.
+The destination must be absent or an empty real directory on the same persistent filesystem as its
+sibling temporary directory. Restore verifies the backup first, writes to that sibling, revalidates
+all bytes and catalog summary, then replaces the empty child. A bad backup leaves both original mount
+and recovery destination unchanged.
+
+For a first seed, deploy `dockerCommand: server` with the Render child-path environment values above,
+leave the external freshness monitor unconfigured, and wait for the old service to be absent. SCP the
+verified private backup into `/tmp`, restore it into the child directory, then change back to
+`dockerCommand: service`. Only configure the external monitor after `/healthz`, `/readiness`, release
+binding, source-health, and archive readback succeed on that seeded runtime.
 
 Launch the recovery service with its normal `service` entrypoint against the recovered directories
 on an isolated loopback port. Check `/healthz`, `/readiness`, current data/release SHA-256, retained
