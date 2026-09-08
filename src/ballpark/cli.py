@@ -137,6 +137,13 @@ def main(argv: list[str] | None = None) -> int:
             payload = json.loads(args.payload.read_text(encoding="utf-8"))
             if not isinstance(payload, dict) or not isinstance(payload.get("games"), list):
                 raise ValueError("--payload must contain a daily slate object")
+            existing_generated_at = payload.get("generated_at")
+            if not isinstance(existing_generated_at, str):
+                raise ValueError("--payload must retain its original generated_at")
+            if args.generated_at is not None and args.generated_at != existing_generated_at:
+                raise ValueError(
+                    "refresh-exchange cannot replace generated_at; it only refreshes exchange evidence"
+                )
             observed_at = datetime.now(UTC)
             quotes = KalshiExchangeProvider(
                 HttpClient(), cache_path=paths.root / ".ballpark-cache" / "kalshi-exchange.json"
@@ -144,8 +151,6 @@ def main(argv: list[str] | None = None) -> int:
             for game in payload["games"]:
                 game["exchange_market"] = quotes[int(game["game_pk"])]
             states = [quote["state"] for quote in quotes.values()]
-            generated_at = args.generated_at or datetime.now(UTC).isoformat().replace("+00:00", "Z")
-            payload["generated_at"] = generated_at
             payload["health"]["exchange_markets"] = {
                 "state": "available" if states and all(state == "observed_unknown_age" for state in states) else "partial" if "observed_unknown_age" in states else "unavailable",
                 "source": "Kalshi public market-data API",

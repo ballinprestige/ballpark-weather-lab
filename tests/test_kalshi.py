@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -76,6 +77,22 @@ def test_rejects_zero_depth_and_requires_reciprocal_orderbook() -> None:
     good_book = {"orderbook_fp": {"yes_dollars": [["0.4800", "1"]], "no_dollars": [["0.5100", "1"]]}}
     assert orderbook_validates(quote, good_book)
     assert not orderbook_validates(quote, {"orderbook_fp": {"yes_dollars": [["0.4700", "1"]], "no_dollars": [["0.5100", "1"]]}})
+
+
+def test_batch_deadline_reaches_each_kalshi_request(tmp_path: Path) -> None:
+    class DeadlineClient:
+        def __init__(self) -> None:
+            self.deadlines: list[float | None] = []
+
+        def get_bytes(self, url: str, *, deadline_at: float | None = None) -> bytes:
+            self.deadlines.append(deadline_at)
+            return json.dumps({"events": []}).encode()
+
+    client = DeadlineClient()
+    provider = KalshiExchangeProvider(client, cache_path=tmp_path / "kalshi.json")  # type: ignore[arg-type]
+    provider.fetch([GAME], observed_at=OBSERVED, deadline_at=time.monotonic() + 1)
+    assert len(client.deadlines) == 1
+    assert client.deadlines[0] is not None
 
 
 class _Client:

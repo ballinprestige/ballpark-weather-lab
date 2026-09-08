@@ -133,7 +133,7 @@ class DailyPipeline:
         else:
             exchange_by_game = KalshiExchangeProvider(
                 self.client, cache_path=self.paths.root / ".ballpark-cache" / "kalshi-exchange.json"
-            ).fetch(schedule, observed_at=observed_at)
+            ).fetch(schedule, observed_at=observed_at, deadline_at=network_deadline)
 
         model = ParkFactorModel(self.paths.models, self.paths.data)
         physics: PhysicsEngine | None = None

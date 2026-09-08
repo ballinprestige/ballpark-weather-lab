@@ -267,11 +267,26 @@ class KalshiExchangeProvider:
     def __init__(self, client: HttpClient, *, cache_path: Path) -> None:
         self.client, self.cache = client, KalshiSnapshotCache(cache_path)
 
-    def _json(self, route: str, params: dict[str, Any]) -> tuple[Any, bytes]:
-        raw = self.client.get_bytes(f"{API}{route}?{urlencode(params)}")
+    def _json(
+        self, route: str, params: dict[str, Any], *, deadline_at: float | None = None
+    ) -> tuple[Any, bytes]:
+        url = f"{API}{route}?{urlencode(params)}"
+        if deadline_at is not None and time.monotonic() >= deadline_at:
+            raise TimeoutError("Kalshi batch deadline elapsed")
+        raw = (
+            self.client.get_bytes(url)
+            if deadline_at is None
+            else self.client.get_bytes(url, deadline_at=deadline_at)
+        )
         return json.loads(raw), raw
 
-    def fetch(self, schedule: list[dict[str, Any]], *, observed_at: datetime) -> dict[int, dict[str, Any]]:
+    def fetch(
+        self,
+        schedule: list[dict[str, Any]],
+        *,
+        observed_at: datetime,
+        deadline_at: float | None = None,
+    ) -> dict[int, dict[str, Any]]:
         observed_at = _utc(observed_at)
         results = {int(game["game_pk"]): unavailable_market(game, observed_at, "no exact Kalshi event") for game in schedule}
         try:
@@ -280,7 +295,7 @@ class KalshiExchangeProvider:
                 parameters: dict[str, Any] = {"series_ticker": SERIES, "limit": 100}
                 if cursor:
                     parameters["cursor"] = cursor
-                body, page_raw = self._json("/events", parameters)
+                body, page_raw = self._json("/events", parameters, deadline_at=deadline_at)
                 page = body.get("events") if isinstance(body, dict) else None
                 if not isinstance(page, list):
                     raise ValueError("events response has no event list")
@@ -298,6 +313,13 @@ class KalshiExchangeProvider:
         ]
         used: set[str] = set()
         for game in schedule:
+            if deadline_at is not None and time.monotonic() >= deadline_at:
+                reason = "Kalshi batch deadline elapsed"
+                results[int(game["game_pk"])] = self.cache.get(game, datetime.now(UTC), reason) or {
+                    **results[int(game["game_pk"])],
+                    "reason": reason,
+                }
+                continue
             team_pair = (_KALSHI_TEAM.get(str(game.get("away_team")), game.get("away_team")), _KALSHI_TEAM.get(str(game.get("home_team")), game.get("home_team")))
             game_key = (_utc(str(game.get("game_time"))), *team_pair)
             matches = [event for event in events if isinstance(event, dict) and (parsed := _event_start(event.get("event_ticker"))) and parsed == game_key]
@@ -307,13 +329,17 @@ class KalshiExchangeProvider:
                 continue
             event = matches[0]; used.add(str(event["event_ticker"]))
             try:
-                body, markets_raw = self._json("/markets", {"event_ticker": event["event_ticker"], "limit": 100})
+                body, markets_raw = self._json(
+                    "/markets",
+                    {"event_ticker": event["event_ticker"], "limit": 100},
+                    deadline_at=deadline_at,
+                )
                 markets = body.get("markets") if isinstance(body, dict) else None
                 if not isinstance(markets, list): raise ValueError("markets response has no market list")
                 quote = normalize_markets(game, event, markets, observed_at=observed_at, raw_bytes=events_raw + b"\n" + markets_raw)
                 if quote["state"] == "observed_unknown_age":
                     orderbook, orderbook_raw = self._json(
-                        f"/markets/{quote['market_ticker']}/orderbook", {}
+                        f"/markets/{quote['market_ticker']}/orderbook", {}, deadline_at=deadline_at
                     )
                     depths = orderbook_validates(quote, orderbook)
                     if depths is None:
