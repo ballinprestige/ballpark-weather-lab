@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -28,6 +29,51 @@ WIND_BUCKETS = [-8, -4, 0, 4, 8]
 PROFILE_PERCENTILES = [5, 25, 50, 75, 95]
 SPRAY_BIN_CENTERS = np.arange(-40, 41, 10)
 PA_WEIGHTS = [4.63, 4.53, 4.41, 4.31, 4.21, 4.10, 3.99, 3.88, 3.75]
+APPROACH_C_METHOD = "neutral-park point-mass Euler wall-crossing ratio v2"
+MAX_EVENT_EVALUATIONS = 121_500
+
+
+@dataclass(frozen=True)
+class QuantizedTrajectoryInput:
+    """The shared input grid for lookup display values and wall events."""
+
+    exit_velocity_mph: int
+    launch_angle_deg: int
+    spray_angle_deg: int
+    temperature_f: int
+    altitude_ft: int
+    wind_carry_mph: int
+
+
+@dataclass(frozen=True)
+class WallFlightEvent:
+    """One terminal outcome from the retained point-mass Euler integration."""
+
+    terminal: Literal["cleared_wall", "wall_contact", "ground_before_wall", "foul", "incomplete"]
+    terminal_distance_ft: float
+    max_height_ft: float
+    elapsed_seconds: float
+    crossing_height_ft: float | None = None
+
+
+def quantize_trajectory_inputs(
+    ev_mph: float,
+    la_deg: float,
+    spray_deg: float,
+    temp_f: float,
+    altitude_ft: float,
+    wind_carry_mph: float,
+) -> QuantizedTrajectoryInput:
+    """Match the established lookup grid before evaluating optional wall events."""
+
+    return QuantizedTrajectoryInput(
+        exit_velocity_mph=int(np.clip(round(ev_mph / 2) * 2, EV_BINS[0], EV_BINS[-1])),
+        launch_angle_deg=int(np.clip(round(la_deg / 2) * 2, LA_BINS[0], LA_BINS[-1])),
+        spray_angle_deg=int(np.clip(round(spray_deg / 5) * 5, SPRAY_BINS[0], SPRAY_BINS[-1])),
+        temperature_f=min(TEMP_BUCKETS, key=lambda value: abs(value - temp_f)),
+        altitude_ft=min(ALT_BUCKETS, key=lambda value: abs(value - altitude_ft)),
+        wind_carry_mph=min(WIND_BUCKETS, key=lambda value: abs(value - wind_carry_mph)),
+    )
 
 
 def air_density_ratio(temp_f: float, altitude_ft: float) -> float:
@@ -37,21 +83,19 @@ def air_density_ratio(temp_f: float, altitude_ft: float) -> float:
     return pressure_ratio * (288.15 / temp_k)
 
 
-def simulate_trajectory(
+def _integrate_euler_event(
     exit_velocity_mph: float,
     launch_angle_deg: float,
     spray_angle_deg: float,
     density_ratio: float = 1.0,
     wind_carry_mph: float = 0.0,
     *,
+    wall_distance_ft: float | None = None,
+    wall_height_ft: float | None = None,
     dt: float = 0.02,
     max_time: float = 8.0,
-) -> tuple[float, float]:
-    """Return landing distance and peak height using a bounded Euler flight approximation.
-
-    This preserves the established table generator's actual numerical method. It is deliberately
-    described as an approximation rather than the RK4 method claimed by an older docstring.
-    """
+) -> WallFlightEvent:
+    """Run the retained Euler update order and return its first terminal flight event."""
 
     velocity = exit_velocity_mph * 5280 / 3600
     wind_carry = wind_carry_mph * 5280 / 3600
@@ -67,10 +111,17 @@ def simulate_trajectory(
     lift_factor = 0.5 * rho * BALL_AREA * CL_BASE / BALL_MASS
     elapsed = 0.0
     while elapsed < max_time:
+        previous_x, previous_y, previous_z = x, y, z
+        previous_distance = math.sqrt(previous_x**2 + previous_y**2)
         vx_rel, vy_rel, vz_rel = vx, vy - wind_carry, vz
         relative_speed = math.sqrt(vx_rel**2 + vy_rel**2 + vz_rel**2)
         if relative_speed < 1.0:
-            break
+            return WallFlightEvent(
+                "incomplete",
+                previous_distance,
+                max_height,
+                elapsed,
+            )
         ax = -drag_factor * relative_speed * vx_rel
         ay = -drag_factor * relative_speed * vy_rel
         horizontal_speed = math.sqrt(vx_rel**2 + vy_rel**2)
@@ -87,9 +138,101 @@ def simulate_trajectory(
         z += vz * dt
         max_height = max(max_height, z)
         elapsed += dt
+        distance = math.sqrt(x**2 + y**2)
+        wall_fraction: float | None = None
+        if wall_distance_ft is not None and previous_distance < wall_distance_ft <= distance:
+            if distance > previous_distance:
+                wall_fraction = (wall_distance_ft - previous_distance) / (
+                    distance - previous_distance
+                )
+        ground_fraction: float | None = None
+        # This preserves the established integrator's release-height guard before ground stops it.
         if z <= 0 and elapsed > 0.5:
-            break
-    return round(math.sqrt(x**2 + y**2), 1), round(max_height, 1)
+            if previous_z > 0 and z < previous_z:
+                ground_fraction = previous_z / (previous_z - z)
+            else:
+                ground_fraction = 0.0
+
+        if wall_fraction is not None and (
+            ground_fraction is None or wall_fraction < ground_fraction
+        ):
+            crossing_z = previous_z + wall_fraction * (z - previous_z)
+            if wall_height_ft is None:
+                raise ValueError("wall height is required with a wall distance")
+            return WallFlightEvent(
+                "cleared_wall" if crossing_z > wall_height_ft else "wall_contact",
+                wall_distance_ft,
+                max_height,
+                elapsed,
+                crossing_z,
+            )
+        if ground_fraction is not None:
+            return WallFlightEvent(
+                "ground_before_wall",
+                distance,
+                max_height,
+                elapsed,
+            )
+
+    return WallFlightEvent(
+        "incomplete",
+        math.sqrt(x**2 + y**2),
+        max_height,
+        elapsed,
+    )
+
+
+def simulate_wall_event(
+    exit_velocity_mph: float,
+    launch_angle_deg: float,
+    spray_angle_deg: float,
+    density_ratio: float,
+    wind_carry_mph: float,
+    *,
+    wall_distance_ft: float,
+    wall_height_ft: float,
+    dt: float = 0.02,
+    max_time: float = 8.0,
+) -> WallFlightEvent:
+    """Classify the first fair wall/ground event in the point-mass Euler approximation."""
+
+    if abs(spray_angle_deg) > 45:
+        return WallFlightEvent("foul", 0.0, 3.0, 0.0)
+    return _integrate_euler_event(
+        exit_velocity_mph,
+        launch_angle_deg,
+        spray_angle_deg,
+        density_ratio,
+        wind_carry_mph,
+        wall_distance_ft=wall_distance_ft,
+        wall_height_ft=wall_height_ft,
+        dt=dt,
+        max_time=max_time,
+    )
+
+
+def simulate_trajectory(
+    exit_velocity_mph: float,
+    launch_angle_deg: float,
+    spray_angle_deg: float,
+    density_ratio: float = 1.0,
+    wind_carry_mph: float = 0.0,
+    *,
+    dt: float = 0.02,
+    max_time: float = 8.0,
+) -> tuple[float, float]:
+    """Return rounded landing distance and peak height using the retained Euler method."""
+
+    event = _integrate_euler_event(
+        exit_velocity_mph,
+        launch_angle_deg,
+        spray_angle_deg,
+        density_ratio,
+        wind_carry_mph,
+        dt=dt,
+        max_time=max_time,
+    )
+    return round(event.terminal_distance_ft, 1), round(event.max_height_ft, 1)
 
 
 class TrajectoryLookup:
@@ -130,27 +273,24 @@ class TrajectoryLookup:
         altitude_ft: float,
         wind_carry_mph: float,
     ) -> tuple[float, float]:
-        ev = int(np.clip(round(ev_mph / 2) * 2, EV_BINS[0], EV_BINS[-1]))
-        launch = int(np.clip(round(la_deg / 2) * 2, LA_BINS[0], LA_BINS[-1]))
-        spray = int(np.clip(round(spray_deg / 5) * 5, SPRAY_BINS[0], SPRAY_BINS[-1]))
-        temp = min(TEMP_BUCKETS, key=lambda value: abs(value - temp_f))
-        altitude = min(ALT_BUCKETS, key=lambda value: abs(value - altitude_ft))
-        wind = min(WIND_BUCKETS, key=lambda value: abs(value - wind_carry_mph))
+        query = quantize_trajectory_inputs(
+            ev_mph, la_deg, spray_deg, temp_f, altitude_ft, wind_carry_mph
+        )
         result = self.values[
-            (ev - EV_BINS[0]) // 2,
-            (launch - LA_BINS[0]) // 2,
-            (spray - SPRAY_BINS[0]) // 5,
-            TEMP_BUCKETS.index(temp),
-            ALT_BUCKETS.index(altitude),
-            WIND_BUCKETS.index(wind),
+            (query.exit_velocity_mph - EV_BINS[0]) // 2,
+            (query.launch_angle_deg - LA_BINS[0]) // 2,
+            (query.spray_angle_deg - SPRAY_BINS[0]) // 5,
+            TEMP_BUCKETS.index(query.temperature_f),
+            ALT_BUCKETS.index(query.altitude_ft),
+            WIND_BUCKETS.index(query.wind_carry_mph),
         ]
         if np.isnan(result).any():
             return simulate_trajectory(
-                ev_mph,
-                la_deg,
-                spray_deg,
-                air_density_ratio(temp_f, altitude_ft),
-                wind_carry_mph,
+                query.exit_velocity_mph,
+                query.launch_angle_deg,
+                query.spray_angle_deg,
+                air_density_ratio(query.temperature_f, query.altitude_ft),
+                query.wind_carry_mph,
             )
         return float(result[0]), float(result[1])
 
@@ -160,6 +300,13 @@ class PhysicsEngine:
     profiles: pd.DataFrame
     geometry: pd.DataFrame
     trajectory: TrajectoryLookup
+    event_limit: int = MAX_EVENT_EVALUATIONS
+    _event_cache: dict[tuple[Any, ...], WallFlightEvent] = field(init=False, repr=False)
+    _event_requested: int = field(init=False, default=0)
+    _event_evaluated: int = field(init=False, default=0)
+    _event_elapsed_seconds: float = field(init=False, default=0.0)
+    _event_budget_exhausted: bool = field(init=False, default=False)
+    _event_incomplete: bool = field(init=False, default=False)
 
     @classmethod
     def load(cls, data_dir: Path) -> PhysicsEngine:
@@ -179,13 +326,82 @@ class PhysicsEngine:
                 ordered["wall_distance_ft"].to_numpy(dtype=float),
                 ordered["wall_height_ft"].to_numpy(dtype=float),
             )
+        self._event_cache = {}
+
+    @property
+    def event_evidence(self) -> dict[str, Any]:
+        """Bounded, publication-scoped evidence for the optional wall-event lane."""
+
+        return {
+            "method": APPROACH_C_METHOD,
+            "requested_event_queries": self._event_requested,
+            "evaluated_event_keys": self._event_evaluated,
+            "elapsed_seconds": self._event_elapsed_seconds,
+            "budget_exhausted": self._event_budget_exhausted,
+            "incomplete_events": self._event_incomplete,
+        }
 
     def wall(self, team: str, spray_angle: float) -> tuple[float, float]:
+        if not -45 <= spray_angle <= 45:
+            raise ValueError("foul spray angle has no fair-territory wall")
         values = self.wall_index.get(team)
         if values is None:
             return 400.0, 8.0
-        position = max(-45, min(45, round(spray_angle))) + 45
+        position = round(spray_angle) + 45
         return float(values[0][position]), float(values[1][position])
+
+    def wall_event(
+        self,
+        *,
+        team: str,
+        ev_mph: float,
+        launch_angle_deg: float,
+        spray_angle_deg: float,
+        temp_f: float,
+        altitude_ft: float,
+        wind_carry_mph: float,
+    ) -> WallFlightEvent | None:
+        """Return one cached fair-flight event, or ``None`` after optional-lane exhaustion."""
+
+        if abs(spray_angle_deg) > 45:
+            return WallFlightEvent("foul", 0.0, 3.0, 0.0)
+        query = quantize_trajectory_inputs(
+            ev_mph,
+            launch_angle_deg,
+            spray_angle_deg,
+            temp_f,
+            altitude_ft,
+            wind_carry_mph,
+        )
+        wall_distance, wall_height = self.wall(team, query.spray_angle_deg)
+        cache_key = (
+            query,
+            wall_distance,
+            wall_height,
+        )
+        self._event_requested += 1
+        cached = self._event_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        if self._event_evaluated >= self.event_limit:
+            self._event_budget_exhausted = True
+            return None
+        started = time.perf_counter()
+        event = simulate_wall_event(
+            query.exit_velocity_mph,
+            query.launch_angle_deg,
+            query.spray_angle_deg,
+            air_density_ratio(query.temperature_f, query.altitude_ft),
+            query.wind_carry_mph,
+            wall_distance_ft=wall_distance,
+            wall_height_ft=wall_height,
+        )
+        self._event_elapsed_seconds += time.perf_counter() - started
+        self._event_evaluated += 1
+        self._event_cache[cache_key] = event
+        if event.terminal == "incomplete":
+            self._event_incomplete = True
+        return event
 
     def wall_clearance_rate(
         self,
@@ -217,16 +433,18 @@ class PhysicsEngine:
                     probability = float(spray_probabilities[index])
                     if probability <= 0:
                         continue
-                    distance, height = self.trajectory.lookup(
-                        float(ev),
-                        float(launch),
-                        float(spray),
-                        temp_f,
-                        altitude_ft,
-                        wind_carry_mph,
+                    event = self.wall_event(
+                        team=team,
+                        ev_mph=float(ev),
+                        launch_angle_deg=float(launch),
+                        spray_angle_deg=float(spray),
+                        temp_f=temp_f,
+                        altitude_ft=altitude_ft,
+                        wind_carry_mph=wind_carry_mph,
                     )
-                    wall_distance, wall_height = self.wall(team, float(spray))
-                    if distance >= wall_distance and height >= wall_height and launch > 10:
+                    if event is None or event.terminal == "incomplete":
+                        return None
+                    if event.terminal == "cleared_wall":
                         cleared += probability
                     weight += probability
         return cleared / weight if weight else None
@@ -280,7 +498,7 @@ class PhysicsEngine:
                 "state": "not_available",
                 "reason": lineup.get("reason") or "both official batting orders are required",
                 "used_in_headline": False,
-                "method": "neutral-park double ratio",
+                "method": APPROACH_C_METHOD,
             }
         home, home_covered = self.lineup_index(
             lineup.get("home_batter_ids") or [],
@@ -295,11 +513,17 @@ class PhysicsEngine:
             wind_carry_mph=float(weather["wind_carry_mph"]),
         )
         if home is None or away is None:
+            if self._event_budget_exhausted:
+                reason = "lineup physics event budget was exhausted before a complete result"
+            elif self._event_incomplete:
+                reason = "lineup physics event integration ended before a complete result"
+            else:
+                reason = "confirmed lineups did not have enough profiled batters"
             return {
                 "state": "not_available",
-                "reason": "confirmed lineups did not have enough profiled batters",
+                "reason": reason,
                 "used_in_headline": False,
-                "method": "neutral-park double ratio",
+                "method": APPROACH_C_METHOD,
                 "home_profile_coverage": home_covered,
                 "away_profile_coverage": away_covered,
             }
@@ -310,7 +534,7 @@ class PhysicsEngine:
                 "used in the headline weather factor."
             ),
             "used_in_headline": False,
-            "method": "neutral-park double ratio",
+            "method": APPROACH_C_METHOD,
             "home_hr_index": home,
             "away_hr_index": away,
             "home_minus_away": round(home - away, 4),

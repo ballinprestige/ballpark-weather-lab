@@ -24,7 +24,7 @@ from ballpark.kalshi import unavailable_market as unavailable_exchange_market
 from ballpark.lineups import fetch_lineup
 from ballpark.model import ParkFactorModel
 from ballpark.paths import ProjectPaths
-from ballpark.physics import PhysicsEngine, trajectory_theater
+from ballpark.physics import APPROACH_C_METHOD, PhysicsEngine, trajectory_theater
 from ballpark.publication import publish_payload
 from ballpark.schedule import fetch_schedule
 from ballpark.venues import VENUES
@@ -307,7 +307,7 @@ class DailyPipeline:
                         "state": "not_available",
                         "reason": f"lineup physics could not be evaluated: {exc}",
                         "used_in_headline": False,
-                        "method": "neutral-park double ratio",
+                        "method": APPROACH_C_METHOD,
                     }
             else:
                 approach_c = {
@@ -318,7 +318,7 @@ class DailyPipeline:
                         else lineup.get("reason") or "official batting orders are not confirmed"
                     ),
                     "used_in_headline": False,
-                    "method": "neutral-park double ratio",
+                    "method": APPROACH_C_METHOD,
                 }
 
             games.append(

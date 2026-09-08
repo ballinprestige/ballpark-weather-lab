@@ -417,6 +417,178 @@ def test_default_monitor_get_decodes_chunked_http_response() -> None:
     assert json.loads(response.body) == {"state": "live"}
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        b"",
+        b'{"state":"live"}',
+        b"x" * (64 * 1024 + 17),
+    ],
+    ids=("zero-length", "small-content-length", "multi-read-content-length"),
+)
+def test_default_monitor_get_reads_framed_content_length_to_exact_eof(body: bytes) -> None:
+    class ContentLengthHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self) -> None:  # noqa: N802
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+            self.wfile.flush()
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), ContentLengthHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        response = _default_get(f"http://127.0.0.1:{server.server_port}/", 2.0)
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+    assert response.status == 200
+    assert response.body == body
+
+
+def test_default_monitor_get_reads_close_delimited_body() -> None:
+    body = b'{"state":"live"}'
+
+    class CloseDelimitedHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.0"
+
+        def do_GET(self) -> None:  # noqa: N802
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+            self.wfile.flush()
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), CloseDelimitedHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        response = _default_get(f"http://127.0.0.1:{server.server_port}/", 2.0)
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+    assert response.status == 200
+    assert response.body == body
+
+
+def test_default_monitor_get_rejects_an_oversized_advertised_body_before_reading() -> None:
+    class OversizedHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self) -> None:  # noqa: N802
+            self.send_response(200)
+            self.send_header("Content-Length", str(2 * 1024 * 1024 + 1))
+            self.send_header("Connection", "close")
+            self.end_headers()
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), OversizedHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with pytest.raises(RuntimeError, match="byte limit"):
+            _default_get(f"http://127.0.0.1:{server.server_port}/", 2.0)
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+def test_default_monitor_get_rejects_truncated_advertised_content_length() -> None:
+    # The partial body is valid JSON. HTTP framing must reject it before a monitor trusts it.
+    body = b'{"state":"live"}'
+
+    class TruncatedHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self) -> None:  # noqa: N802
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body) + 8))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+            self.wfile.flush()
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), TruncatedHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with pytest.raises(RuntimeError, match="advertised Content-Length"):
+            _default_get(f"http://127.0.0.1:{server.server_port}/", 2.0)
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+@pytest.mark.parametrize(
+    ("headers", "body", "message"),
+    [
+        (
+            b"Transfer-Encoding: chunked\r\nContent-Length: 2\r\n",
+            b"6\r\n{}evil\r\n0\r\n\r\n",
+            "ambiguous transfer framing",
+        ),
+        (
+            b"Content-Length: 2\r\nContent-Length: 6\r\n",
+            b"{}evil",
+            "ambiguous Content-Length",
+        ),
+        (
+            b"Content-Length: +2\r\n",
+            b"{}evil",
+            "invalid Content-Length",
+        ),
+    ],
+    ids=("chunked-plus-content-length", "duplicate-content-length", "signed-content-length"),
+)
+def test_default_monitor_get_rejects_ambiguous_or_malformed_framing(
+    headers: bytes, body: bytes, message: str
+) -> None:
+    class AmbiguousFramingHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self) -> None:  # noqa: N802
+            self.wfile.write(b"HTTP/1.1 200 OK\r\n" + headers + b"Connection: close\r\n\r\n" + body)
+            self.wfile.flush()
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), AmbiguousFramingHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with pytest.raises(RuntimeError, match=message):
+            _default_get(f"http://127.0.0.1:{server.server_port}/", 2.0)
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
 def test_default_monitor_get_enforces_total_deadline_during_a_slow_drip() -> None:
     class SlowHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802

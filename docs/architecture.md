@@ -55,6 +55,13 @@ Approach C requires both confirmed nine-player batting orders, verified weather,
 artifact families. A missing or malformed Approach C artifact changes the artifact lane to
 `partial` and Approach C to `not_available`; it does not suppress Approach B.
 
+The optional Approach C wall calculation uses a bounded, point-mass Euler event rather than the
+lookup's rounded landing and apex fields. Inputs first use the lookup's existing weather and batted-
+ball buckets. At the first fair radial wall crossing, the unrounded within-step height must be
+strictly above the wall top; equality is wall contact. The first ground crossing, foul direction,
+or an incomplete integration is excluded from clearance evidence. Results are memoized only for
+the current publication and remain experimental with `used_in_headline: false`.
+
 | Condition | Publication behavior |
 | --- | --- |
 | Required schedule cannot be fetched or parsed | Stop; do not replace the previous publication. |

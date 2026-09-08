@@ -54,19 +54,59 @@ def _default_get(url: str, timeout_seconds: float) -> HttpResponse:
         except AttributeError as exc:
             raise RuntimeError("monitor transport cannot enforce a total deadline") from exc
 
+    def content_length(response: Any) -> int | None:
+        headers = response.headers
+        lengths = headers.get_all("Content-Length") or []
+        transfer_encodings = headers.get_all("Transfer-Encoding") or []
+        if transfer_encodings and lengths:
+            raise RuntimeError("monitor response has ambiguous transfer framing")
+        if not lengths:
+            return None
+        if len(lengths) != 1:
+            raise RuntimeError("monitor response has ambiguous Content-Length")
+        declared = lengths[0]
+        if (
+            not isinstance(declared, str)
+            or not declared
+            or not declared.isascii()
+            or not declared.isdecimal()
+        ):
+            raise RuntimeError("monitor response has an invalid Content-Length")
+        length = int(declared)
+        if length > _MAX_BODY_BYTES:
+            raise RuntimeError("monitor response exceeds its byte limit")
+        return length
+
     try:
         with build_opener(_RejectRedirects()).open(request, timeout=remaining()) as response:
-            chunks, size = [], 0
+            expected_size = content_length(response)
+            chunks: list[bytes] = []
+            size = 0
+            # A framed Content-Length body closes HTTPResponse.fp exactly when its final byte is
+            # read. Return at that boundary rather than trying to set a socket timeout on EOF.
+            if expected_size == 0:
+                remaining()
+                return HttpResponse(int(response.status), b"")
             while True:
                 set_read_timeout(response)
                 reader = getattr(response, "read1", response.read)
-                chunk = reader(min(64 * 1024, _MAX_BODY_BYTES + 1 - size))
+                limit = _MAX_BODY_BYTES + 1 - size
+                if expected_size is not None:
+                    limit = min(limit, expected_size - size)
+                chunk = reader(min(64 * 1024, limit))
                 if not chunk:
+                    if expected_size is not None and size != expected_size:
+                        raise RuntimeError(
+                            "monitor response ended before its advertised Content-Length"
+                        )
                     break
                 chunks.append(chunk)
                 size += len(chunk)
                 if size > _MAX_BODY_BYTES:
                     raise RuntimeError("monitor response exceeds its byte limit")
+                if expected_size is not None and size == expected_size:
+                    remaining()
+                    return HttpResponse(int(response.status), b"".join(chunks))
             remaining()
             return HttpResponse(int(response.status), b"".join(chunks))
     except (HTTPError, URLError, OSError) as exc:
