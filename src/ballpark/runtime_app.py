@@ -145,25 +145,96 @@ def _load_json(path: Path, maximum: int, message: str) -> object:
         raise RuntimeError(message) from exc
 
 
+def _validated_release(value: object, *, payload_date: str, payload_digest: str) -> None:
+    if (
+        not isinstance(value, dict)
+        or value.get("date") != payload_date
+        or value.get("payload_sha256") != payload_digest
+    ):
+        raise RuntimeError("release receipt does not bind staged data")
+
+
+def _validated_accepted_manifest(
+    objects: Path, manifest: object, maximum: int
+) -> list[dict[str, Any]]:
+    if not isinstance(manifest, dict) or not _is_token(manifest.get("token")):
+        raise RuntimeError("accepted manifest is malformed")
+    digests = {
+        field: manifest.get(field)
+        for field in ("data_sha256", "release_sha256", "archive_index_sha256")
+    }
+    if not all(_is_digest(digest) for digest in digests.values()):
+        raise RuntimeError("accepted manifest is malformed")
+    receipts = manifest.get("input_receipts")
+    if not isinstance(receipts, dict) or not all(_is_digest(value) for value in receipts.values()):
+        raise RuntimeError("accepted manifest is malformed")
+    data_raw = _read_object(objects, digests["data_sha256"], maximum)
+    data = _load_object_json(objects, digests["data_sha256"], maximum, "accepted data is malformed")
+    if not isinstance(data, dict):
+        raise RuntimeError("accepted data is malformed")
+    payload_date = _canonical_date(data.get("date"))
+    release = _load_object_json(
+        objects, digests["release_sha256"], maximum, "accepted release receipt is malformed"
+    )
+    _validated_release(
+        release,
+        payload_date=payload_date,
+        payload_digest=hashlib.sha256(data_raw).hexdigest(),
+    )
+    rows = _validated_index(
+        _load_object_json(
+            objects,
+            digests["archive_index_sha256"],
+            maximum,
+            "accepted archive history is malformed",
+        ),
+        require_object=True,
+    )
+    matching = [row for row in rows if row["date"] == payload_date]
+    if (
+        len(matching) != 1
+        or matching[0].get("payload_sha256") != digests["data_sha256"]
+        or matching[0].get("object_sha256") != digests["data_sha256"]
+    ):
+        raise RuntimeError("accepted archive history does not bind data")
+    for receipt in receipts.values():
+        _read_object(objects, receipt, maximum)
+    for row in rows:
+        raw = _read_object(objects, row["object_sha256"], maximum)
+        if hashlib.sha256(raw).hexdigest() != row["payload_sha256"]:
+            raise RuntimeError("accepted archive history payload digest is invalid")
+    return rows
+
+
 def _cleanup_store(
     publication: Path, *, current: str, previous: dict[str, Any] | None, maximum: int
 ) -> None:
-    """Bound owned debris only after pointer promotion; malformed history is retained."""
+    """Reclaim only owned unaccepted/orphan storage after a grace period."""
+    del previous
     try:
         grace = _environment_limit("BALLPARK_STORE_GRACE_SECONDS", 3600)
         cutoff = time.time() - grace
-        retained = {current}
-        if isinstance(previous, dict) and _is_token(previous.get("token")):
-            retained.add(previous["token"])
         releases = publication / "releases"
+        objects = publication / "objects"
+        referenced: set[str] = set()
+        # Every accepted manifest is immutable history. Validate every one before
+        # deleting any object so corruption cannot cause reachability data loss.
         for release in releases.iterdir() if releases.is_dir() else ():
-            if (
-                release.is_dir()
-                and _is_token(release.name)
-                and release.name not in retained
-                and release.stat().st_mtime <= cutoff
-            ):
-                shutil.rmtree(release)
+            if not (release.is_dir() and _is_token(release.name)):
+                continue
+            manifest = _load_json(
+                _safe_child(releases, release.name) / "manifest.json",
+                maximum,
+                "accepted manifest is malformed",
+            )
+            rows = _validated_accepted_manifest(objects, manifest, maximum)
+            assert isinstance(manifest, dict)
+            referenced.update(
+                manifest[field]
+                for field in ("data_sha256", "release_sha256", "archive_index_sha256")
+            )
+            referenced.update(manifest["input_receipts"].values())
+            referenced.update(row["object_sha256"] for row in rows)
         staged_root = publication / ".staged"
         for staged in staged_root.iterdir() if staged_root.is_dir() else ():
             if (
@@ -173,53 +244,18 @@ def _cleanup_store(
                 and staged.stat().st_mtime <= cutoff
             ):
                 shutil.rmtree(staged)
-
-        # Retain every object referenced by each retained release. If a manifest is
-        # malformed, leave all objects alone; cleanup must never turn corruption into
-        # data loss.
-        referenced: set[str] = set()
-        for token in retained:
-            manifest = _load_json(
-                _safe_child(releases, token) / "manifest.json",
-                maximum,
-                "accepted manifest is malformed",
-            )
-            if not isinstance(manifest, dict):
-                raise RuntimeError("accepted manifest is malformed")
-            for field in ("data_sha256", "release_sha256", "archive_index_sha256"):
-                digest = manifest.get(field)
-                if not _is_digest(digest):
-                    raise RuntimeError("accepted manifest is malformed")
-                referenced.add(digest)
-            receipts = manifest.get("input_receipts")
-            if not isinstance(receipts, dict) or not all(
-                _is_digest(value) for value in receipts.values()
-            ):
-                raise RuntimeError("accepted manifest is malformed")
-            referenced.update(receipts.values())
-            index = _load_object_json(
-                publication / "objects",
-                manifest["archive_index_sha256"],
-                maximum,
-                "accepted archive history is malformed",
-            )
-            for row in _validated_index(index, require_object=True):
-                referenced.add(row["object_sha256"])
-        objects = publication / "objects"
         for object_path in objects.iterdir() if objects.is_dir() else ():
-            name = object_path.name
-            digest = name.removesuffix(".json.gz")
+            digest = object_path.name.removesuffix(".json.gz")
             if (
                 object_path.is_file()
-                and name == f"{digest}.json.gz"
+                and object_path.name == f"{digest}.json.gz"
                 and _is_digest(digest)
                 and digest not in referenced
                 and object_path.stat().st_mtime <= cutoff
             ):
                 object_path.unlink()
     except (OSError, RuntimeError):
-        # Pointer promotion succeeded. A later worker may retry bounded cleanup;
-        # it must not reinterpret a successful immutable publication as a failed job.
+        # Cleanup is never allowed to invalidate an already-promoted pointer.
         return
 
 
@@ -311,15 +347,20 @@ def _accept_stage(context: JobContext) -> None:
     data_raw = _read_bounded(data_path, maximum)
     release_raw = _read_bounded(release_path, maximum)
     data = _load_json(data_path, maximum, "staged data is malformed")
+    release = _load_json(release_path, maximum, "staged release receipt is malformed")
     if not isinstance(data, dict):
         raise RuntimeError("staged data is malformed")
     payload_date = _canonical_date(data.get("date"))
+    data_digest = hashlib.sha256(data_raw).hexdigest()
+    _validated_release(release, payload_date=payload_date, payload_digest=data_digest)
     candidate_rows = _validated_index(
         _load_json(index_path, maximum, "staged archive index is malformed"), require_object=False
     )
     candidate_by_date = {row["date"]: row for row in candidate_rows}
     if payload_date not in candidate_by_date:
         raise RuntimeError("staged archive index omits its data date")
+    if candidate_by_date[payload_date].get("payload_sha256") != data_digest:
+        raise RuntimeError("staged archive index does not bind data")
 
     releases.mkdir(parents=True, exist_ok=True)
     accepted = _safe_child(releases, context.token)
@@ -344,9 +385,7 @@ def _accept_stage(context: JobContext) -> None:
 
     rows: dict[str, dict[str, Any]] = {}
     for row in candidate_rows:
-        archive_raw = _read_bounded(
-            _safe_child(staged / "archive", f"{row['date']}.json"), maximum
-        )
+        archive_raw = _read_bounded(_safe_child(staged / "archive", f"{row['date']}.json"), maximum)
         if hashlib.sha256(archive_raw).hexdigest() != row["payload_sha256"]:
             raise RuntimeError("staged archive payload digest is invalid")
         rows[row["date"]] = {**row, "object_sha256": store(archive_raw)}
@@ -368,16 +407,7 @@ def _accept_stage(context: JobContext) -> None:
         )
         if not isinstance(prior_manifest, dict) or prior_manifest.get("token") != prior_token:
             raise RuntimeError("accepted manifest is malformed")
-        prior_index = _load_object_json(
-            objects,
-            prior_manifest.get("archive_index_sha256"),
-            maximum,
-            "accepted archive history is malformed",
-        )
-        for row in _validated_index(prior_index, require_object=True):
-            raw = _read_object(objects, row["object_sha256"], maximum)
-            if hashlib.sha256(raw).hexdigest() != row["payload_sha256"]:
-                raise RuntimeError("accepted archive history payload digest is invalid")
+        for row in _validated_accepted_manifest(objects, prior_manifest, maximum):
             rows.setdefault(row["date"], row)
 
     merged_index = {

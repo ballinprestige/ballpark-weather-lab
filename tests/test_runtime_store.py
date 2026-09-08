@@ -42,7 +42,9 @@ def _stage(root: Path, token: str, publication_date: str) -> None:
     (stage / "data").mkdir(parents=True)
     (stage / "archive").mkdir(parents=True)
     (stage / "data" / "data.json").write_bytes(payload)
-    (stage / "data" / "release.json").write_bytes(canonical_json_bytes({"date": publication_date}))
+    (stage / "data" / "release.json").write_bytes(
+        canonical_json_bytes({"date": publication_date, "payload_sha256": digest})
+    )
     (stage / "archive" / f"{publication_date}.json").write_bytes(payload)
     (stage / "archive" / "index.json").write_bytes(
         canonical_json_bytes(
@@ -144,7 +146,7 @@ def test_store_deduplicates_inputs_and_reclaims_only_orphaned_storage(
     for number in range(3, 7):
         _accept(tmp_path, monkeypatch, number)
     retained = list((publication / "releases").iterdir())
-    assert len(retained) <= 2
+    assert len(retained) == 6
 
     active, orphan = f"{6:032x}", f"{7:032x}"
     (publication / ".staged" / active).mkdir(parents=True)
@@ -158,3 +160,97 @@ def test_store_deduplicates_inputs_and_reclaims_only_orphaned_storage(
     )
     assert (publication / ".staged" / active).is_dir()
     assert not (publication / ".staged" / orphan).exists()
+
+
+def test_store_retains_every_accepted_manifest_data_and_unique_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BALLPARK_MIN_FREE_BYTES", "0")
+    monkeypatch.setenv("BALLPARK_STORE_GRACE_SECONDS", "0")
+    sources = tmp_path / "cache" / "sources"
+    sources.mkdir(parents=True)
+    tokens: list[str] = []
+    for number in (1, 2, 3):
+        raw = canonical_json_bytes({"date": "2026-09-02", "source_observation": number})
+        (sources / "schedule.json").write_bytes(raw)
+        tokens.append(_accept(tmp_path, monkeypatch, number))
+    publication = tmp_path / "publication"
+    manifests = [
+        json.loads((publication / "releases" / token / "manifest.json").read_text())
+        for token in tokens
+    ]
+    assert len(list((publication / "releases").iterdir())) == 3
+    assert len({manifest["input_receipts"]["schedule"] for manifest in manifests}) == 3
+    for manifest in manifests:
+        assert (publication / "objects" / f"{manifest['data_sha256']}.json.gz").is_file()
+        assert (
+            publication / "objects" / f"{manifest['input_receipts']['schedule']}.json.gz"
+        ).is_file()
+
+
+def test_store_rejects_mismatched_candidate_receipt_without_switching_pointer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BALLPARK_MIN_FREE_BYTES", "0")
+    first = _accept(tmp_path, monkeypatch, 1)
+    publication = tmp_path / "publication"
+    pointer_before = (publication / "pointer.json").read_bytes()
+    token = f"{2:032x}"
+    _stage(tmp_path, token, "2026-09-03")
+    receipt_path = publication / ".staged" / token / "data" / "release.json"
+    receipt = json.loads(receipt_path.read_text())
+    receipt["payload_sha256"] = "0" * 64
+    receipt_path.write_bytes(canonical_json_bytes(receipt))
+    with pytest.raises(RuntimeError, match="receipt"):
+        _accept_stage(_context(tmp_path, token))
+    assert first in (publication / "pointer.json").read_text()
+    assert (publication / "pointer.json").read_bytes() == pointer_before
+
+
+def test_store_imports_all_indexed_archive_objects_into_empty_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BALLPARK_MIN_FREE_BYTES", "0")
+    token = f"{1:032x}"
+    publication = tmp_path / "publication"
+    stage = publication / ".staged" / token
+    (stage / "data").mkdir(parents=True)
+    (stage / "archive").mkdir(parents=True)
+    payloads = {
+        "2026-09-02": canonical_json_bytes({"date": "2026-09-02", "games": [], "status": "ready"}),
+        "2026-09-01": canonical_json_bytes({"date": "2026-09-01", "games": [], "status": "ready"}),
+    }
+    for day, raw in payloads.items():
+        (stage / "archive" / f"{day}.json").write_bytes(raw)
+    current = payloads["2026-09-02"]
+    (stage / "data" / "data.json").write_bytes(current)
+    (stage / "data" / "release.json").write_bytes(
+        canonical_json_bytes(
+            {"date": "2026-09-02", "payload_sha256": hashlib.sha256(current).hexdigest()}
+        )
+    )
+    (stage / "archive" / "index.json").write_bytes(
+        canonical_json_bytes(
+            {
+                "schema_version": 1,
+                "dates": [
+                    {"date": day, "payload_sha256": hashlib.sha256(raw).hexdigest()}
+                    for day, raw in payloads.items()
+                ],
+            }
+        )
+    )
+    _accept_stage(_context(tmp_path, token))
+    manifest = json.loads((publication / "releases" / token / "manifest.json").read_text())
+    imported = json.loads(
+        gzip.decompress(
+            (publication / "objects" / f"{manifest['archive_index_sha256']}.json.gz").read_bytes()
+        )
+    )
+    assert {row["payload_sha256"] for row in imported["dates"]} == {
+        hashlib.sha256(raw).hexdigest() for raw in payloads.values()
+    }
+    assert all(
+        (publication / "objects" / f"{row['object_sha256']}.json.gz").is_file()
+        for row in imported["dates"]
+    )
