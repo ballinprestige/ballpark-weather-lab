@@ -169,3 +169,14 @@ def test_catalog_1500_replay_is_flat_and_pending_queue_is_indexed(tmp_path: Path
     assert catalog.current_manifest()["token"] == f"{1499:032x}"
     catalog.register_object("d" * 64, "pending", "d.json.gz", "2026-09-08T00:00:00Z")
     assert catalog.maintenance("2027-01-01T00:00:00Z", 1) == [("d" * 64, "pending", "d.json.gz")]
+
+
+def test_same_token_retry_is_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BALLPARK_MIN_FREE_BYTES", "0")
+    token = f"{1:032x}"
+    stage(tmp_path, token, "2026-09-02")
+    _accept_stage(context(tmp_path, token))
+    catalog = PublicationCatalog(tmp_path / "publication")
+    accepted = catalog.accepted(token)
+    _accept_stage(context(tmp_path, token))
+    assert catalog.accepted(token) == accepted
