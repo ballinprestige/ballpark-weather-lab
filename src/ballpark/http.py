@@ -100,3 +100,7 @@ class HttpClient:
 
     def get_bytes(self, url: str, *, deadline_at: float | None = None) -> bytes:
         return self._get_bytes(url, deadline_at=deadline_at)
+
+    def close(self) -> None:
+        """Release pooled sockets at the end of a runtime acquisition pass."""
+        self.session.close()

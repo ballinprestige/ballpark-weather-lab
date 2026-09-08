@@ -382,12 +382,15 @@ def run_live_worker(
                 acceptors={"publish": _accept_stage},
             )
             try:
-                last = worker.run_once()
-            except RuntimeBusyError:
-                # A prior process can retain a bounded, durable lease through
-                # a restart. Wait for it instead of turning a valid recovery
-                # interval into a platform crash loop.
-                last = {"state": "waiting_for_prior_lease"}
+                try:
+                    last = worker.run_once()
+                except RuntimeBusyError:
+                    # A prior process can retain a bounded, durable lease through
+                    # a restart. Wait for it instead of turning a valid recovery
+                    # interval into a platform crash loop.
+                    last = {"state": "waiting_for_prior_lease"}
+            finally:
+                client.close()
             if once:
                 return last
             time.sleep(1)
