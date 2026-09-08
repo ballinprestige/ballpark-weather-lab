@@ -727,6 +727,10 @@ def run_live_worker(
                     last = {"state": "waiting_for_prior_lease"}
             finally:
                 client.close()
+            try:
+                maintain_publication_store(publication_dir)
+            except (OSError, RuntimeError):
+                pass
             if once:
                 return last
             time.sleep(1)
