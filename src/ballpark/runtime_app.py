@@ -85,7 +85,7 @@ def _safe_child(root: Path, name: str) -> Path:
 
 
 def _catalog_stamp(value: datetime) -> str:
-    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    return value.astimezone(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def _context_now(context: JobContext) -> datetime:
@@ -851,7 +851,7 @@ def _accept_stage_impl(context: JobContext) -> None:
     catalog.register_candidate(
         context.token, staged, observed_at, _catalog_stamp(context.deadline_at)
     )
-    catalog.begin_accept(context.token, now=observed_at)
+    catalog.begin_accept(context.token, clock=lambda: _context_now(context))
     data_path, release_path, index_path = (
         staged / "data" / "data.json",
         staged / "data" / "release.json",
@@ -951,15 +951,14 @@ def _accept_stage_impl(context: JobContext) -> None:
         if canonical_json_bytes(existing) != canonical_json_bytes(manifest):
             raise RuntimeError("publication token conflicts with accepted content")
         catalog.set_candidate_manifest(context.token, manifest)
-        catalog.commit(context.token, manifest, digests, observed_at, now=observed_at)
+        catalog.commit(context.token, manifest, digests, clock=lambda: _context_now(context))
         return
-    observed_at = _catalog_stamp(_context_now(context))
     _require_time(context, lambda: _context_now(context))
     if shutil.disk_usage(publication).free < minimum_free:
         raise RuntimeError("publication disk reserve fell below minimum")
     catalog.set_candidate_manifest(context.token, manifest)
     try:
-        catalog.commit(context.token, manifest, digests, observed_at, now=observed_at)
+        catalog.commit(context.token, manifest, digests, clock=lambda: _context_now(context))
     except Exception:
         # A durable catalog commit is success even when a later local action
         # raises. The stored candidate manifest proves this is the same content.

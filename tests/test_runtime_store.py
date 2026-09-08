@@ -7,12 +7,14 @@ import json
 import sqlite3
 import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 
 import pytest
 
+import ballpark.runtime_store as runtime_store
 from ballpark.paths import ProjectPaths
 from ballpark.pipeline import DailyPipeline
 from ballpark.publication import canonical_json_bytes
@@ -26,18 +28,26 @@ from ballpark.runtime_app import (
 from ballpark.runtime_store import PublicationCatalog
 
 
-def context(root: Path, token: str, *, now: datetime | None = None) -> JobContext:
+def context(
+    root: Path,
+    token: str,
+    *,
+    now: datetime | None = None,
+    deadline_seconds: int = 30,
+    clock: Callable[[], datetime] | None = None,
+) -> JobContext:
     now = now or datetime.now(UTC)
     return JobContext(
         "publish",
         now,
         now,
-        now + timedelta(seconds=30),
+        now + timedelta(seconds=deadline_seconds),
         1,
         token,
         root / "state",
         root / "cache",
         root / "publication",
+        clock,
     )
 
 
@@ -91,6 +101,14 @@ def stage(root: Path, token: str, day: str) -> None:
 
 def stamp(value: datetime) -> str:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class MutableClock:
+    def __init__(self, value: datetime) -> None:
+        self.value = value
+
+    def __call__(self) -> datetime:
+        return self.value
 
 
 def registered_stage(root: Path, ctx: JobContext, day: str) -> PublicationCatalog:
@@ -209,15 +227,193 @@ def test_catalog_1500_replay_is_flat_and_pending_queue_is_indexed(tmp_path: Path
     assert catalog.maintenance("2027-01-01T00:00:00Z", 1) == [("d" * 64, "pending", "d.json.gz")]
 
 
-def test_same_token_retry_is_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_same_token_retry_is_idempotent_after_its_original_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("BALLPARK_MIN_FREE_BYTES", "0")
+    started = datetime(2026, 9, 8, 8, tzinfo=UTC)
+    clock = MutableClock(started)
     token = f"{1:032x}"
     stage(tmp_path, token, "2026-09-02")
-    _accept_stage(context(tmp_path, token))
+    first = context(tmp_path, token, now=started, deadline_seconds=1, clock=clock)
+    _accept_stage(first)
     catalog = PublicationCatalog(tmp_path / "publication")
     accepted = catalog.accepted(token)
-    _accept_stage(context(tmp_path, token))
+    clock.value = started + timedelta(seconds=2)
+    _accept_stage(first)
     assert catalog.accepted(token) == accepted
+
+
+def test_catalog_commit_samples_default_clock_after_real_lock_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The default UTC clock is read only after BEGIN IMMEDIATE owns the lock."""
+    catalog = PublicationCatalog(tmp_path / "publication")
+    token = f"{2:032x}"
+    started = datetime.now(UTC)
+    manifest = {"schema_version": 3, "token": token, "data_sha256": "a" * 64}
+    catalog.register_candidate(
+        token,
+        tmp_path / "publication" / ".staged" / token,
+        stamp(started),
+        stamp(started + timedelta(seconds=1)),
+    )
+    catalog.begin_accept(token)
+    catalog.set_candidate_manifest(token, manifest)
+
+    sampled = threading.Event()
+    original_stamp = runtime_store._stamp
+
+    def mark_default_sample(value: datetime | None = None) -> str:
+        sampled.set()
+        return original_stamp(value)
+
+    monkeypatch.setattr(runtime_store, "_stamp", mark_default_sample)
+    lock = sqlite3.connect(catalog.path, isolation_level=None)
+    lock.execute("BEGIN IMMEDIATE")
+    errors: list[Exception] = []
+
+    def commit() -> None:
+        try:
+            catalog.commit(token, manifest, {"a" * 64})
+        except Exception as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=commit)
+    worker.start()
+    try:
+        assert not sampled.wait(0.1)
+        time.sleep(1.05)
+    finally:
+        lock.execute("COMMIT")
+        lock.close()
+    worker.join(5)
+
+    assert sampled.is_set()
+    assert len(errors) == 1 and isinstance(errors[0], TimeoutError)
+    assert catalog.current_manifest() is None
+    database = sqlite3.connect(catalog.path)
+    try:
+        state, error = database.execute(
+            "SELECT state,error FROM pending_candidates WHERE token=?", (token,)
+        ).fetchone()
+    finally:
+        database.close()
+    assert state == "failed" and "deadline elapsed" in error
+
+
+def test_catalog_deadlines_compare_legacy_whole_seconds_at_subsecond_precision(
+    tmp_path: Path,
+) -> None:
+    catalog = PublicationCatalog(tmp_path / "publication")
+    token = f"{5:032x}"
+    started = datetime(2026, 9, 8, 8, tzinfo=UTC)
+    deadline = "2026-09-08T08:00:01Z"
+    manifest = {"schema_version": 3, "token": token, "data_sha256": "a" * 64}
+    catalog.register_candidate(
+        token,
+        tmp_path / "publication" / ".staged" / token,
+        stamp(started),
+        deadline,
+    )
+    catalog.begin_accept(token, now=stamp(started + timedelta(milliseconds=900)))
+    catalog.set_candidate_manifest(token, manifest)
+
+    with pytest.raises(TimeoutError, match="deadline elapsed"):
+        catalog.commit(
+            token,
+            manifest,
+            {"a" * 64},
+            clock=lambda: started + timedelta(seconds=1, milliseconds=100),
+        )
+    assert catalog.current_manifest() is None
+
+
+def test_subsecond_active_candidate_skips_maintenance_cleanup(tmp_path: Path) -> None:
+    catalog = PublicationCatalog(tmp_path / "publication")
+    token, digest = f"{6:032x}", "b" * 64
+    started = datetime(2026, 9, 8, 8, tzinfo=UTC)
+    catalog.register_candidate(
+        token,
+        tmp_path / "publication" / ".staged" / token,
+        stamp(started),
+        stamp(started + timedelta(seconds=1, milliseconds=500)),
+    )
+    catalog.register_object(digest, token, f"{digest}.json.gz", stamp(started))
+    removed: list[str] = []
+
+    outcome = catalog.maintain(
+        now=stamp(started + timedelta(seconds=1)),
+        cutoff=stamp(started + timedelta(seconds=1)),
+        entry_limit=1,
+        byte_limit=1,
+        time_limit_seconds=1,
+        remove=lambda _kind, key, _relative, _remaining: (removed.append(key) is not None, 1, None),
+    )
+
+    assert outcome["state"] == "skipped_active"
+    assert not removed
+
+
+def test_actual_acceptor_rechecks_callable_clock_after_real_lock_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BALLPARK_MIN_FREE_BYTES", "0")
+    started = datetime(2026, 9, 8, 8, tzinfo=UTC)
+    clock = MutableClock(started)
+    current, expired = f"{3:032x}", f"{4:032x}"
+    stage(tmp_path, current, "2026-09-08")
+    _accept_stage(context(tmp_path, current, now=started, clock=clock))
+
+    stage(tmp_path, expired, "2026-09-09")
+    expired_context = context(tmp_path, expired, now=started, deadline_seconds=1, clock=clock)
+    original = PublicationCatalog.set_candidate_manifest
+    manifest_ready, allow_commit = threading.Event(), threading.Event()
+
+    def pause_after_manifest(
+        self: PublicationCatalog, candidate_token: str, manifest: dict[str, object]
+    ) -> None:
+        original(self, candidate_token, manifest)
+        if candidate_token == expired:
+            manifest_ready.set()
+            assert allow_commit.wait(5)
+
+    monkeypatch.setattr(PublicationCatalog, "set_candidate_manifest", pause_after_manifest)
+    errors: list[Exception] = []
+
+    def accept_expired() -> None:
+        try:
+            _accept_stage(expired_context)
+        except Exception as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=accept_expired)
+    worker.start()
+    assert manifest_ready.wait(5)
+    lock = sqlite3.connect(tmp_path / "publication" / "catalog.sqlite3", isolation_level=None)
+    lock.execute("BEGIN IMMEDIATE")
+    clock.value = started + timedelta(seconds=2)
+    allow_commit.set()
+    time.sleep(0.1)
+    lock.execute("COMMIT")
+    lock.close()
+    worker.join(5)
+
+    catalog = PublicationCatalog(tmp_path / "publication")
+    assert len(errors) == 1 and isinstance(errors[0], TimeoutError)
+    assert catalog.current_manifest()["token"] == current
+    database = sqlite3.connect(catalog.path)
+    try:
+        candidate = database.execute(
+            "SELECT state,error FROM pending_candidates WHERE token=?", (expired,)
+        ).fetchone()
+        publication_state = database.execute(
+            "SELECT current_token,rollback_token FROM publication_state WHERE id=1"
+        ).fetchone()
+    finally:
+        database.close()
+    assert candidate[0] == "failed" and "deadline elapsed" in candidate[1]
+    assert publication_state == (current, None)
 
 
 def test_postcommit_interruption_reconciles_on_same_token_retry(

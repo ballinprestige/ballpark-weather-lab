@@ -16,8 +16,36 @@ _SCHEMA_VERSION = 3
 _CANDIDATE_STATES = {"preparing", "accepting", "accepted", "failed", "pending"}
 
 
-def _stamp() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+def _stamp(value: datetime | None = None) -> str:
+    observed = value or datetime.now(UTC)
+    if observed.tzinfo is None:
+        raise RuntimeError("catalog clock must include an offset")
+    return observed.astimezone(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def _instant(value: str) -> datetime:
+    """Parse catalog timestamps exactly, including legacy whole-second values."""
+    try:
+        observed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+    except ValueError as exc:
+        raise RuntimeError("catalog timestamp is invalid") from exc
+    if observed.tzinfo is None:
+        raise RuntimeError("catalog timestamp must include an offset")
+    return observed.astimezone(UTC)
+
+
+def _instant_key(value: str | None) -> str | None:
+    """SQLite-indexable UTC key; invalid stored evidence is never treated as expired."""
+    if not isinstance(value, str):
+        return None
+    try:
+        observed = _instant(value)
+    except RuntimeError:
+        return None
+    return (
+        f"{observed.year:04d}{observed.month:02d}{observed.day:02d}"
+        f"{observed.hour:02d}{observed.minute:02d}{observed.second:02d}{observed.microsecond:06d}"
+    )
 
 
 def _relative_path(value: str) -> str:
@@ -49,6 +77,7 @@ class PublicationCatalog:
 
     def _connect(self, *, timeout: float = 30) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=timeout, isolation_level=None)
+        db.create_function("catalog_instant_key", 1, _instant_key, deterministic=True)
         db.execute("PRAGMA foreign_keys=ON")
         db.execute("PRAGMA synchronous=FULL")
         return db
@@ -135,6 +164,8 @@ class PublicationCatalog:
                 ON pending_object_refs(digest,token);
             CREATE INDEX IF NOT EXISTS pending_candidates_active
                 ON pending_candidates(state,deadline_at,token);
+            CREATE INDEX IF NOT EXISTS pending_candidates_active_instant
+                ON pending_candidates(state,catalog_instant_key(deadline_at),token);
             CREATE INDEX IF NOT EXISTS pending_stage_paths_created
                 ON pending_stage_paths(created_at,token,relative_path);
             CREATE INDEX IF NOT EXISTS pending_object_temps_created
@@ -332,11 +363,17 @@ class PublicationCatalog:
                 db.execute("ROLLBACK")
                 raise
 
-    def begin_accept(self, token: str, now: str | None = None) -> bool:
-        now = now or _stamp()
+    def begin_accept(
+        self,
+        token: str,
+        now: str | None = None,
+        *,
+        clock: Callable[[], datetime] | None = None,
+    ) -> bool:
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             try:
+                observed = now or _stamp(clock() if clock is not None else None)
                 row = db.execute(
                     "SELECT state,deadline_at FROM pending_candidates WHERE token=?", (token,)
                 ).fetchone()
@@ -348,7 +385,7 @@ class PublicationCatalog:
                     return False
                 if state == "failed":
                     raise RuntimeError("publication candidate previously failed")
-                if deadline_at <= now:
+                if _instant(deadline_at) <= _instant(observed):
                     db.execute(
                         "UPDATE pending_candidates SET state='failed',error=? WHERE token=?",
                         ("publication candidate deadline elapsed", token),
@@ -437,15 +474,19 @@ class PublicationCatalog:
         token: str,
         manifest: dict[str, Any],
         digests: set[str],
-        accepted_at: str,
+        accepted_at: str | None = None,
         *,
-        now: str | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> bool:
-        observed = now or _stamp()
         encoded = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             try:
+                # The deadline fence is authoritative only after this transaction owns
+                # the catalog write lock. A callable preserves deterministic worker
+                # clocks without turning a pre-lock sample into a stale authority.
+                observed = _stamp(clock() if clock is not None else None)
+                accepted = accepted_at or observed
                 old = db.execute(
                     "SELECT manifest FROM accepted_releases WHERE token=?", (token,)
                 ).fetchone()
@@ -472,7 +513,7 @@ class PublicationCatalog:
                         raise RuntimeError("publication token conflicts with candidate content")
                     # Recheck after BEGIN IMMEDIATE: waiting for maintenance must
                     # not permit an expired candidate to resurrect.
-                    if str(deadline_at) <= observed:
+                    if _instant(str(deadline_at)) <= _instant(observed):
                         db.execute(
                             "UPDATE pending_candidates SET state='failed',error=? WHERE token=?",
                             ("publication candidate deadline elapsed before commit", token),
@@ -482,7 +523,7 @@ class PublicationCatalog:
                 prior = db.execute("SELECT current_token FROM publication_state WHERE id=1").fetchone()
                 db.execute(
                     "INSERT INTO accepted_releases(token,manifest,accepted_at) VALUES(?,?,?)",
-                    (token, encoded, accepted_at),
+                    (token, encoded, accepted),
                 )
                 db.executemany(
                     "INSERT OR IGNORE INTO protected_objects(digest,token) VALUES(?,?)",
@@ -586,6 +627,10 @@ class PublicationCatalog:
         if entry_limit <= 0 or byte_limit < 0 or time_limit_seconds < 0:
             outcome.update(state="budget", reason="invalid_budget")
             return outcome
+        now_key = _instant_key(now)
+        cutoff_key = _instant_key(cutoff)
+        if now_key is None or cutoff_key is None:
+            raise RuntimeError("catalog maintenance timestamp is invalid")
         start = monotonic()
         try:
             with self._connection(timeout=0.1) as db:
@@ -595,10 +640,14 @@ class PublicationCatalog:
                     outcome.update(state="busy", reason="catalog_busy")
                     return outcome
                 try:
-                    active = db.execute(
+                    invalid_active = db.execute(
                         "SELECT 1 FROM pending_candidates WHERE state IN ('preparing','accepting') "
-                        "AND deadline_at > ? LIMIT 1",
-                        (now,),
+                        "AND catalog_instant_key(deadline_at) IS NULL LIMIT 1"
+                    ).fetchone()
+                    active = invalid_active or db.execute(
+                        "SELECT 1 FROM pending_candidates WHERE state IN ('preparing','accepting') "
+                        "AND catalog_instant_key(deadline_at) > ? LIMIT 1",
+                        (now_key,),
                     ).fetchone()
                     if active is not None:
                         db.execute("COMMIT")
@@ -609,9 +658,11 @@ class PublicationCatalog:
                         "SELECT digest,relative_path FROM pending_objects WHERE created_at <= ? "
                         "AND NOT EXISTS (SELECT 1 FROM pending_object_refs r "
                         "JOIN pending_candidates c ON c.token=r.token "
-                        "WHERE r.digest=pending_objects.digest AND c.deadline_at > ?) "
+                        "WHERE r.digest=pending_objects.digest AND "
+                        "(catalog_instant_key(c.deadline_at) IS NULL "
+                        "OR catalog_instant_key(c.deadline_at) > ?)) "
                         "ORDER BY created_at,digest LIMIT ?",
-                        (cutoff, cutoff, entry_limit),
+                        (cutoff, cutoff_key, entry_limit),
                     ).fetchall()
                     for digest, relative_path in object_rows:
                         if monotonic() - start >= time_limit_seconds:
@@ -649,9 +700,9 @@ class PublicationCatalog:
                         temp_rows = db.execute(
                             "SELECT t.token,t.relative_path FROM pending_object_temps t "
                             "JOIN pending_candidates c ON c.token=t.token "
-                            "WHERE t.created_at <= ? AND c.deadline_at <= ? "
+                            "WHERE t.created_at <= ? AND catalog_instant_key(c.deadline_at) <= ? "
                             "ORDER BY t.created_at,t.token,t.relative_path LIMIT ?",
-                            (cutoff, cutoff, remaining),
+                            (cutoff, cutoff_key, remaining),
                         ).fetchall()
                         for token, relative_path in temp_rows:
                             if monotonic() - start >= time_limit_seconds:
@@ -679,9 +730,9 @@ class PublicationCatalog:
                         stage_rows = db.execute(
                             "SELECT s.token,s.relative_path FROM pending_stage_paths s "
                             "JOIN pending_candidates c ON c.token=s.token "
-                            "WHERE s.created_at <= ? AND c.deadline_at <= ? "
+                            "WHERE s.created_at <= ? AND catalog_instant_key(c.deadline_at) <= ? "
                             "ORDER BY s.created_at,s.token,s.relative_path LIMIT ?",
-                            (cutoff, cutoff, remaining),
+                            (cutoff, cutoff_key, remaining),
                         ).fetchall()
                         for token, relative_path in stage_rows:
                             if monotonic() - start >= time_limit_seconds:
@@ -762,7 +813,8 @@ class PublicationCatalog:
     def pending_candidates(self, cutoff: str, limit: int) -> list[tuple[str, str]]:
         with self._connection() as db:
             return db.execute(
-                "SELECT token,stage_path FROM pending_candidates WHERE deadline_at <= ? "
+                "SELECT token,stage_path FROM pending_candidates "
+                "WHERE catalog_instant_key(deadline_at) <= catalog_instant_key(?) "
                 "ORDER BY created_at,token LIMIT ?",
                 (cutoff, limit),
             ).fetchall()
