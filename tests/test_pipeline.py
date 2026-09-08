@@ -11,12 +11,14 @@ from ballpark.errors import ArtifactError, DataContractError
 from ballpark.paths import ProjectPaths
 from ballpark.pipeline import DailyPipeline
 from ballpark.publication import canonical_json_bytes, sha256_bytes
+from ballpark.weather import build_model_source_receipts
 from tests.support import (
     GENERATED_AT,
     TARGET_DATE,
     FakeParkFactorModel,
     FakePhysicsEngine,
     fast_trajectory,
+    valid_weather,
 )
 
 
@@ -61,6 +63,33 @@ def test_normal_slate_builds_valid_payload_and_publishes(
     assert FakePhysicsEngine.loads == 1
     assert release["payload_sha256"] == sha256_bytes(canonical_json_bytes(payload))
     assert json.loads((tmp_path / "site" / "data" / "data.json").read_text()) == payload
+
+
+def test_trusted_runtime_bundle_keeps_live_provenance_and_private_model_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+    project_paths: ProjectPaths,
+    fixture_root: Path,
+    verified_receipt: ArtifactReceipt,
+) -> None:
+    _stub_pipeline(monkeypatch, verified_receipt)
+    bundle = json.loads((fixture_root / "normal_slate.json").read_text(encoding="utf-8"))
+    bundle["odds_by_game"] = {}
+    bundle["exchange_by_game"] = {}
+    selected_weather = valid_weather()
+    bundle["weather_by_game"] = {"810001": dict(selected_weather)}
+    bundle["model_source_receipts"] = build_model_source_receipts(
+        {"810001": selected_weather}
+    )
+
+    payload = DailyPipeline(project_paths).build(
+        TARGET_DATE, source_bundle=bundle, generated_at=GENERATED_AT
+    )
+
+    assert payload["health"]["schedule"]["source"] == "MLB Stats API"
+    assert payload["health"]["weather"]["source"] == "Open-Meteo"
+    assert payload["health"]["lineups"]["source"] == "MLB Stats API game feeds"
+    assert payload["games"][0]["factors"]["state"] == "modeled"
+    assert "model_source_receipts" not in json.dumps(payload)
 
 
 def test_explicit_no_slate_is_a_publishable_state(

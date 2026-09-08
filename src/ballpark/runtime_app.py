@@ -26,7 +26,7 @@ from ballpark.publication import atomic_write, canonical_json_bytes
 from ballpark.runtime import JobContext, JobSpec, RuntimeBusyError, RuntimeWorker, probe_runtime
 from ballpark.schedule import fetch_schedule
 from ballpark.venues import VENUES
-from ballpark.weather import fetch_game_weather
+from ballpark.weather import build_model_source_receipts, fetch_game_weather
 
 
 def _stamp() -> str:
@@ -258,7 +258,17 @@ def run_live_worker(
                     for game in schedule_value
                 }
                 _require_time(context)
-                _snapshot(context, "weather", {"date": target_date.isoformat(), "games": value})
+                _snapshot(
+                    context,
+                    "weather",
+                    {
+                        "date": target_date.isoformat(),
+                        "games": value,
+                        # The private unrounded source tuple is bound to the public
+                        # weather bytes and retained only in this durable receipt.
+                        "model_source_receipts": build_model_source_receipts(value),
+                    },
+                )
                 receipt["weather"] = value
                 receipt["weather_succeeded"] = True
 
@@ -324,7 +334,8 @@ def run_live_worker(
                     if receipt.get(f"{name}_due") and not receipt.get(f"{name}_succeeded"):
                         raise RuntimeError(f"required {name} refresh failed in this pass")
                 schedule_value = _load_snapshot(cache_dir, "schedule", target_date).get("games")
-                weather_value = _load_snapshot(cache_dir, "weather", target_date).get("games")
+                weather_receipt = _load_snapshot(cache_dir, "weather", target_date)
+                weather_value = weather_receipt.get("games")
                 lineup_value = _load_snapshot(cache_dir, "lineups", target_date).get("games")
                 market_value = _load_snapshot(cache_dir, "markets", target_date).get("exchange")
                 if (
@@ -334,21 +345,19 @@ def run_live_worker(
                     or not isinstance(market_value, dict)
                 ):
                     raise RuntimeError("dated source receipts are incomplete")
-                fixture = {
+                source_bundle = {
                     "date": target_date.isoformat(),
                     "schedule": schedule_value,
                     "weather_by_game": weather_value,
                     "lineups_by_game": lineup_value,
                     "odds_by_game": {},
                     "exchange_by_game": market_value,
+                    "model_source_receipts": weather_receipt.get("model_source_receipts", {}),
                 }
-                fixture_path = context.cache_dir / "assembled" / f"{context.token}.json"
-                fixture_path.parent.mkdir(parents=True, exist_ok=True)
-                fixture_path.write_bytes(canonical_json_bytes(fixture))
                 DailyPipeline(paths).build_and_publish(
                     target_date,
                     context.publication_dir / ".staged" / context.token,
-                    fixture_path=fixture_path,
+                    source_bundle=source_bundle,
                     generated_at=_stamp(),
                 )
 

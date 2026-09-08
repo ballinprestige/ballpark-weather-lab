@@ -21,7 +21,11 @@ from ballpark.physics import PhysicsEngine, trajectory_theater
 from ballpark.publication import publish_payload
 from ballpark.schedule import fetch_schedule
 from ballpark.venues import VENUES
-from ballpark.weather import fetch_game_weather, neutral_weather
+from ballpark.weather import (
+    fetch_game_weather,
+    neutral_weather,
+    rehydrate_model_source_weather_by_game,
+)
 
 
 def utc_now() -> str:
@@ -80,15 +84,32 @@ class DailyPipeline:
         target_date: date,
         *,
         fixture_path: Path | None = None,
+        source_bundle: dict[str, Any] | None = None,
         generated_at: str | None = None,
     ) -> dict[str, Any]:
+        if fixture_path is not None and source_bundle is not None:
+            raise DataContractError("fixture and trusted source bundle are mutually exclusive")
         generated_at_supplied = generated_at is not None
         generated_at = generated_at or utc_now()
         network_deadline = time.monotonic() + 180.0
         receipt = verify_artifacts(self.paths)
         verify_exported_geometry(self.paths.root)
         fixture = load_fixture(fixture_path, target_date) if fixture_path else None
-        schedule = fixture["schedule"] if fixture else fetch_schedule(target_date, self.client)
+        if source_bundle is not None:
+            if (
+                source_bundle.get("date") != target_date.isoformat()
+                or not isinstance(source_bundle.get("schedule"), list)
+                or not isinstance(source_bundle.get("weather_by_game"), dict)
+                or not isinstance(source_bundle.get("lineups_by_game"), dict)
+                or not isinstance(source_bundle.get("exchange_by_game"), dict)
+            ):
+                raise DataContractError(
+                    "trusted source bundle is malformed or belongs to another date"
+                )
+        inputs = fixture if fixture is not None else source_bundle
+        schedule = (
+            inputs["schedule"] if inputs is not None else fetch_schedule(target_date, self.client)
+        )
         game_ids = [int(game["game_pk"]) for game in schedule]
         if len(game_ids) != len(set(game_ids)):
             raise DataContractError("schedule contains duplicate game IDs")
@@ -104,14 +125,14 @@ class DailyPipeline:
             return payload
 
         observed_at = datetime.now(UTC)
-        if fixture and isinstance(fixture.get("odds_by_game"), dict):
+        if inputs is not None and isinstance(inputs.get("odds_by_game"), dict):
             odds_by_game = {
-                int(game["game_pk"]): fixture["odds_by_game"].get(
+                int(game["game_pk"]): inputs["odds_by_game"].get(
                     str(game["game_pk"]),
                     unavailable_market(
                         int(game["game_pk"]),
                         target_date,
-                        "fixture omits market",
+                        "fixture omits market" if fixture else "runtime source bundle omits market",
                         observed_at=observed_at,
                     ),
                 )
@@ -130,12 +151,18 @@ class DailyPipeline:
                 )
                 for game in schedule
             }
-        if fixture:
+        if inputs is not None:
             exchange_by_game = {
-                int(game["game_pk"]): fixture.get("exchange_by_game", {}).get(
+                int(game["game_pk"]): inputs.get("exchange_by_game", {}).get(
                     str(game["game_pk"]),
                     unavailable_exchange_market(
-                        game, observed_at, "fixture omits Kalshi exchange market"
+                        game,
+                        observed_at,
+                        (
+                            "fixture omits Kalshi exchange market"
+                            if fixture
+                            else "runtime source bundle omits Kalshi exchange market"
+                        ),
                     ),
                 )
                 for game in schedule
@@ -152,8 +179,12 @@ class DailyPipeline:
         modeled_factors = 0
         lineups_confirmed = 0
         lineup_unavailable = 0
-        weather_fixture = fixture.get("weather_by_game", {}) if fixture else {}
-        lineup_fixture = fixture.get("lineups_by_game", {}) if fixture else {}
+        weather_inputs = inputs.get("weather_by_game", {}) if inputs else {}
+        if source_bundle is not None:
+            weather_inputs = rehydrate_model_source_weather_by_game(
+                weather_inputs, source_bundle.get("model_source_receipts")
+            )
+        lineup_inputs = inputs.get("lineups_by_game", {}) if inputs else {}
 
         for scheduled in schedule:
             home_team = str(scheduled.get("home_team") or "")
@@ -161,15 +192,27 @@ class DailyPipeline:
                 raise DataContractError(f"unsupported home venue team: {home_team!r}")
             venue = VENUES[home_team]
             game_pk = int(scheduled["game_pk"])
-            if fixture:
-                weather = weather_fixture.get(str(game_pk))
+            if inputs is not None:
+                weather = weather_inputs.get(str(game_pk))
                 if not isinstance(weather, dict):
-                    weather = neutral_weather(game_pk, venue, "fixture omits game-hour weather")
-                lineup = lineup_fixture.get(str(game_pk))
+                    weather = neutral_weather(
+                        game_pk,
+                        venue,
+                        (
+                            "fixture omits game-hour weather"
+                            if fixture
+                            else "runtime source bundle omits game-hour weather"
+                        ),
+                    )
+                lineup = lineup_inputs.get(str(game_pk))
                 if not isinstance(lineup, dict):
                     lineup = {
                         "state": "not_yet_available",
-                        "reason": "fixture omits official batting orders",
+                        "reason": (
+                            "fixture omits official batting orders"
+                            if fixture
+                            else "runtime source bundle omits official batting orders"
+                        ),
                         "observed_at": generated_at,
                         "home_batter_ids": [],
                         "away_batter_ids": [],
@@ -314,11 +357,13 @@ class DailyPipeline:
         output_root: Path,
         *,
         fixture_path: Path | None = None,
+        source_bundle: dict[str, Any] | None = None,
         generated_at: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         payload = self.build(
             target_date,
             fixture_path=fixture_path,
+            source_bundle=source_bundle,
             generated_at=generated_at,
         )
         return payload, publish_payload(output_root, payload)
