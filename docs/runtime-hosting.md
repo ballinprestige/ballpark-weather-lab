@@ -78,12 +78,16 @@ and never prints it. A run makes at most five bounded service GETs (`/healthz`, 
 bounded no-redirect HTTPS ping. Each request has a 1–30 second timeout and response bodies are
 limited to 2 MiB. A monotonic deadline covers each complete request, including a slow response body.
 The packaged `runtime-monitor` CLI runs those requests in an isolated child process; a parent
-60-second monotonic watchdog kills that child at the whole-run deadline even when DNS or response
-headers block below Python's socket timeout mechanism. Its bounded reaping step is at most 0.2 seconds,
-so a stalled child cannot overlap the next scheduled run. Set `--max-run-seconds` only from 5 through
-300. It requires current payload generation, latest ESPN attempt, and latest publication-maintenance
-outcome to be no more than ten minutes old by default, and rejects timestamps more than five minutes
-in the future. Set
+60-second monotonic watchdog kills that child at the check-execution deadline even when DNS or response
+headers block below Python's socket timeout mechanism. Its bounded reaping step is at most 0.2 seconds.
+The budget deliberately excludes CLI import, project discovery, and child-process startup, so it is not
+a full wall-clock cap for the scheduler invocation. Keep the production proposal at the default
+60-second child budget on one five-minute Render Cron Job, leaving time for startup and teardown. For
+any cadence, the configured child budget plus measured startup/teardown headroom must remain below
+that cadence; a 300-second budget is unsuitable for this five-minute schedule. Set
+`--max-run-seconds` only from 5 through 300. It requires current payload generation, latest ESPN
+attempt, and latest publication-maintenance outcome to be no more than ten minutes old by default, and
+rejects timestamps more than five minutes in the future. Set
 `--max-publication-age-seconds`, `--max-source-attempt-age-seconds`, or
 `--max-maintenance-age-seconds` only to another bounded value from 60 through 86,400.
 
