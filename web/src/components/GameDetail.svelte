@@ -48,8 +48,11 @@
       <StateBadge state={game.game_status} label={capturedPregameAfterStart ? `Status at capture: ${game.game_status}` : null} />
       <span>{pitcherName(game, 'away')} vs {pitcherName(game, 'home')}</span>
     </div>
-    {#if exchangeAvailable}
-      <p class="detail-exchange-line"><strong>{game.exchange_market?.line}</strong> · Over {formatContractCents(game.exchange_market?.over_ask_cents)} · Under {formatContractCents(game.exchange_market?.under_ask_cents)} <span>Kalshi · captured {formatTimestamp(game.exchange_market?.observed_at ?? null)}</span></p>
+    {#if marketFreshness.state !== 'unavailable'}
+      <p class="detail-exchange-line"><strong>{game.odds.line}</strong> · Over {american(game.odds.over_price)} · Under {american(game.odds.under_price)} <span>{game.odds.sportsbook_name} via {game.odds.provider} · captured {formatTimestamp(game.odds.observed_at)}</span></p>
+      {#if exchangeAvailable}<p class="detail-exchange-line">Kalshi supplemental ask · Over {formatContractCents(game.exchange_market?.over_ask_cents)} · Under {formatContractCents(game.exchange_market?.under_ask_cents)} <span>captured {formatTimestamp(game.exchange_market?.observed_at ?? null)}</span></p>{/if}
+    {:else if exchangeAvailable}
+      <p class="detail-exchange-line"><strong>{game.exchange_market?.line}</strong> · Over {formatContractCents(game.exchange_market?.over_ask_cents)} · Under {formatContractCents(game.exchange_market?.under_ask_cents)} <span>Kalshi contract ask · captured {formatTimestamp(game.exchange_market?.observed_at ?? null)}</span></p>
     {/if}
   </header>
 

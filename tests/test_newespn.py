@@ -241,6 +241,17 @@ def test_provider_preserves_complete_quote_through_empty_and_transport_failure()
     )
     assert rejected.status == "transport_error"
     assert rejected.markets[401816854]["state"] == "unavailable"
+    wrong_date = _schedule()
+    wrong_date[0]["game_date"] = "2026-09-07"
+    rejected_date = provider.acquire(
+        TARGET,
+        wrong_date,
+        observed_at=OBSERVED + timedelta(minutes=3),
+        deadline_at=deadline,
+        comparison_now=OBSERVED + timedelta(minutes=3),
+    )
+    assert rejected_date.status == "transport_error"
+    assert rejected_date.markets[401816854]["state"] == "unavailable"
 
 
 def test_schema_failure_and_valid_no_quote_are_distinct_and_corrupt_cache_is_rejected() -> None:

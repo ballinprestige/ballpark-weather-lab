@@ -376,7 +376,7 @@ class EspnOddsProvider:
 
     def __init__(self, client: HttpClient, *, cache: OddsCache | None = None) -> None:
         self.client, self.cache = client, cache
-        self._official_bindings: dict[tuple[date, int], tuple[str, str, str]] = {}
+        self._official_bindings: dict[tuple[date, int], tuple[str, str, str, str]] = {}
 
     def acquire(
         self,
@@ -427,7 +427,9 @@ class EspnOddsProvider:
                         market, target_date, game_pk, comparison_now, scheduled
                     ):
                         self.cache.accept(market)
-                        self._official_bindings[(target_date, game_pk)] = self._binding(scheduled)
+                        self._official_bindings[(target_date, game_pk)] = self._binding(
+                            scheduled, target_date
+                        )
             return outcome
         except Exception as exc:
             return self._fallback(
@@ -472,7 +474,8 @@ class EspnOddsProvider:
             markets[game_pk] = (
                 cached
                 if self._valid_cached_market(cached, target_date, game_pk, comparison_now, game)
-                and self._official_bindings.get((target_date, game_pk)) == self._binding(game)
+                and self._official_bindings.get((target_date, game_pk))
+                == self._binding(game, target_date)
                 else unavailable_market(
                     game_pk,
                     target_date,
@@ -483,7 +486,7 @@ class EspnOddsProvider:
         return EspnAcquisitionOutcome(status, markets, failure)
 
     @staticmethod
-    def _binding(game: Mapping[str, Any]) -> tuple[str, str, str] | None:
+    def _binding(game: Mapping[str, Any], target_date: date) -> tuple[str, str, str, str] | None:
         try:
             game_date = date.fromisoformat(str(game["game_date"]))
             start = _timestamp(_utc(str(game["game_time"])))
@@ -491,9 +494,9 @@ class EspnOddsProvider:
             home = _team_key(str(game["home_team"]))
         except (KeyError, TypeError, ValueError):
             return None
-        if not _official_pregame(game, game_date):
+        if game_date != target_date or not _official_pregame(game, target_date):
             return None
-        return (away, home, start)
+        return (game_date.isoformat(), away, home, start)
 
     @staticmethod
     def _valid_cached_market(
@@ -506,7 +509,7 @@ class EspnOddsProvider:
         if (
             not isinstance(value, Mapping)
             or scheduled is None
-            or EspnOddsProvider._binding(scheduled) is None
+            or EspnOddsProvider._binding(scheduled, target_date) is None
         ):
             return False
         try:
