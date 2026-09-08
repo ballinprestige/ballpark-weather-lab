@@ -20,7 +20,7 @@ class PublicationCatalog:
             CREATE TABLE IF NOT EXISTS accepted_releases (token TEXT PRIMARY KEY, manifest TEXT NOT NULL, accepted_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS publication_state (id INTEGER PRIMARY KEY CHECK(id=1), current_token TEXT, rollback_token TEXT);
             CREATE TABLE IF NOT EXISTS protected_objects (digest TEXT PRIMARY KEY, token TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS pending_candidates (token TEXT PRIMARY KEY, stage_path TEXT NOT NULL, created_at TEXT NOT NULL, error TEXT);
+            CREATE TABLE IF NOT EXISTS pending_candidates (token TEXT PRIMARY KEY, stage_path TEXT NOT NULL, created_at TEXT NOT NULL, error TEXT, state TEXT NOT NULL DEFAULT 'pending');
             CREATE TABLE IF NOT EXISTS pending_objects (digest TEXT PRIMARY KEY, token TEXT NOT NULL, relative_path TEXT NOT NULL, created_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS catalog_errors (id INTEGER PRIMARY KEY, token TEXT, message TEXT NOT NULL, created_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS pending_objects_created ON pending_objects(created_at,digest);
@@ -72,9 +72,19 @@ class PublicationCatalog:
     def register_candidate(self, token: str, stage_path: Path, created_at: str) -> None:
         with self._connection() as db:
             db.execute(
-                "INSERT OR IGNORE INTO pending_candidates(token,stage_path,created_at) VALUES(?,?,?)",
+            "INSERT OR IGNORE INTO pending_candidates(token,stage_path,created_at) VALUES(?,?,?)",
                 (token, str(stage_path), created_at),
             )
+
+    def begin_accept(self, token: str) -> None:
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT state FROM pending_candidates WHERE token=?", (token,)).fetchone()
+            if row is None:
+                db.execute("ROLLBACK")
+                raise RuntimeError("publication candidate is not registered")
+            db.execute("UPDATE pending_candidates SET state='accepting' WHERE token=?", (token,))
+            db.execute("COMMIT")
 
     def register_object(self, digest: str, token: str, relative_path: str, created_at: str) -> None:
         with self._connection() as db:
@@ -121,6 +131,24 @@ class PublicationCatalog:
     def remove_pending_object(self, digest: str) -> None:
         with self._connection() as db:
             db.execute("DELETE FROM pending_objects WHERE digest=?", (digest,))
+
+    def delete_pending_if_unprotected(self, digest: str, remove: Any) -> bool:
+        """Serialize the final protection check and unlink against catalog acceptance."""
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT p.token FROM pending_objects p JOIN pending_candidates c ON c.token=p.token "
+                "WHERE p.digest=? AND c.state='pending' AND p.digest NOT IN "
+                "(SELECT digest FROM protected_objects)",
+                (digest,),
+            ).fetchone()
+            if row is None:
+                db.execute("ROLLBACK")
+                return False
+            remove()
+            db.execute("DELETE FROM pending_objects WHERE digest=?", (digest,))
+            db.execute("COMMIT")
+            return True
 
     def pending_candidates(self, cutoff: str, limit: int) -> list[tuple[str, str]]:
         with self._connection() as db:
