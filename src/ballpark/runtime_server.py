@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 from datetime import date
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -60,7 +61,7 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
         ):
             try:
                 maximum = _environment_limit("BALLPARK_MAX_OBJECT_BYTES", _DEFAULT_MAX_OBJECT_BYTES)
-                manifest = PublicationCatalog(self.publication_dir).current_manifest()
+                manifest = PublicationCatalog.read_current(self.publication_dir)
                 if not isinstance(manifest, dict):
                     raise RuntimeError("no accepted publication")
                 field = {
@@ -96,6 +97,7 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
                 TypeError,
                 ValueError,
                 RuntimeError,
+                sqlite3.Error,
                 json.JSONDecodeError,
             ):
                 self._json(404, {"state": "not_published"})

@@ -22,6 +22,8 @@ class PublicationCatalog:
             CREATE TABLE IF NOT EXISTS pending_candidates (token TEXT PRIMARY KEY, stage_path TEXT NOT NULL, created_at TEXT NOT NULL, error TEXT);
             CREATE TABLE IF NOT EXISTS pending_objects (digest TEXT PRIMARY KEY, token TEXT NOT NULL, relative_path TEXT NOT NULL, created_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS catalog_errors (id INTEGER PRIMARY KEY, token TEXT, message TEXT NOT NULL, created_at TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS pending_objects_created ON pending_objects(created_at,digest);
+            CREATE INDEX IF NOT EXISTS pending_candidates_created ON pending_candidates(created_at,token);
             """)
 
     def _connect(self) -> sqlite3.Connection:
@@ -29,6 +31,20 @@ class PublicationCatalog:
         db.execute("PRAGMA foreign_keys=ON")
         db.execute("PRAGMA synchronous=FULL")
         return db
+
+    @classmethod
+    def read_current(cls, publication: Path) -> dict[str, Any] | None:
+        path = publication / "catalog.sqlite3"
+        if not path.is_file():
+            return None
+        db = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        try:
+            row = db.execute(
+                "SELECT manifest FROM accepted_releases JOIN publication_state ON token=current_token WHERE id=1"
+            ).fetchone()
+            return json.loads(row[0]) if row else None
+        finally:
+            db.close()
 
     def current_manifest(self) -> dict[str, Any] | None:
         with self._connect() as db:
@@ -82,16 +98,15 @@ class PublicationCatalog:
                 "INSERT INTO publication_state(id,current_token,rollback_token) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET rollback_token=current_token,current_token=excluded.current_token",
                 (token, prior[0] if prior else None),
             )
-            db.execute("DELETE FROM pending_candidates WHERE token=?", (token,))
             db.execute("DELETE FROM pending_objects WHERE token=?", (token,))
             db.execute("COMMIT")
             return True
 
-    def maintenance(self, limit: int) -> list[tuple[str, str, str]]:
+    def maintenance(self, cutoff: str, limit: int) -> list[tuple[str, str, str]]:
         with self._connect() as db:
             return db.execute(
-                "SELECT digest,token,relative_path FROM pending_objects WHERE digest NOT IN (SELECT digest FROM protected_objects) ORDER BY created_at LIMIT ?",
-                (limit,),
+                "SELECT digest,token,relative_path FROM pending_objects WHERE created_at <= ? AND digest NOT IN (SELECT digest FROM protected_objects) ORDER BY created_at,digest LIMIT ?",
+                (cutoff, limit),
             ).fetchall()
 
     def remove_pending_object(self, digest: str) -> None:

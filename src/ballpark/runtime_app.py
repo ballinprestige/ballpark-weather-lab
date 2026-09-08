@@ -15,11 +15,13 @@ import shutil
 import signal
 import time
 from collections.abc import Mapping
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ballpark.contract import validate_payload
+from ballpark.errors import DataContractError
 from ballpark.http import HttpClient
 from ballpark.kalshi import KalshiExchangeProvider
 from ballpark.lineups import fetch_lineup
@@ -316,6 +318,12 @@ def _validate_payload(payload: object) -> dict[str, Any]:
         raise RuntimeError("staged payload generated_at is invalid") from exc
     if parsed.tzinfo is None:
         raise RuntimeError("staged payload generated_at is invalid")
+    try:
+        validate_payload(
+            payload, Path(__file__).resolve().parents[2] / "schemas" / "slate.schema.json"
+        )
+    except DataContractError as exc:
+        raise RuntimeError(f"staged payload schema is invalid: {exc}") from exc
     return payload
 
 
@@ -371,10 +379,12 @@ def _accept_stage_impl(context: JobContext) -> None:
                 raise RuntimeError("immutable object corruption")
             return object_digest
         objects.mkdir(parents=True, exist_ok=True)
+        # Register the owned pending name before the durable replacement. A crash
+        # after this point is discoverable by indexed maintenance.
+        catalog.register_object(object_digest, context.token, target.name, _stamp())
         atomic_write(target, gzip.compress(raw, mtime=0))
         if _read_object(objects, object_digest, maximum) != raw:
             raise RuntimeError("immutable object write verification failed")
-        catalog.register_object(object_digest, context.token, target.name, _stamp())
         created.add(object_digest)
         return object_digest
 
@@ -406,7 +416,6 @@ def _accept_stage_impl(context: JobContext) -> None:
         "release_sha256": store(release_raw),
         "archive_index_sha256": store(canonical_json_bytes(merged)),
         "input_receipts": inputs,
-        "accepted_at": _stamp(),
     }
     existing = catalog.accepted(context.token)
     if existing is not None:
@@ -431,12 +440,14 @@ def maintain_publication_store(publication: Path) -> None:
     catalog = PublicationCatalog(publication)
     objects = publication / "objects"
     limit = _environment_limit("BALLPARK_CLEANUP_BATCH", 8)
-    for object_digest, _token, relative in catalog.maintenance(limit):
+    grace = _environment_limit("BALLPARK_STORE_GRACE_SECONDS", 3600)
+    cutoff = (datetime.now(UTC) - timedelta(seconds=grace)).isoformat().replace("+00:00", "Z")
+    for object_digest, _token, relative in catalog.maintenance(cutoff, limit):
         target = _safe_child(objects, relative)
         if target.is_file():
             target.unlink()
         catalog.remove_pending_object(object_digest)
-    for pending_token, stage_path in catalog.pending_candidates(limit):
+    for pending_token, stage_path in catalog.pending_candidates(cutoff, limit):
         candidate = Path(stage_path)
         staging_root = (publication / ".staged").resolve()
         if (
@@ -491,6 +502,9 @@ def run_fixture_worker(
             if not (context.cache_dir / "sources" / f"{name}.json").is_file():
                 raise RuntimeError(f"cannot publish before {name} source snapshot")
         candidate = context.publication_dir / ".staged" / context.token
+        PublicationCatalog(context.publication_dir).register_candidate(
+            context.token, candidate, _stamp()
+        )
         DailyPipeline(paths).build_and_publish(
             target_date, candidate, fixture_path=fixture, generated_at=_stamp()
         )
@@ -690,9 +704,13 @@ def run_live_worker(
                     "exchange_by_game": market_value,
                     "model_source_receipts": weather_receipt.get("model_source_receipts", {}),
                 }
+                candidate = context.publication_dir / ".staged" / context.token
+                PublicationCatalog(context.publication_dir).register_candidate(
+                    context.token, candidate, _stamp()
+                )
                 DailyPipeline(paths).build_and_publish(
                     target_date,
-                    context.publication_dir / ".staged" / context.token,
+                    candidate,
                     source_bundle=source_bundle,
                     generated_at=_stamp(),
                 )

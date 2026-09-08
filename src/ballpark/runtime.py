@@ -276,9 +276,14 @@ class RuntimeWorker:
             if error_value is None:
                 acceptor = self.acceptors.get(context.name)
                 if acceptor is not None:
-                    # This executes inside the same SQLite IMMEDIATE transaction
-                    # that still owns the writer and attempt fencing tokens.
-                    acceptor(context)
+                    # Acceptance has its own durable catalog. Record an acceptor
+                    # failure in this job ledger instead of aborting this callback.
+                    try:
+                        acceptor(context)
+                    except Exception as exc:
+                        job["last_error"] = f"{type(exc).__name__}: {exc}"
+                        job["attempt"] = 0
+                        return "failed_exhausted"
                 job.update(
                     {
                         "attempt": 0,

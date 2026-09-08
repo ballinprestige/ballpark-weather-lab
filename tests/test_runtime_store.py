@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from ballpark.paths import ProjectPaths
+from ballpark.pipeline import DailyPipeline
 from ballpark.publication import canonical_json_bytes
 from ballpark.runtime import JobContext
 from ballpark.runtime_app import _accept_stage, _read_object
@@ -30,13 +32,14 @@ def context(root: Path, token: str) -> JobContext:
 
 
 def document(day: str) -> dict[str, object]:
-    return {
-        "schema_version": 1,
-        "date": day,
-        "generated_at": f"{day}T04:00:00Z",
-        "status": "no_slate",
-        "games": [],
-    }
+    payload = DailyPipeline(ProjectPaths.discover()).build(
+        datetime(2026, 8, 26, tzinfo=UTC).date(),
+        fixture_path=Path("tests/fixtures/no_slate.json"),
+        generated_at="2026-08-26T04:00:00Z",
+    )
+    payload["date"] = day
+    payload["generated_at"] = f"{day}T04:00:00Z"
+    return payload
 
 
 def stage(root: Path, token: str, day: str) -> None:
@@ -165,4 +168,4 @@ def test_catalog_1500_replay_is_flat_and_pending_queue_is_indexed(tmp_path: Path
         catalog.commit(token, manifest, {"a" * 64, "b" * 64, "c" * 64}, "2026-09-08T00:00:00Z")
     assert catalog.current_manifest()["token"] == f"{1499:032x}"
     catalog.register_object("d" * 64, "pending", "d.json.gz", "2026-09-08T00:00:00Z")
-    assert catalog.maintenance(1) == [("d" * 64, "pending", "d.json.gz")]
+    assert catalog.maintenance("2027-01-01T00:00:00Z", 1) == [("d" * 64, "pending", "d.json.gz")]
