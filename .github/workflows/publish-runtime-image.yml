@@ -27,6 +27,7 @@ jobs:
     env:
       IMAGE: ghcr.io/ballinprestige/ballpark-weather-lab
       REVISION: ${{ inputs.revision }}
+      SKOPEO_IMAGE: quay.io/skopeo/stable@sha256:db4108427c05acbadd1447316caa9b5f097a9a737d897d2297443baedff37ded
       GH_TOKEN: ${{ github.token }}
       GHCR_TOKEN: ${{ github.token }}
     steps:
@@ -112,39 +113,7 @@ jobs:
           set -euo pipefail
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
 
-      - name: Refuse any known revision tag before a first publication
-        shell: bash
-        run: |
-          set -euo pipefail
-          owner_type="$(gh api "/users/${GITHUB_REPOSITORY_OWNER}" --jq '.type')"
-          case "$owner_type" in
-            Organization) packages_endpoint="/orgs/${GITHUB_REPOSITORY_OWNER}/packages?package_type=container"; versions_endpoint="/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/ballpark-weather-lab/versions" ;;
-            User) packages_endpoint="/users/${GITHUB_REPOSITORY_OWNER}/packages?package_type=container"; versions_endpoint="/users/${GITHUB_REPOSITORY_OWNER}/packages/container/ballpark-weather-lab/versions" ;;
-            *) echo "unrecognized repository owner type" >&2; exit 1 ;;
-          esac
-          gh api --paginate "${packages_endpoint}&per_page=100" > owner-package-pages.json
-          jq -s 'add' owner-package-pages.json > owner-packages.json
-          package_exists="$(jq '[.[] | select(.name == "ballpark-weather-lab")] | length' owner-packages.json)"
-          printf 'OWNER_PACKAGES_ENDPOINT=%s\n' "$packages_endpoint" >> "$GITHUB_ENV"
-          printf 'PACKAGE_VERSIONS_ENDPOINT=%s\n' "$versions_endpoint" >> "$GITHUB_ENV"
-          printf 'PACKAGE_EXISTED=%s\n' "$package_exists" >> "$GITHUB_ENV"
-          if [[ "$package_exists" -gt 1 ]]; then
-            echo "owner package listing has duplicate container package names" >&2
-            exit 1
-          fi
-          if [[ "$package_exists" -eq 1 ]]; then
-            gh api --paginate "${versions_endpoint}?per_page=100" > package-version-pages.json
-            jq -s 'add' package-version-pages.json > package-versions.json
-            tag_count="$(jq --arg tag "$REVISION" '[.[] | select((.metadata.container.tags // []) | index($tag))] | length' package-versions.json)"
-            if [[ "$tag_count" -ne 0 ]]; then
-              echo "reviewed revision tag already exists; refusing to reuse or replace it" >&2
-              exit 1
-            fi
-          fi
-          echo 'PUBLICATION_MODE=new' >> "$GITHUB_ENV"
-
       - name: Build the reviewed public source image locally
-        if: env.PUBLICATION_MODE == 'new'
         shell: bash
         run: |
           set -euo pipefail
@@ -164,62 +133,79 @@ jobs:
           printf 'LOCAL_IMAGE_TAR_SHA256=%s\n' "$local_image_tar_sha256" >> "$GITHUB_ENV"
 
       - name: Verify artifacts in the locally built image before push
-        if: env.PUBLICATION_MODE == 'new'
         shell: bash
         run: |
           set -euo pipefail
           docker run --rm --entrypoint ballpark "${IMAGE}:${REVISION}" verify-artifacts
 
-      - name: Recheck revision tag immediately before its first push
-        if: env.PUBLICATION_MODE == 'new'
+      - name: Record the pinned Skopeo runtime identity before publication
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$PACKAGE_EXISTED" -eq 1 ]]; then
-            gh api --paginate "${PACKAGE_VERSIONS_ENDPOINT}?per_page=100" > package-version-pages-before-push.json
-            jq -s 'add' package-version-pages-before-push.json > package-versions-before-push.json
-            if jq -e --arg tag "$REVISION" '.[] | select((.metadata.container.tags // []) | index($tag))' package-versions-before-push.json > /dev/null; then
-              echo "reviewed revision tag appeared before push; refusing to replace it" >&2
-              exit 1
-            fi
-          else
-            gh api --paginate "${OWNER_PACKAGES_ENDPOINT}&per_page=100" > owner-package-pages-before-push.json
-            jq -s 'add' owner-package-pages-before-push.json > owner-packages-before-push.json
-            if jq -e '.[] | select(.name == "ballpark-weather-lab")' owner-packages-before-push.json > /dev/null; then
-              echo "container package appeared before push; refusing unknown tag state" >&2
-              exit 1
-            fi
+          skopeo_version="$(docker run --rm --network none "$SKOPEO_IMAGE" --version)"
+          if [[ -z "$skopeo_version" || "$skopeo_version" != skopeo\ version\ * ]]; then
+            echo "pinned Skopeo image did not report its version" >&2
+            exit 1
           fi
+          mkdir -p publication-diagnostics
+          jq -n --arg image "$SKOPEO_IMAGE" --arg version "$skopeo_version" \
+            '{skopeo_image:$image, skopeo_version:$version}' \
+            > publication-diagnostics/skopeo-runtime-identity.json
+          printf '%s\n' "$skopeo_version" > skopeo-version.txt
 
-      - name: Push only a previously absent revision tag and record registry digest
-        if: env.PUBLICATION_MODE == 'new'
+      - name: Convert the verified Docker archive to a local OCI layout
         shell: bash
         run: |
           set -euo pipefail
-          printf '{"push_attempted":true,"image":"%s","tag":"%s"}\n' "$IMAGE" "$REVISION" > publication-diagnostics/push-attempt.json
-          docker push "${IMAGE}:${REVISION}"
-          docker pull "${IMAGE}:${REVISION}" > docker-pull.txt
-          registry_manifest_digest="$(docker image inspect --format '{{json .RepoDigests}}' "${IMAGE}:${REVISION}" | jq -er --arg image "$IMAGE" '[.[] | select(startswith($image + "@"))] | if length == 1 then .[0] | split("@")[1] else error("expected one registry digest") end')"
-          if [[ ! "$registry_manifest_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "Docker pull did not verify one registry digest for the reviewed revision tag" >&2
-            exit 1
+          rm -rf reviewed-oci
+          docker run --rm --network none -v "$PWD:/work" -w /work "$SKOPEO_IMAGE" \
+            copy docker-archive:/work/local-image.tar oci:/work/reviewed-oci:reviewed
+          python scripts/verify_digest_image.py --docker-archive local-image.tar \
+            --oci-layout reviewed-oci --oci-ref-name reviewed --expected-reference "${IMAGE}:${REVISION}" --receipt local-oci-receipt.json
+          oci_manifest_digest="$(jq -er '.oci_manifest_digest' local-oci-receipt.json)"
+          [[ "$oci_manifest_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'OCI_MANIFEST_DIGEST=%s\n' "$oci_manifest_digest" >> "$GITHUB_ENV"
+
+      - name: Publish only the verified OCI manifest by digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p publication-diagnostics
+          printf '{"push_attempted":true,"image":"%s","digest":"%s"}\n' "$IMAGE" "$OCI_MANIFEST_DIGEST" > publication-diagnostics/push-attempt.json
+          docker run --rm -v "$PWD:/work" -v "$HOME/.docker:/root/.docker:ro" -w /work "$SKOPEO_IMAGE" \
+            copy --preserve-digests --format oci --digestfile /work/pushed-digest.txt \
+            oci:/work/reviewed-oci:reviewed "docker://${IMAGE}@${OCI_MANIFEST_DIGEST}"
+          [[ "$(cat pushed-digest.txt)" == "$OCI_MANIFEST_DIGEST" ]]
+          docker run --rm -v "$PWD:/work" -v "$HOME/.docker:/root/.docker:ro" -w /work "$SKOPEO_IMAGE" \
+            inspect --raw "docker://${IMAGE}@${OCI_MANIFEST_DIGEST}" > remote-manifest.json
+          python scripts/verify_digest_image.py --docker-archive local-image.tar \
+            --oci-layout reviewed-oci --oci-ref-name reviewed --expected-reference "${IMAGE}:${REVISION}" --remote-manifest remote-manifest.json \
+            --receipt remote-oci-receipt.json
+          oci_config_digest="$(jq -er '.oci_config_digest' local-oci-receipt.json)"
+          oci_config_hex="${oci_config_digest#sha256:}"
+          rm -rf remote-oci
+          docker run --rm -v "$PWD:/work" -v "$HOME/.docker:/root/.docker:ro" -w /work "$SKOPEO_IMAGE" \
+            copy --preserve-digests "docker://${IMAGE}@${OCI_MANIFEST_DIGEST}" oci:/work/remote-oci:reviewed
+          [[ "$(sha256sum "remote-oci/blobs/sha256/${oci_config_hex}" | awk '{print $1}')" == "$oci_config_hex" ]]
+          cmp -- "reviewed-oci/blobs/sha256/${oci_config_hex}" "remote-oci/blobs/sha256/${oci_config_hex}"
+          docker pull "${IMAGE}@${OCI_MANIFEST_DIGEST}" > docker-pull-by-digest.txt
+          [[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "${IMAGE}@${OCI_MANIFEST_DIGEST}")" == "linux/amd64" ]]
+          docker run --rm --entrypoint ballpark "${IMAGE}@${OCI_MANIFEST_DIGEST}" verify-artifacts
+          printf 'REGISTRY_MANIFEST_DIGEST=%s\n' "$OCI_MANIFEST_DIGEST" >> "$GITHUB_ENV"
+
+      - name: Optionally record a sanitized registry tag observation
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          docker run --rm -v "$HOME/.docker:/root/.docker:ro" "$SKOPEO_IMAGE" \
+            list-tags "docker://${IMAGE}" | python scripts/sanitize_registry_tags.py \
+              --reviewed-revision "$REVISION" > publication-diagnostics/registry-tag-observation.json
+          observation_status="$?"
+          set -e
+          if [[ "$observation_status" -ne 0 ]]; then
+            printf '{"state":"unavailable"}\n' > publication-diagnostics/registry-tag-observation.json
           fi
-          docker buildx imagetools inspect --raw "${IMAGE}@${registry_manifest_digest}" > remote-reference.json
-          reference_media_type="$(jq -er '.mediaType' remote-reference.json)"
-          if [[ "$reference_media_type" == "application/vnd.oci.image.index.v1+json" || "$reference_media_type" == "application/vnd.docker.distribution.manifest.list.v2+json" ]]; then
-            remote_platform_manifest_digest="$(jq -er '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64" and ((.platform.variant // "") == ""))] | if length == 1 then .[0].digest else error("expected one linux/amd64 descriptor") end' remote-reference.json)"
-          else
-            remote_platform_manifest_digest="$registry_manifest_digest"
-          fi
-          docker buildx imagetools inspect --raw "${IMAGE}@${remote_platform_manifest_digest}" > remote-linux-amd64-manifest.json
-          remote_platform_config_digest="$(jq -r '.config.digest // empty' remote-linux-amd64-manifest.json)"
-          if [[ ! "$remote_platform_config_digest" =~ ^sha256:[0-9a-f]{64}$ || "$remote_platform_config_digest" != "$LOCAL_PLATFORM_CONFIG_DIGEST" ]]; then
-            echo "remote linux/amd64 config does not match the built-and-verified image" >&2
-            exit 1
-          fi
-          printf 'REGISTRY_MANIFEST_DIGEST=%s\n' "$registry_manifest_digest" >> "$GITHUB_ENV"
-          printf 'REMOTE_PLATFORM_MANIFEST_DIGEST=%s\n' "$remote_platform_manifest_digest" >> "$GITHUB_ENV"
-          printf 'REMOTE_PLATFORM_CONFIG_DIGEST=%s\n' "$remote_platform_config_digest" >> "$GITHUB_ENV"
 
       - name: Preserve publication diagnostics after any push outcome
         if: always()
@@ -227,35 +213,23 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p publication-diagnostics
-          for file in docker-pull.txt remote-reference.json remote-linux-amd64-manifest.json local-image-inspect-id.txt selected-checks.json; do
+          for file in local-oci-receipt.json remote-oci-receipt.json remote-manifest.json pushed-digest.txt docker-pull-by-digest.txt local-image-inspect-id.txt selected-checks.json skopeo-version.txt; do
             [[ -f "$file" ]] && cp "$file" publication-diagnostics/ || true
           done
 
-      - name: Write digest receipt without conflating local and registry identifiers
+      - name: Write digest receipt
         shell: bash
         run: |
           set -euo pipefail
-          local_image_inspect_id=null
-          if [[ "$PUBLICATION_MODE" == 'new' ]]; then
-            local_image_inspect_id="$(jq -Rsc 'rtrimstr("\n")' < local-image-inspect-id.txt)"
-          fi
-          jq -n \
-            --arg image "$IMAGE" \
-            --arg revision "$REVISION" \
-            --arg platform "linux/amd64" \
-            --arg publication_action "$PUBLICATION_MODE" \
-            --arg registry_manifest_digest "$REGISTRY_MANIFEST_DIGEST" \
-            --arg local_image_tar_sha256 "$LOCAL_IMAGE_TAR_SHA256" \
-            --arg local_platform_config_digest "${LOCAL_PLATFORM_CONFIG_DIGEST:-}" \
-            --arg remote_platform_manifest_digest "${REMOTE_PLATFORM_MANIFEST_DIGEST:-}" \
-            --arg remote_platform_config_digest "${REMOTE_PLATFORM_CONFIG_DIGEST:-}" \
-            --arg existing_package_version_id "${EXISTING_PACKAGE_VERSION_ID:-}" \
-            --argjson local_image_inspect_id "$local_image_inspect_id" \
-            --slurpfile checks selected-checks.json \
-            '{image: $image, tag: $revision, immutable_image: ($image + "@" + $registry_manifest_digest), platform: $platform, publication_action: $publication_action, registry_manifest_digest: $registry_manifest_digest, local_image_tar_sha256: $local_image_tar_sha256, local_image_inspect_id: $local_image_inspect_id, local_platform_config_digest: (if $local_platform_config_digest == "" then null else $local_platform_config_digest end), registry_platform_manifest_digest: (if $remote_platform_manifest_digest == "" then null else $remote_platform_manifest_digest end), registry_platform_config_digest: (if $remote_platform_config_digest == "" then null else $remote_platform_config_digest end), existing_package_version_id: (if $existing_package_version_id == "" then null else $existing_package_version_id end), required_checks: $checks[0]}' \
-            > image-receipt.json
+          local_image_inspect_id="$(jq -Rsc 'rtrimstr("\n")' < local-image-inspect-id.txt)"
+          skopeo_version="$(jq -Rsc 'rtrimstr("\n")' < skopeo-version.txt)"
+          jq -n --arg image "$IMAGE" --arg revision "$REVISION" --arg digest "$REGISTRY_MANIFEST_DIGEST" \
+            --arg tar_sha256 "$LOCAL_IMAGE_TAR_SHA256" --arg skopeo_image "$SKOPEO_IMAGE" \
+            --argjson local_image_inspect_id "$local_image_inspect_id" --argjson skopeo_version "$skopeo_version" \
+            --slurpfile local local-oci-receipt.json --slurpfile remote remote-oci-receipt.json --slurpfile checks selected-checks.json \
+            '{image:$image, revision:$revision, immutable_image:($image+"@"+$digest), registry_manifest_digest:$digest, local_image_tar_sha256:$tar_sha256, local_image_inspect_id:$local_image_inspect_id, skopeo_image:$skopeo_image, skopeo_version:$skopeo_version, local_oci:$local[0], remote_oci:$remote[0], required_checks:$checks[0]}' > image-receipt.json
 
-      - name: Upload publication receipt only
+      - name: Upload publication receipt and reproducible source image
         if: always()
         uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
         with:
@@ -265,8 +239,6 @@ jobs:
           path: |
             publication-diagnostics
             image-receipt.json
-            remote-reference.json
             selected-checks.json
-            package-versions.json
             local-image-inspect-id.txt
             local-image.tar
