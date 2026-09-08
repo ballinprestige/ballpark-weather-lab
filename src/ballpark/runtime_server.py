@@ -16,7 +16,10 @@ from ballpark.runtime_app import (
     _is_digest,
     _load_object_json,
     _read_object,
+    _validate_archive_metadata,
+    _validate_payload,
     _validated_index,
+    _validated_release,
     runtime_readiness,
 )
 from ballpark.runtime_store import PublicationCatalog
@@ -38,6 +41,28 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
     def list_directory(self, _path: str) -> None:
         self.send_error(404, "directory listing disabled")
         return None
+
+    @staticmethod
+    def _payload(body: bytes) -> dict[str, object]:
+        try:
+            value = json.loads(body)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("accepted payload is malformed") from exc
+        return _validate_payload(value)
+
+    @staticmethod
+    def _current_archive_row(
+        rows: list[dict[str, object]], payload: dict[str, object], digest: str, body: bytes
+    ) -> dict[str, object]:
+        matching = [row for row in rows if row["date"] == payload.get("date")]
+        if (
+            len(matching) != 1
+            or matching[0].get("payload_sha256") != digest
+            or matching[0].get("object_sha256") != digest
+        ):
+            raise RuntimeError("accepted archive history does not bind current data")
+        _validate_archive_metadata(matching[0], body)
+        return matching[0]
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
@@ -89,6 +114,32 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
                     hashlib.sha256(body).hexdigest() != row["payload_sha256"]
                 ):
                     raise RuntimeError("accepted archive object digest is malformed")
+                if archive_date is not None:
+                    payload = self._payload(body)
+                    _validate_archive_metadata(row, body)
+                    if payload.get("date") != archive_date:
+                        raise RuntimeError("accepted archive payload belongs to another date")
+                elif path == "/data/data.json":
+                    payload = self._payload(body)
+                    self._current_archive_row(
+                        rows,
+                        payload,
+                        str(manifest["data_sha256"]),
+                        body,
+                    )
+                elif path == "/data/release.json":
+                    data_digest = manifest.get("data_sha256")
+                    if not _is_digest(data_digest):
+                        raise RuntimeError("accepted data digest is malformed")
+                    data_body = _read_object(objects, data_digest, maximum)
+                    payload = self._payload(data_body)
+                    self._current_archive_row(rows, payload, data_digest, data_body)
+                    receipt = self._payload_json(body, "accepted release receipt is malformed")
+                    _validated_release(
+                        receipt,
+                        payload=payload,
+                        payload_digest=hashlib.sha256(data_body).hexdigest(),
+                    )
             except (
                 EOFError,
                 OSError,
@@ -114,6 +165,13 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
             return
         self.directory = str(self.web_dir)
         super().do_GET()
+
+    @staticmethod
+    def _payload_json(body: bytes, message: str) -> object:
+        try:
+            return json.loads(body)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(message) from exc
 
 
 def serve(*, web_dir: Path, publication_dir: Path, state_dir: Path, host: str, port: int) -> None:
