@@ -68,7 +68,7 @@ def _build_parser() -> argparse.ArgumentParser:
     worker.add_argument("--state-dir", type=Path, required=True)
     worker.add_argument("--cache-dir", type=Path, required=True)
     worker.add_argument("--publication-dir", type=Path, required=True)
-    worker.add_argument("--fixture", type=Path, required=True)
+    worker.add_argument("--fixture", type=Path)
     worker.add_argument("--date", type=_date, default=_default_date())
     worker.add_argument("--once", action="store_true")
 
@@ -126,9 +126,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "runtime-worker":
-            from ballpark.runtime_app import run_fixture_worker
+            from ballpark.runtime_app import run_fixture_worker, run_live_worker
 
-            _print(
+            result = (
                 run_fixture_worker(
                     paths,
                     fixture=args.fixture.resolve(),
@@ -138,7 +138,16 @@ def main(argv: list[str] | None = None) -> int:
                     publication_dir=args.publication_dir.resolve(),
                     once=args.once,
                 )
+                if args.fixture
+                else run_live_worker(
+                    paths,
+                    state_dir=args.state_dir.resolve(),
+                    cache_dir=args.cache_dir.resolve(),
+                    publication_dir=args.publication_dir.resolve(),
+                    once=args.once,
+                )
             )
+            _print(result)
             return 0
 
         if args.command == "runtime-probe":

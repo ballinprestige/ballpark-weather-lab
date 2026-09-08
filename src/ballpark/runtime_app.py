@@ -10,14 +10,22 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
+import time
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from ballpark.http import HttpClient
+from ballpark.kalshi import KalshiExchangeProvider
 from ballpark.paths import ProjectPaths
 from ballpark.pipeline import DailyPipeline, load_fixture
 from ballpark.publication import atomic_write, canonical_json_bytes
 from ballpark.runtime import JobContext, JobSpec, RuntimeWorker, probe_runtime
+from ballpark.schedule import fetch_schedule
+from ballpark.venues import VENUES
+from ballpark.weather import fetch_game_weather
 
 
 def _stamp() -> str:
@@ -118,3 +126,132 @@ def runtime_readiness(
     return probe_runtime(
         state_dir, max_heartbeat_age_seconds=heartbeat_seconds, max_job_lag_seconds=job_lag_seconds
     )
+
+
+def run_live_worker(
+    paths: ProjectPaths,
+    *,
+    state_dir: Path,
+    cache_dir: Path,
+    publication_dir: Path,
+    once: bool,
+) -> dict[str, Any]:
+    """Run authorized MLB/Open-Meteo/Kalshi reads independently and assemble receipts."""
+    stopping = False
+
+    def stop(_signal: int, _frame: object) -> None:
+        nonlocal stopping
+        stopping = True
+
+    previous_int = signal.signal(signal.SIGINT, stop)
+    previous_term = signal.signal(signal.SIGTERM, stop)
+    last: dict[str, Any] = {"state": "not_run"}
+    try:
+        while not stopping:
+            target_date = datetime.now(ZoneInfo("America/New_York")).date()
+            client = HttpClient()
+            receipt: dict[str, Any] = {"date": target_date.isoformat()}
+
+            def schedule(
+                context: JobContext,
+                target_date: date = target_date,
+                client: HttpClient = client,
+                receipt: dict[str, Any] = receipt,
+            ) -> None:
+                value = fetch_schedule(target_date, client)
+                _snapshot(context, "schedule", {"date": target_date.isoformat(), "games": value})
+                receipt["schedule"] = value
+
+            def weather(
+                context: JobContext,
+                target_date: date = target_date,
+                client: HttpClient = client,
+                receipt: dict[str, Any] = receipt,
+            ) -> None:
+                schedule_value = receipt.get("schedule")
+                if not isinstance(schedule_value, list):
+                    raise RuntimeError("schedule acquisition is unavailable for this pass")
+                value = {
+                    str(game["game_pk"]): fetch_game_weather(
+                        game, VENUES[game["home_team"]], client
+                    )
+                    for game in schedule_value
+                }
+                _snapshot(context, "weather", {"date": target_date.isoformat(), "games": value})
+                receipt["weather"] = value
+
+            def markets(
+                context: JobContext,
+                target_date: date = target_date,
+                client: HttpClient = client,
+                receipt: dict[str, Any] = receipt,
+                cache_dir: Path = cache_dir,
+            ) -> None:
+                schedule_value = receipt.get("schedule")
+                if not isinstance(schedule_value, list):
+                    raise RuntimeError("schedule acquisition is unavailable for this pass")
+                quotes = KalshiExchangeProvider(
+                    client, cache_path=cache_dir / "kalshi-exchange.json"
+                ).fetch(
+                    schedule_value,
+                    observed_at=datetime.now(UTC),
+                    deadline_at=time.monotonic() + 120,
+                )
+                _snapshot(context, "markets", {"date": target_date.isoformat(), "exchange": quotes})
+                receipt["markets"] = quotes
+
+            def publish(
+                context: JobContext,
+                target_date: date = target_date,
+                receipt: dict[str, Any] = receipt,
+            ) -> None:
+                schedule_value, weather_value, market_value = (
+                    receipt.get("schedule"),
+                    receipt.get("weather"),
+                    receipt.get("markets"),
+                )
+                if (
+                    not isinstance(schedule_value, list)
+                    or not isinstance(weather_value, dict)
+                    or not isinstance(market_value, dict)
+                ):
+                    raise RuntimeError("dated source receipts are incomplete")
+                fixture = {
+                    "date": target_date.isoformat(),
+                    "schedule": schedule_value,
+                    "weather_by_game": weather_value,
+                    "lineups_by_game": {},
+                    "odds_by_game": {},
+                    "exchange_by_game": market_value,
+                }
+                fixture_path = context.cache_dir / "assembled" / f"{context.token}.json"
+                fixture_path.parent.mkdir(parents=True, exist_ok=True)
+                fixture_path.write_bytes(canonical_json_bytes(fixture))
+                DailyPipeline(paths).build_and_publish(
+                    target_date,
+                    context.publication_dir / ".staged" / context.token,
+                    fixture_path=fixture_path,
+                    generated_at=_stamp(),
+                )
+
+            worker = RuntimeWorker(
+                [
+                    JobSpec("schedule", 300, 30),
+                    JobSpec("weather", 900, 60),
+                    JobSpec("markets", 60, 120),
+                    JobSpec("publish", 60, 30),
+                ],
+                {"schedule": schedule, "weather": weather, "markets": markets, "publish": publish},
+                state_dir=state_dir,
+                cache_dir=cache_dir,
+                publication_dir=publication_dir,
+                acceptors={"publish": _accept_stage},
+            )
+            last = worker.run_once()
+            if once:
+                return last
+            time.sleep(1)
+        return last
+    finally:
+        signal.signal(signal.SIGINT, previous_int)
+        signal.signal(signal.SIGTERM, previous_term)
