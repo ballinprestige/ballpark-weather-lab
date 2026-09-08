@@ -137,7 +137,28 @@ def run_fixture_worker(
         publication_dir=publication_dir,
         acceptors={"publish": _accept_stage},
     )
-    return worker.run_once() if once else worker.run_once()
+    if once:
+        return worker.run_once()
+    stopping = False
+
+    def stop(_signal: int, _frame: object) -> None:
+        nonlocal stopping
+        stopping = True
+
+    previous_int = signal.signal(signal.SIGINT, stop)
+    previous_term = signal.signal(signal.SIGTERM, stop)
+    last: dict[str, Any] = {"state": "not_run"}
+    try:
+        while not stopping:
+            try:
+                last = worker.run_once()
+            except RuntimeBusyError:
+                last = {"state": "waiting_for_prior_lease"}
+            time.sleep(1)
+        return last
+    finally:
+        signal.signal(signal.SIGINT, previous_int)
+        signal.signal(signal.SIGTERM, previous_term)
 
 
 def runtime_readiness(
