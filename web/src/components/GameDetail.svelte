@@ -25,6 +25,8 @@
     && game.exchange_market.over_ask_cents !== null
     && game.exchange_market.under_ask_cents !== null;
   $: exchangePhase = effectiveExchangePhase(game.exchange_market, game.game_time, now);
+  $: capturedPregameAfterStart = exchangePhase === 'after_scheduled_start'
+    && /pre.?game/i.test(game.game_status);
   const american = (price: number | null): string => price === null ? '—' : `${price > 0 ? '+' : ''}${price}`;
 </script>
 
@@ -43,7 +45,7 @@
       <h3 id={titleId} aria-label={`${teamLabel(game.away_team)} at ${teamLabel(game.home_team)}`}><strong>{game.away_team}</strong> <span>at</span> <strong>{game.home_team}</strong></h3>
     {/if}
     <div class="detail-status-line">
-      <StateBadge state={game.game_status} />
+      <StateBadge state={game.game_status} label={capturedPregameAfterStart ? `Status at capture: ${game.game_status}` : null} />
       <span>{pitcherName(game, 'away')} vs {pitcherName(game, 'home')}</span>
     </div>
     {#if exchangeAvailable}

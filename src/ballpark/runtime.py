@@ -190,6 +190,10 @@ class RuntimeWorker:
                     }
                 )
                 job.pop("in_flight", None)
+                if int(job["attempt"]) >= spec.max_attempts:
+                    job["attempt"] = 0
+                else:
+                    job["retry_at"] = utc_stamp(now)
             slot = parse_stamp(job["next_slot_at"])
             retry = job.get("retry_at")
             if slot > now and (retry is None or parse_stamp(retry) > now):
@@ -202,10 +206,13 @@ class RuntimeWorker:
                     scheduled + timedelta(seconds=spec.interval_seconds)
                 )
                 job["attempt"] = 0
+                job["batch_deadline_at"] = utc_stamp(
+                    scheduled + timedelta(seconds=spec.timeout_seconds)
+                )
             else:
                 scheduled = parse_stamp(job["last_scheduled_slot_at"])
             attempt, token = int(job["attempt"]) + 1, uuid.uuid4().hex
-            deadline = now + timedelta(seconds=spec.timeout_seconds)
+            deadline = parse_stamp(job["batch_deadline_at"])
             job.update(
                 {
                     "attempt": attempt,
