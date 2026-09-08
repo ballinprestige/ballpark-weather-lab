@@ -9,8 +9,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import signal
 import shutil
+import signal
 import time
 from datetime import UTC, date, datetime
 from pathlib import Path
