@@ -374,4 +374,3 @@ def trajectory_theater(venue: Venue, weather: dict[str, Any]) -> dict[str, Any]:
         "integration": "bounded Euler approximation",
         "arcs": arcs,
     }
-

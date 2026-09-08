@@ -1,4 +1,5 @@
 """Bounded public Kalshi MLB-total reader; a supplemental exchange lane."""
+
 from __future__ import annotations
 
 import hashlib
@@ -22,16 +23,45 @@ _ET = ZoneInfo("America/New_York")
 _EVENT = re.compile(r"^KXMLBTOTAL-(\d{2}[A-Z]{3}\d{2})(\d{4})([A-Z]+)$")
 _TITLE = re.compile(r"^Over\s+(\d+\.5)\s+runs scored$", re.I)
 _KALSHI_TEAM = {
-    "ARI": "AZ", "ATL": "ATL", "BAL": "BAL", "BOS": "BOS", "CHC": "CHC", "CIN": "CIN",
-    "CLE": "CLE", "COL": "COL", "CWS": "CWS", "DET": "DET", "HOU": "HOU", "KC": "KC",
-    "LAA": "LAA", "LAD": "LAD", "MIA": "MIA", "MIL": "MIL", "MIN": "MIN", "NYM": "NYM",
-    "NYY": "NYY", "OAK": "ATH", "PHI": "PHI", "PIT": "PIT", "SD": "SD", "SEA": "SEA",
-    "SF": "SF", "STL": "STL", "TB": "TB", "TEX": "TEX", "TOR": "TOR", "WSH": "WSH",
+    "ARI": "AZ",
+    "ATL": "ATL",
+    "BAL": "BAL",
+    "BOS": "BOS",
+    "CHC": "CHC",
+    "CIN": "CIN",
+    "CLE": "CLE",
+    "COL": "COL",
+    "CWS": "CWS",
+    "DET": "DET",
+    "HOU": "HOU",
+    "KC": "KC",
+    "LAA": "LAA",
+    "LAD": "LAD",
+    "MIA": "MIA",
+    "MIL": "MIL",
+    "MIN": "MIN",
+    "NYM": "NYM",
+    "NYY": "NYY",
+    "OAK": "ATH",
+    "PHI": "PHI",
+    "PIT": "PIT",
+    "SD": "SD",
+    "SEA": "SEA",
+    "SF": "SF",
+    "STL": "STL",
+    "TB": "TB",
+    "TEX": "TEX",
+    "TOR": "TOR",
+    "WSH": "WSH",
 }
 
 
 def _utc(value: str | datetime) -> datetime:
-    parsed = value if isinstance(value, datetime) else datetime.fromisoformat(value.replace("Z", "+00:00"))
+    parsed = (
+        value
+        if isinstance(value, datetime)
+        else datetime.fromisoformat(value.replace("Z", "+00:00"))
+    )
     if parsed.tzinfo is None:
         raise ValueError("timestamp must include an offset")
     return parsed.astimezone(UTC)
@@ -54,7 +84,7 @@ def _event_start(ticker: Any) -> tuple[datetime, str, str] | None:
     teams = match[3]
     aliases = sorted(set(_KALSHI_TEAM.values()), key=len, reverse=True)
     for away in aliases:
-        home = teams[len(away):] if teams.startswith(away) else ""
+        home = teams[len(away) :] if teams.startswith(away) else ""
         if home in aliases:
             return local.astimezone(UTC), away, home
     return None
@@ -79,12 +109,36 @@ def _phase(game: dict[str, Any], at: datetime) -> tuple[str, str | None]:
 def unavailable_market(game: dict[str, Any], observed_at: datetime, reason: str) -> dict[str, Any]:
     phase, status_reason = _phase(game, observed_at)
     return {
-        "state": "unavailable", "reason": status_reason or reason, "provider": "Kalshi", "provider_url": API, "slate_date": _utc(str(game["game_time"])).astimezone(_ET).date().isoformat(),
-        "event_ticker": None, "market_ticker": None, "game_pk": int(game["game_pk"]), "game_time": game.get("game_time"),
-        "market_type": "total", "period": "full_game", "game_phase": phase, "quote_type": "contract_ask", "condition": None, "price_format": "contract_cents", "currency": "USD", "line": None,
-        "over_ask_dollars": None, "under_ask_dollars": None, "over_ask_cents": None, "under_ask_cents": None,
-        "over_ask_size": None, "under_ask_size": None, "source_updated_at": None, "observed_at": _stamp(observed_at),
-        "raw_sha256": None, "snapshot_id": None, "active": False, "source_schema_version": "kalshi-public-v2", "failure_reason": None,
+        "state": "unavailable",
+        "reason": status_reason or reason,
+        "provider": "Kalshi",
+        "provider_url": API,
+        "slate_date": _utc(str(game["game_time"])).astimezone(_ET).date().isoformat(),
+        "event_ticker": None,
+        "market_ticker": None,
+        "game_pk": int(game["game_pk"]),
+        "game_time": game.get("game_time"),
+        "market_type": "total",
+        "period": "full_game",
+        "game_phase": phase,
+        "quote_type": "contract_ask",
+        "condition": None,
+        "price_format": "contract_cents",
+        "currency": "USD",
+        "line": None,
+        "over_ask_dollars": None,
+        "under_ask_dollars": None,
+        "over_ask_cents": None,
+        "under_ask_cents": None,
+        "over_ask_size": None,
+        "under_ask_size": None,
+        "source_updated_at": None,
+        "observed_at": _stamp(observed_at),
+        "raw_sha256": None,
+        "snapshot_id": None,
+        "active": False,
+        "source_schema_version": "kalshi-public-v2",
+        "failure_reason": None,
     }
 
 
@@ -119,10 +173,23 @@ def _line(event_ticker: str, market: dict[str, Any]) -> dict[str, Any] | None:
         return None
     over, under = _ask(market.get("yes_ask_dollars")), _ask(market.get("no_ask_dollars"))
     # NO ask is supplied by the reciprocal positive YES bid.
-    over_size, under_size = _size(market.get("yes_ask_size_fp")), _size(market.get("yes_bid_size_fp"))
+    over_size, under_size = (
+        _size(market.get("yes_ask_size_fp")),
+        _size(market.get("yes_bid_size_fp")),
+    )
     if None in (over, under, over_size, under_size):
         return None
-    return {"market_ticker": ticker, "line": float(line), "condition": f"Over {line} runs scored", "over_ask_dollars": format(over, ".4f"), "under_ask_dollars": format(under, ".4f"), "over_ask_cents": format(over * 100, "f"), "under_ask_cents": format(under * 100, "f"), "over_ask_size": format(over_size, "f"), "under_ask_size": format(under_size, "f")}
+    return {
+        "market_ticker": ticker,
+        "line": float(line),
+        "condition": f"Over {line} runs scored",
+        "over_ask_dollars": format(over, ".4f"),
+        "under_ask_dollars": format(under, ".4f"),
+        "over_ask_cents": format(over * 100, "f"),
+        "under_ask_cents": format(under * 100, "f"),
+        "over_ask_size": format(over_size, "f"),
+        "under_ask_size": format(under_size, "f"),
+    }
 
 
 def orderbook_validates(quote: dict[str, Any], orderbook: dict[str, Any]) -> tuple[str, str] | None:
@@ -150,45 +217,104 @@ def orderbook_validates(quote: dict[str, Any], orderbook: dict[str, Any]) -> tup
     return format(no_bid[1], "f"), format(yes_bid[1], "f")
 
 
-def normalize_markets(game: dict[str, Any], event: dict[str, Any], markets: list[dict[str, Any]], *, observed_at: datetime, raw_bytes: bytes | None = None) -> dict[str, Any]:
+def normalize_markets(
+    game: dict[str, Any],
+    event: dict[str, Any],
+    markets: list[dict[str, Any]],
+    *,
+    observed_at: datetime,
+    raw_bytes: bytes | None = None,
+) -> dict[str, Any]:
     """Accept only a one-to-one exact event and one full-game active line."""
     observed_at = _utc(observed_at)
     missing = unavailable_market(game, observed_at, "no active two-sided Kalshi half-run market")
     phase, reason = _phase(game, observed_at)
     parsed = _event_start(event.get("event_ticker"))
     if reason:
-        return {**missing, "event_ticker": str(event.get("event_ticker") or "") or None, "reason": reason}
-    team_pair = (_KALSHI_TEAM.get(str(game.get("away_team")), game.get("away_team")), _KALSHI_TEAM.get(str(game.get("home_team")), game.get("home_team")))
+        return {
+            **missing,
+            "event_ticker": str(event.get("event_ticker") or "") or None,
+            "reason": reason,
+        }
+    team_pair = (
+        _KALSHI_TEAM.get(str(game.get("away_team")), game.get("away_team")),
+        _KALSHI_TEAM.get(str(game.get("home_team")), game.get("home_team")),
+    )
     if not parsed or parsed[0] != _utc(str(game.get("game_time"))) or parsed[1:] != team_pair:
-        return {**missing, "reason": "Kalshi event does not exactly match official teams and scheduled start"}
-    lines = [line for market in markets if isinstance(market, dict) if (line := _line(str(event["event_ticker"]), market))]
+        return {
+            **missing,
+            "reason": "Kalshi event does not exactly match official teams and scheduled start",
+        }
+    lines = [
+        line
+        for market in markets
+        if isinstance(market, dict)
+        if (line := _line(str(event["event_ticker"]), market))
+    ]
     if not lines:
-        return {**missing, "event_ticker": str(event["event_ticker"]), "reason": "no active two-sided Kalshi half-run market"}
+        return {
+            **missing,
+            "event_ticker": str(event["event_ticker"]),
+            "reason": "no active two-sided Kalshi half-run market",
+        }
     line = min(
         lines,
         key=lambda value: (
-            abs(Decimal(value["over_ask_cents"]) - 50) + abs(Decimal(value["under_ask_cents"]) - 50),
+            abs(Decimal(value["over_ask_cents"]) - 50)
+            + abs(Decimal(value["under_ask_cents"]) - 50),
             value["market_ticker"],
         ),
     )
-    raw = raw_bytes if raw_bytes is not None else json.dumps({"event": event, "markets": markets}, sort_keys=True, separators=(",", ":")).encode()
+    raw = (
+        raw_bytes
+        if raw_bytes is not None
+        else json.dumps(
+            {"event": event, "markets": markets}, sort_keys=True, separators=(",", ":")
+        ).encode()
+    )
     digest = hashlib.sha256(raw).hexdigest()
     return {
-        "state": "observed_unknown_age", "reason": "source quote-update time is not supplied", "provider": "Kalshi", "provider_url": API, "slate_date": _utc(str(game["game_time"])).astimezone(_ET).date().isoformat(),
-        "event_ticker": str(event["event_ticker"]), "market_ticker": line["market_ticker"], "game_pk": int(game["game_pk"]), "game_time": game.get("game_time"),
-        "market_type": "total", "period": "full_game", "game_phase": phase, "quote_type": "contract_ask", "condition": line["condition"], "price_format": "contract_cents", "currency": "USD", **line,
-        "source_updated_at": None, "observed_at": _stamp(observed_at), "raw_sha256": digest,
-        "snapshot_id": hashlib.sha256(f"{digest}:{game['game_pk']}:{line['market_ticker']}".encode()).hexdigest(), "active": True, "source_schema_version": "kalshi-public-v2", "failure_reason": None,
+        "state": "observed_unknown_age",
+        "reason": "source quote-update time is not supplied",
+        "provider": "Kalshi",
+        "provider_url": API,
+        "slate_date": _utc(str(game["game_time"])).astimezone(_ET).date().isoformat(),
+        "event_ticker": str(event["event_ticker"]),
+        "market_ticker": line["market_ticker"],
+        "game_pk": int(game["game_pk"]),
+        "game_time": game.get("game_time"),
+        "market_type": "total",
+        "period": "full_game",
+        "game_phase": phase,
+        "quote_type": "contract_ask",
+        "condition": line["condition"],
+        "price_format": "contract_cents",
+        "currency": "USD",
+        **line,
+        "source_updated_at": None,
+        "observed_at": _stamp(observed_at),
+        "raw_sha256": digest,
+        "snapshot_id": hashlib.sha256(
+            f"{digest}:{game['game_pk']}:{line['market_ticker']}".encode()
+        ).hexdigest(),
+        "active": True,
+        "source_schema_version": "kalshi-public-v2",
+        "failure_reason": None,
     }
 
 
 class KalshiSnapshotCache:
     """Durable last-good exchange evidence. Error responses never replace it."""
+
     def __init__(self, path: Path) -> None:
         self.path, self.quotes = path, {}
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
-            self.quotes = {str(key): quote for key, quote in value.get("quotes", {}).items() if isinstance(quote, dict)}
+            self.quotes = {
+                str(key): quote
+                for key, quote in value.get("quotes", {}).items()
+                if isinstance(quote, dict)
+            }
         except (OSError, json.JSONDecodeError, AttributeError):
             pass
 
@@ -203,7 +329,11 @@ class KalshiSnapshotCache:
             _KALSHI_TEAM.get(str(game.get("away_team")), game.get("away_team")),
             _KALSHI_TEAM.get(str(game.get("home_team")), game.get("home_team")),
         )
-        if not parsed or parsed[0] != _utc(str(game.get("game_time"))) or parsed[1:] != expected_teams:
+        if (
+            not parsed
+            or parsed[0] != _utc(str(game.get("game_time")))
+            or parsed[1:] != expected_teams
+        ):
             return None
         try:
             age = (_utc(at) - _utc(str(quote["observed_at"]))).total_seconds()
@@ -215,8 +345,10 @@ class KalshiSnapshotCache:
         if terminal:
             return None
         return {
-            **quote, "slate_date": _utc(str(game["game_time"])).astimezone(_ET).date().isoformat(),
-            "game_phase": phase, "reason": "source quote-update time is not supplied; retained after fetch failure",
+            **quote,
+            "slate_date": _utc(str(game["game_time"])).astimezone(_ET).date().isoformat(),
+            "game_phase": phase,
+            "reason": "source quote-update time is not supplied; retained after fetch failure",
             "failure_reason": reason,
         }
 
@@ -232,7 +364,9 @@ class KalshiSnapshotCache:
         for _ in range(20):
             try:
                 descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.close(descriptor); acquired = True; break
+                os.close(descriptor)
+                acquired = True
+                break
             except FileExistsError:
                 time.sleep(0.05)
         if not acquired:
@@ -242,8 +376,14 @@ class KalshiSnapshotCache:
             try:
                 disk = json.loads(self.path.read_text(encoding="utf-8"))
                 disk_quotes = disk.get("quotes", {})
-                latest = disk_quotes.get(str(quote["game_pk"])) if isinstance(disk_quotes, dict) else None
-                if isinstance(latest, dict) and _utc(str(latest["observed_at"])) > _utc(str(quote["observed_at"])):
+                latest = (
+                    disk_quotes.get(str(quote["game_pk"]))
+                    if isinstance(disk_quotes, dict)
+                    else None
+                )
+                if isinstance(latest, dict) and _utc(str(latest["observed_at"])) > _utc(
+                    str(quote["observed_at"])
+                ):
                     quote = latest
                 if isinstance(disk_quotes, dict):
                     self.quotes.update(disk_quotes)
@@ -252,7 +392,8 @@ class KalshiSnapshotCache:
             self.quotes[str(quote["game_pk"])] = dict(quote)
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump({"schema_version": 1, "quotes": self.quotes}, handle, sort_keys=True)
-                handle.flush(); os.fsync(handle.fileno())
+                handle.flush()
+                os.fsync(handle.fileno())
             os.replace(temporary, self.path)
         except OSError:
             pass
@@ -288,7 +429,10 @@ class KalshiExchangeProvider:
         deadline_at: float | None = None,
     ) -> dict[int, dict[str, Any]]:
         observed_at = _utc(observed_at)
-        results = {int(game["game_pk"]): unavailable_market(game, observed_at, "no exact Kalshi event") for game in schedule}
+        results = {
+            int(game["game_pk"]): unavailable_market(game, observed_at, "no exact Kalshi event")
+            for game in schedule
+        }
         try:
             events, raw_pages, cursor = [], [], None
             for _ in range(3):
@@ -299,16 +443,25 @@ class KalshiExchangeProvider:
                 page = body.get("events") if isinstance(body, dict) else None
                 if not isinstance(page, list):
                     raise ValueError("events response has no event list")
-                events.extend(page); raw_pages.append(page_raw)
+                events.extend(page)
+                raw_pages.append(page_raw)
                 cursor = body.get("cursor")
                 if not cursor:
                     break
             events_raw = b"\n".join(raw_pages)
         except Exception as exc:
             reason = f"Kalshi public market request failed: {type(exc).__name__}"
-            return {int(game["game_pk"]): self.cache.get(game, datetime.now(UTC), reason) or {**results[int(game["game_pk"])], "reason": reason} for game in schedule}
+            return {
+                int(game["game_pk"]): self.cache.get(game, datetime.now(UTC), reason)
+                or {**results[int(game["game_pk"])], "reason": reason}
+                for game in schedule
+            }
         keys = [
-            (_utc(str(game.get("game_time"))), _KALSHI_TEAM.get(str(game.get("away_team")), game.get("away_team")), _KALSHI_TEAM.get(str(game.get("home_team")), game.get("home_team")))
+            (
+                _utc(str(game.get("game_time"))),
+                _KALSHI_TEAM.get(str(game.get("away_team")), game.get("away_team")),
+                _KALSHI_TEAM.get(str(game.get("home_team")), game.get("home_team")),
+            )
             for game in schedule
         ]
         used: set[str] = set()
@@ -320,14 +473,24 @@ class KalshiExchangeProvider:
                     "reason": reason,
                 }
                 continue
-            team_pair = (_KALSHI_TEAM.get(str(game.get("away_team")), game.get("away_team")), _KALSHI_TEAM.get(str(game.get("home_team")), game.get("home_team")))
+            team_pair = (
+                _KALSHI_TEAM.get(str(game.get("away_team")), game.get("away_team")),
+                _KALSHI_TEAM.get(str(game.get("home_team")), game.get("home_team")),
+            )
             game_key = (_utc(str(game.get("game_time"))), *team_pair)
-            matches = [event for event in events if isinstance(event, dict) and (parsed := _event_start(event.get("event_ticker"))) and parsed == game_key]
+            matches = [
+                event
+                for event in events
+                if isinstance(event, dict)
+                and (parsed := _event_start(event.get("event_ticker")))
+                and parsed == game_key
+            ]
             if keys.count(game_key) != 1:
                 continue
             if len(matches) != 1 or str(matches[0]["event_ticker"]) in used:
                 continue
-            event = matches[0]; used.add(str(event["event_ticker"]))
+            event = matches[0]
+            used.add(str(event["event_ticker"]))
             try:
                 body, markets_raw = self._json(
                     "/markets",
@@ -335,8 +498,15 @@ class KalshiExchangeProvider:
                     deadline_at=deadline_at,
                 )
                 markets = body.get("markets") if isinstance(body, dict) else None
-                if not isinstance(markets, list): raise ValueError("markets response has no market list")
-                quote = normalize_markets(game, event, markets, observed_at=observed_at, raw_bytes=events_raw + b"\n" + markets_raw)
+                if not isinstance(markets, list):
+                    raise ValueError("markets response has no market list")
+                quote = normalize_markets(
+                    game,
+                    event,
+                    markets,
+                    observed_at=observed_at,
+                    raw_bytes=events_raw + b"\n" + markets_raw,
+                )
                 if quote["state"] == "observed_unknown_age":
                     orderbook, orderbook_raw = self._json(
                         f"/markets/{quote['market_ticker']}/orderbook", {}, deadline_at=deadline_at
@@ -344,7 +514,9 @@ class KalshiExchangeProvider:
                     depths = orderbook_validates(quote, orderbook)
                     if depths is None:
                         quote = unavailable_market(
-                            game, observed_at, "Kalshi orderbook does not confirm the two supplied asks"
+                            game,
+                            observed_at,
+                            "Kalshi orderbook does not confirm the two supplied asks",
                         )
                         quote["event_ticker"] = str(event["event_ticker"])
                     else:
@@ -368,9 +540,14 @@ class KalshiExchangeProvider:
                 self.cache.accept(quote)
             except Exception as exc:
                 reason = f"Kalshi public market request failed: {type(exc).__name__}"
-                results[int(game["game_pk"])] = self.cache.get(game, datetime.now(UTC), reason) or {**results[int(game["game_pk"])], "reason": reason}
+                results[int(game["game_pk"])] = self.cache.get(game, datetime.now(UTC), reason) or {
+                    **results[int(game["game_pk"])],
+                    "reason": reason,
+                }
         if cursor:
             for quote in results.values():
                 if quote.get("event_ticker") is None:
-                    quote["failure_reason"] = "Kalshi event pagination reached its three-page safety limit"
+                    quote["failure_reason"] = (
+                        "Kalshi event pagination reached its three-page safety limit"
+                    )
         return results

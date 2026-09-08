@@ -64,7 +64,10 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
     health = payload["health"]
     if any(isinstance(game, dict) and "odds" in game for game in games) and "odds" not in health:
         raise DataContractError("market-bearing payload requires a complete odds health lane")
-    if any(isinstance(game, dict) and "exchange_market" in game for game in games) and "exchange_markets" not in health:
+    if (
+        any(isinstance(game, dict) and "exchange_market" in game for game in games)
+        and "exchange_markets" not in health
+    ):
         raise DataContractError("exchange-bearing payload requires a complete exchange health lane")
     if health["schedule"].get("game_count") != len(games):
         raise DataContractError("schedule health count does not match the slate")
@@ -82,7 +85,10 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
             raise DataContractError("no-slate lineup health must be not applicable")
         if "odds" in health and health["odds"].get("state") != "not_applicable":
             raise DataContractError("no-slate odds health must be not applicable")
-        if "exchange_markets" in health and health["exchange_markets"].get("state") != "not_applicable":
+        if (
+            "exchange_markets" in health
+            and health["exchange_markets"].get("state") != "not_applicable"
+        ):
             raise DataContractError("no-slate exchange health must be not applicable")
         return
     if payload.get("no_slate_reason") is not None:
@@ -112,9 +118,7 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
         if weather_state == "verified":
             verified_weather += 1
             if trajectory_state != "available":
-                raise DataContractError(
-                    "verified weather must produce an available trajectory"
-                )
+                raise DataContractError("verified weather must produce an available trajectory")
             if factor_state == "held":
                 if not isinstance(factors["reason"], str) or not factors["reason"].strip():
                     raise DataContractError(
@@ -135,9 +139,7 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
                     "degraded weather must hold factors and the trajectory comparison"
                 )
             if not held_baselines or game["trajectory"]["arcs"]:
-                raise DataContractError(
-                    "degraded weather must expose unchanged seasonal baselines"
-                )
+                raise DataContractError("degraded weather must expose unchanged seasonal baselines")
         if lineup_state == "confirmed":
             confirmed_lineups += 1
             if game["lineup"]["home_count"] != 9 or game["lineup"]["away_count"] != 9:
@@ -159,33 +161,73 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
                 "home_profile_coverage",
                 "away_profile_coverage",
             )
-            ):
-                raise DataContractError("experimental lineup physics requires complete metrics")
+        ):
+            raise DataContractError("experimental lineup physics requires complete metrics")
         if "odds" in game:
             odds = game["odds"]
-            if odds.get("game_pk") != game.get("game_pk") or odds.get("slate_date") != payload.get("date"):
+            if odds.get("game_pk") != game.get("game_pk") or odds.get("slate_date") != payload.get(
+                "date"
+            ):
                 raise DataContractError("payload contains odds attached to the wrong game or date")
-            if odds.get("sport") != "MLB" or odds.get("market_type") != "total" or odds.get("period") != "full_game":
+            if (
+                odds.get("sport") != "MLB"
+                or odds.get("market_type") != "total"
+                or odds.get("period") != "full_game"
+            ):
                 raise DataContractError("payload contains a non-MLB full-game-total market")
             state = odds.get("state")
             odds_states.append(state)
-            populated = any(odds.get(key) is not None for key in ("line", "over_price", "under_price", "raw_sha256", "snapshot_id"))
+            populated = any(
+                odds.get(key) is not None
+                for key in ("line", "over_price", "under_price", "raw_sha256", "snapshot_id")
+            )
             if populated:
-                required_observed = ("line", "over_price", "under_price", "observed_at", "raw_sha256", "snapshot_id", "sportsbook_id", "sportsbook_name", "provider_event_id")
+                required_observed = (
+                    "line",
+                    "over_price",
+                    "under_price",
+                    "observed_at",
+                    "raw_sha256",
+                    "snapshot_id",
+                    "sportsbook_id",
+                    "sportsbook_name",
+                    "provider_event_id",
+                )
                 if any(odds.get(key) is None for key in required_observed):
-                    raise DataContractError("observed market is missing price, provenance, book, or retrieval evidence")
+                    raise DataContractError(
+                        "observed market is missing price, provenance, book, or retrieval evidence"
+                    )
                 for price_key in ("over_price", "under_price"):
                     price = odds[price_key]
                     if not isinstance(price, int) or isinstance(price, bool) or -99 <= price <= 99:
                         raise DataContractError("quoted market has an invalid American price")
-                observed = datetime.fromisoformat(str(odds["observed_at"]).replace("Z", "+00:00")).astimezone(UTC)
-                generated = datetime.fromisoformat(str(payload["generated_at"]).replace("Z", "+00:00")).astimezone(UTC)
+                observed = datetime.fromisoformat(
+                    str(odds["observed_at"]).replace("Z", "+00:00")
+                ).astimezone(UTC)
+                generated = datetime.fromisoformat(
+                    str(payload["generated_at"]).replace("Z", "+00:00")
+                ).astimezone(UTC)
                 if observed > generated + timedelta(minutes=5):
-                    raise DataContractError("market retrieval is implausibly later than publication")
+                    raise DataContractError(
+                        "market retrieval is implausibly later than publication"
+                    )
             if state in {"current", "stale"}:
-                required = ("line", "over_price", "under_price", "source_updated_at", "observed_at", "raw_sha256", "snapshot_id", "sportsbook_id", "sportsbook_name", "provider_event_id")
+                required = (
+                    "line",
+                    "over_price",
+                    "under_price",
+                    "source_updated_at",
+                    "observed_at",
+                    "raw_sha256",
+                    "snapshot_id",
+                    "sportsbook_id",
+                    "sportsbook_name",
+                    "provider_event_id",
+                )
                 if any(odds.get(key) is None for key in required):
-                    raise DataContractError("quoted market is missing line, both prices, provenance, or timestamps")
+                    raise DataContractError(
+                        "quoted market is missing line, both prices, provenance, or timestamps"
+                    )
                 for price_key in ("over_price", "under_price"):
                     price = odds[price_key]
                     if not isinstance(price, int) or -99 <= price <= 99:
@@ -194,14 +236,28 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
                 raise DataContractError("odds market has an unknown state")
         if "exchange_market" in game:
             exchange = game["exchange_market"]
-            if exchange.get("game_pk") != game.get("game_pk") or exchange.get("game_time") != game.get("game_time") or exchange.get("slate_date") != payload.get("date"):
-                raise DataContractError("payload contains exchange market attached to the wrong game or start")
+            if (
+                exchange.get("game_pk") != game.get("game_pk")
+                or exchange.get("game_time") != game.get("game_time")
+                or exchange.get("slate_date") != payload.get("date")
+            ):
+                raise DataContractError(
+                    "payload contains exchange market attached to the wrong game or start"
+                )
             state = exchange.get("state")
             exchange_states.append(state)
-            if exchange.get("provider") != "Kalshi" or exchange.get("market_type") != "total" or exchange.get("period") != "full_game" or exchange.get("quote_type") != "contract_ask" or exchange.get("price_format") != "contract_cents":
+            if (
+                exchange.get("provider") != "Kalshi"
+                or exchange.get("market_type") != "total"
+                or exchange.get("period") != "full_game"
+                or exchange.get("quote_type") != "contract_ask"
+                or exchange.get("price_format") != "contract_cents"
+            ):
                 raise DataContractError("exchange market has an invalid provider or price domain")
             if (state == "observed_unknown_age") != (exchange.get("active") is True):
-                raise DataContractError("exchange active flag does not match its availability state")
+                raise DataContractError(
+                    "exchange active flag does not match its availability state"
+                )
             start_clock = datetime.fromisoformat(
                 str(game["game_time"]).replace("Z", "+00:00")
             ).astimezone(UTC)
@@ -214,47 +270,96 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
             elif any(word in status for word in ("postponed", "cancelled", "canceled", "delayed")):
                 expected_phase = "unknown"
             else:
-                assessment_time = payload["generated_at"] if exchange.get("failure_reason") else exchange["observed_at"]
+                assessment_time = (
+                    payload["generated_at"]
+                    if exchange.get("failure_reason")
+                    else exchange["observed_at"]
+                )
                 observed_clock = datetime.fromisoformat(
                     str(assessment_time).replace("Z", "+00:00")
                 ).astimezone(UTC)
-                expected_phase = "pregame" if observed_clock < start_clock else "after_scheduled_start"
+                expected_phase = (
+                    "pregame" if observed_clock < start_clock else "after_scheduled_start"
+                )
             if phase != expected_phase:
-                raise DataContractError("exchange phase does not match official status and scheduled start")
+                raise DataContractError(
+                    "exchange phase does not match official status and scheduled start"
+                )
             if state == "observed_unknown_age":
-                required = ("event_ticker", "market_ticker", "condition", "line", "over_ask_dollars", "under_ask_dollars", "over_ask_cents", "under_ask_cents", "over_ask_size", "under_ask_size", "observed_at", "raw_sha256", "snapshot_id")
-                if any(exchange.get(key) is None for key in required) or exchange.get("source_updated_at") is not None:
-                    raise DataContractError("observed exchange quote is missing evidence or invents a source update time")
+                required = (
+                    "event_ticker",
+                    "market_ticker",
+                    "condition",
+                    "line",
+                    "over_ask_dollars",
+                    "under_ask_dollars",
+                    "over_ask_cents",
+                    "under_ask_cents",
+                    "over_ask_size",
+                    "under_ask_size",
+                    "observed_at",
+                    "raw_sha256",
+                    "snapshot_id",
+                )
+                if (
+                    any(exchange.get(key) is None for key in required)
+                    or exchange.get("source_updated_at") is not None
+                ):
+                    raise DataContractError(
+                        "observed exchange quote is missing evidence "
+                        "or invents a source update time"
+                    )
                 parsed = _event_start(exchange.get("event_ticker"))
                 teams = (
                     _KALSHI_TEAM.get(str(game.get("away_team")), game.get("away_team")),
                     _KALSHI_TEAM.get(str(game.get("home_team")), game.get("home_team")),
                 )
                 if not parsed or parsed[0] != start_clock or parsed[1:] != teams:
-                    raise DataContractError("exchange ticker does not match the official game identity")
+                    raise DataContractError(
+                        "exchange ticker does not match the official game identity"
+                    )
                 try:
-                    over, under = Decimal(str(exchange["over_ask_dollars"])), Decimal(str(exchange["under_ask_dollars"]))
-                    over_size, under_size = Decimal(str(exchange["over_ask_size"])), Decimal(str(exchange["under_ask_size"]))
+                    over, under = (
+                        Decimal(str(exchange["over_ask_dollars"])),
+                        Decimal(str(exchange["under_ask_dollars"])),
+                    )
+                    over_size, under_size = (
+                        Decimal(str(exchange["over_ask_size"])),
+                        Decimal(str(exchange["under_ask_size"])),
+                    )
                 except (InvalidOperation, ValueError) as exc:
-                    raise DataContractError("exchange quote has invalid decimal prices or depth") from exc
-                if not (Decimal("0") < over < Decimal("1") and Decimal("0") < under < Decimal("1") and over_size > 0 and under_size > 0):
-                    raise DataContractError("exchange quote requires positive two-sided asks and depth")
+                    raise DataContractError(
+                        "exchange quote has invalid decimal prices or depth"
+                    ) from exc
+                if not (
+                    Decimal("0") < over < Decimal("1")
+                    and Decimal("0") < under < Decimal("1")
+                    and over_size > 0
+                    and under_size > 0
+                ):
+                    raise DataContractError(
+                        "exchange quote requires positive two-sided asks and depth"
+                    )
                 if (
                     Decimal(str(exchange["over_ask_cents"])) != over * 100
                     or Decimal(str(exchange["under_ask_cents"])) != under * 100
                 ):
                     raise DataContractError("exchange display cents do not match native dollars")
-                observed = datetime.fromisoformat(str(exchange["observed_at"]).replace("Z", "+00:00")).astimezone(UTC)
-                generated = datetime.fromisoformat(str(payload["generated_at"]).replace("Z", "+00:00")).astimezone(UTC)
+                observed = datetime.fromisoformat(
+                    str(exchange["observed_at"]).replace("Z", "+00:00")
+                ).astimezone(UTC)
+                generated = datetime.fromisoformat(
+                    str(payload["generated_at"]).replace("Z", "+00:00")
+                ).astimezone(UTC)
                 if observed > generated + timedelta(minutes=5):
-                    raise DataContractError("exchange retrieval is implausibly later than publication")
+                    raise DataContractError(
+                        "exchange retrieval is implausibly later than publication"
+                    )
             elif state != "unavailable":
                 raise DataContractError("exchange market has an unknown state")
 
     expected_status = (
-        "ready"
-        if verified_weather == len(games) and modeled_factors == len(games)
-        else "degraded"
+        "ready" if verified_weather == len(games) and modeled_factors == len(games) else "degraded"
     )
     if payload.get("status") != expected_status:
         raise DataContractError("payload status does not match weather and factor availability")
@@ -290,16 +395,33 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
         counts = {state: odds_states.count(state) for state in ("current", "stale", "unavailable")}
         if any(health["odds"].get(f"{state}_games") != count for state, count in counts.items()):
             raise DataContractError("odds health counts do not match game market states")
-        expected_odds_state = "available" if counts["current"] == len(games) else "partial" if counts["current"] else "unavailable"
+        expected_odds_state = (
+            "available"
+            if counts["current"] == len(games)
+            else "partial"
+            if counts["current"]
+            else "unavailable"
+        )
         if health["odds"].get("state") != expected_odds_state:
             raise DataContractError("odds health state does not match game market states")
     if "exchange_markets" in health:
         if len(exchange_states) != len(games):
-            raise DataContractError("exchange health exists but one or more games have no exchange state")
+            raise DataContractError(
+                "exchange health exists but one or more games have no exchange state"
+            )
         observed_count = exchange_states.count("observed_unknown_age")
         unavailable_count = exchange_states.count("unavailable")
-        if health["exchange_markets"].get("observed_unknown_age_games") != observed_count or health["exchange_markets"].get("unavailable_games") != unavailable_count:
+        if (
+            health["exchange_markets"].get("observed_unknown_age_games") != observed_count
+            or health["exchange_markets"].get("unavailable_games") != unavailable_count
+        ):
             raise DataContractError("exchange health counts do not match game market states")
-        expected_exchange_state = "available" if observed_count == len(games) else "partial" if observed_count else "unavailable"
+        expected_exchange_state = (
+            "available"
+            if observed_count == len(games)
+            else "partial"
+            if observed_count
+            else "unavailable"
+        )
         if health["exchange_markets"].get("state") != expected_exchange_state:
             raise DataContractError("exchange health state does not match game market states")

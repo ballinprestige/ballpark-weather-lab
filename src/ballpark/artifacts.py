@@ -163,8 +163,10 @@ def verify_artifacts(paths: ProjectPaths) -> ArtifactReceipt:
     training = _read_json(paths.models / "training_manifest.json")
     models = training.get("models") or {}
     try:
-        evidence_games = int(training["training_rows"]) + int(models["runs"]["val_rows"]) + int(
-            models["runs"]["test_rows"]
+        evidence_games = (
+            int(training["training_rows"])
+            + int(models["runs"]["val_rows"])
+            + int(models["runs"]["test_rows"])
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ArtifactError("training manifest split counts are malformed") from exc

@@ -74,9 +74,7 @@ def test_schedule_parser_preserves_game_identity_and_probable_pitchers() -> None
 
 def test_schedule_parser_rejects_duplicate_game_ids() -> None:
     target = date(2026, 8, 26)
-    document = {
-        "dates": [{"date": target.isoformat(), "games": [_raw_game(), _raw_game()]}]
-    }
+    document = {"dates": [{"date": target.isoformat(), "games": [_raw_game(), _raw_game()]}]}
     with pytest.raises(DataContractError, match="duplicate game IDs"):
         parse_schedule_document(document, target)
 

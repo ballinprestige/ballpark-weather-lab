@@ -30,9 +30,7 @@ def decompose_wind(
     wind_speed_mph: float, wind_direction_deg: float, center_field_azimuth: float
 ) -> tuple[float, float]:
     angle = math.radians(wind_direction_deg - (center_field_azimuth + 180.0))
-    return round(wind_speed_mph * math.cos(angle), 2), round(
-        wind_speed_mph * math.sin(angle), 2
-    )
+    return round(wind_speed_mph * math.cos(angle), 2), round(wind_speed_mph * math.sin(angle), 2)
 
 
 def _iso_now() -> str:

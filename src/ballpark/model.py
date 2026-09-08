@@ -44,8 +44,7 @@ class ParkFactorModel:
                 (data_dir / "hr_baselines_2026.json").read_text(encoding="utf-8-sig")
             )
             self.hr_baselines = {
-                team: float(row["seasonal_pf_hr"])
-                for team, row in baseline_doc["venues"].items()
+                team: float(row["seasonal_pf_hr"]) for team, row in baseline_doc["venues"].items()
             }
             self.hr_baseline_as_of = str(baseline_doc["baseline_as_of"])
             self.hr_baseline_source = str(baseline_doc["source_url"])

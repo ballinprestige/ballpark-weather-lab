@@ -16,4 +16,3 @@ class DataContractError(BallparkError):
 
 class PublicVerificationError(BallparkError):
     """The public site does not yet match the locally built release receipt."""
-

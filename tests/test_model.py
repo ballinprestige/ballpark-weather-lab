@@ -35,9 +35,7 @@ def test_unverified_weather_holds_at_seasonal_baselines_without_model_inference(
     model = _model(runs=1.2, hr=0.8)
     weather = neutral_weather(810001, VENUES["BOS"], "weather unavailable")
 
-    factors = model.predict(
-        target_date=date(2026, 8, 26), venue=VENUES["BOS"], weather=weather
-    )
+    factors = model.predict(target_date=date(2026, 8, 26), venue=VENUES["BOS"], weather=weather)
 
     assert factors["state"] == "held"
     assert factors["game_pf_runs"] == factors["seasonal_pf_runs"]
@@ -65,9 +63,7 @@ def test_verified_lad_weather_holds_only_the_unvalidated_learned_adjustment() ->
     model = _model(runs=1.2, hr=0.8)
     weather = valid_weather()
 
-    factors = model.predict(
-        target_date=date(2026, 8, 26), venue=VENUES["LAD"], weather=weather
-    )
+    factors = model.predict(target_date=date(2026, 8, 26), venue=VENUES["LAD"], weather=weather)
 
     assert weather["state"] == "verified"
     assert factors["state"] == "held"
@@ -84,9 +80,7 @@ def test_active_dome_forces_neutral_weather_multiplier() -> None:
     weather = valid_weather()
     weather["dome_active"] = True
 
-    factors = model.predict(
-        target_date=date(2026, 8, 26), venue=VENUES["TB"], weather=weather
-    )
+    factors = model.predict(target_date=date(2026, 8, 26), venue=VENUES["TB"], weather=weather)
 
     assert factors["weather_multiplier_runs"] == 1.0
     assert factors["weather_multiplier_hr"] == 1.0

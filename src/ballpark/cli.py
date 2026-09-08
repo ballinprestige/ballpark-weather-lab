@@ -142,7 +142,8 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("--payload must retain its original generated_at")
             if args.generated_at is not None and args.generated_at != existing_generated_at:
                 raise ValueError(
-                    "refresh-exchange cannot replace generated_at; it only refreshes exchange evidence"
+                    "refresh-exchange cannot replace generated_at; "
+                    "it only refreshes exchange evidence"
                 )
             observed_at = datetime.now(UTC)
             quotes = KalshiExchangeProvider(
@@ -152,7 +153,11 @@ def main(argv: list[str] | None = None) -> int:
                 game["exchange_market"] = quotes[int(game["game_pk"])]
             states = [quote["state"] for quote in quotes.values()]
             payload["health"]["exchange_markets"] = {
-                "state": "available" if states and all(state == "observed_unknown_age" for state in states) else "partial" if "observed_unknown_age" in states else "unavailable",
+                "state": "available"
+                if states and all(state == "observed_unknown_age" for state in states)
+                else "partial"
+                if "observed_unknown_age" in states
+                else "unavailable",
                 "source": "Kalshi public market-data API",
                 "observed_unknown_age_games": states.count("observed_unknown_age"),
                 "unavailable_games": states.count("unavailable"),
@@ -160,7 +165,13 @@ def main(argv: list[str] | None = None) -> int:
             }
             validate_payload(payload, paths.schemas / "slate.schema.json")
             release = publish_payload(args.output.resolve(), payload)
-            _print({"state": "published-locally", "output": str(args.output.resolve()), "release": release})
+            _print(
+                {
+                    "state": "published-locally",
+                    "output": str(args.output.resolve()),
+                    "release": release,
+                }
+            )
             return 0
 
         if args.command == "verify-public":

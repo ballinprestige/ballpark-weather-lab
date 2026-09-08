@@ -4,6 +4,7 @@ The scheduler deliberately stores operational state separately from a published
 slate.  A failed or late acquisition can therefore never make an older domain
 look newly acquired merely because another domain was refreshed.
 """
+
 from __future__ import annotations
 
 import json
@@ -45,7 +46,9 @@ class JobSpec:
     retry_backoff_seconds: int = 15
 
     def __post_init__(self) -> None:
-        if not self.name or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789_-" for char in self.name):
+        if not self.name or any(
+            char not in "abcdefghijklmnopqrstuvwxyz0123456789_-" for char in self.name
+        ):
             raise ValueError("job name must use lowercase letters, digits, _ or -")
         if self.interval_seconds <= 0 or self.timeout_seconds <= 0:
             raise ValueError("job intervals and deadlines must be positive")
@@ -110,14 +113,20 @@ class RuntimeLedger:
             return {"schema_version": 1, "jobs": {}}
         except json.JSONDecodeError as exc:
             raise ValueError(f"runtime state is malformed: {self.path}") from exc
-        if not isinstance(state, dict) or state.get("schema_version") != 1 or not isinstance(state.get("jobs"), dict):
+        if (
+            not isinstance(state, dict)
+            or state.get("schema_version") != 1
+            or not isinstance(state.get("jobs"), dict)
+        ):
             raise ValueError(f"runtime state is invalid: {self.path}")
         return state
 
     def write(self, state: dict[str, Any]) -> None:
         if self._lock_fd is None:
             raise RuntimeError("runtime state write requires the writer lock")
-        descriptor, temporary = tempfile.mkstemp(prefix=".runtime-", suffix=".json", dir=self.state_dir)
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=".runtime-", suffix=".json", dir=self.state_dir
+        )
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 json.dump(state, handle, sort_keys=True, separators=(",", ":"))
@@ -175,26 +184,62 @@ class RuntimeWorker:
                 attempt = int(job.get("attempt", 0)) + 1
                 started_at = now
                 deadline_at = now + timedelta(seconds=spec.timeout_seconds)
-                job.update({"attempt": attempt, "last_started_at": utc_stamp(started_at), "last_deadline_at": utc_stamp(deadline_at)})
+                job.update(
+                    {
+                        "attempt": attempt,
+                        "last_started_at": utc_stamp(started_at),
+                        "last_deadline_at": utc_stamp(deadline_at),
+                    }
+                )
                 try:
-                    self.handlers[name](JobContext(name, started_at, deadline_at, attempt, self.ledger.state_dir, self.cache_dir, self.publication_dir))
-                except Exception as exc:  # handlers record no freshness; ledger retains last good success
+                    self.handlers[name](
+                        JobContext(
+                            name,
+                            started_at,
+                            deadline_at,
+                            attempt,
+                            self.ledger.state_dir,
+                            self.cache_dir,
+                            self.publication_dir,
+                        )
+                    )
+                except (
+                    Exception
+                ) as exc:  # handlers record no freshness; ledger retains last good success
                     exhausted = attempt >= spec.max_attempts
-                    job.update({
-                        "last_finished_at": utc_stamp(now),
-                        "last_error": f"{type(exc).__name__}: {exc}",
-                        "next_due_at": utc_stamp(now + timedelta(seconds=spec.interval_seconds if exhausted else spec.retry_backoff_seconds)),
-                        "attempt": 0 if exhausted else attempt,
-                    })
-                    outcomes.append({"job": name, "state": "failed_exhausted" if exhausted else "retry_scheduled"})
+                    job.update(
+                        {
+                            "last_finished_at": utc_stamp(now),
+                            "last_error": f"{type(exc).__name__}: {exc}",
+                            "next_due_at": utc_stamp(
+                                now
+                                + timedelta(
+                                    seconds=spec.interval_seconds
+                                    if exhausted
+                                    else spec.retry_backoff_seconds
+                                )
+                            ),
+                            "attempt": 0 if exhausted else attempt,
+                        }
+                    )
+                    outcomes.append(
+                        {
+                            "job": name,
+                            "state": "failed_exhausted" if exhausted else "retry_scheduled",
+                        }
+                    )
                 else:
-                    job.update({
-                        "attempt": 0,
-                        "last_error": None,
-                        "last_finished_at": utc_stamp(now),
-                        "last_success_at": utc_stamp(now),
-                        "next_due_at": utc_stamp(now + timedelta(seconds=spec.interval_seconds)),
-                    })
+                    job.update(
+                        {
+                            "attempt": 0,
+                            "last_error": None,
+                            "last_finished_at": utc_stamp(now),
+                            "last_success_at": utc_stamp(now),
+                            "next_due_at": utc_stamp(
+                                now + timedelta(seconds=spec.interval_seconds)
+                            ),
+                        }
+                    )
                     outcomes.append({"job": name, "state": "succeeded"})
             self.ledger.write(state)
         return {"state": "ran", "heartbeat_at": utc_stamp(now), "jobs": outcomes}
@@ -229,4 +274,8 @@ def probe_runtime(
                 problems.append(f"job is overdue: {name}")
         except (KeyError, TypeError, ValueError):
             problems.append(f"job state is missing: {name}")
-    return {"state": "ready" if not problems else "not_ready", "checked_at": utc_stamp(now), "problems": problems}
+    return {
+        "state": "ready" if not problems else "not_ready",
+        "checked_at": utc_stamp(now),
+        "problems": problems,
+    }

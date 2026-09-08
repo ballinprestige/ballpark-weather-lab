@@ -56,4 +56,3 @@ def fetch_lineup(game_pk: int, client: HttpClient) -> dict[str, Any]:
             "home_batter_ids": [],
             "away_batter_ids": [],
         }
-

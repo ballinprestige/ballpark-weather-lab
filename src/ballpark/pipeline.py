@@ -108,7 +108,12 @@ class DailyPipeline:
             odds_by_game = {
                 int(game["game_pk"]): fixture["odds_by_game"].get(
                     str(game["game_pk"]),
-                    unavailable_market(int(game["game_pk"]), target_date, "fixture omits market", observed_at=observed_at),
+                    unavailable_market(
+                        int(game["game_pk"]),
+                        target_date,
+                        "fixture omits market",
+                        observed_at=observed_at,
+                    ),
                 )
                 for game in schedule
             }
@@ -117,8 +122,10 @@ class DailyPipeline:
             # republication. Do not silently turn accessibility into a production source grant.
             odds_by_game = {
                 int(game["game_pk"]): unavailable_market(
-                    int(game["game_pk"]), target_date,
-                    "no authorized live sportsbook provider is configured; public Covers data is not republished",
+                    int(game["game_pk"]),
+                    target_date,
+                    "no authorized live sportsbook provider is configured; "
+                    "public Covers data is not republished",
                     observed_at=observed_at,
                 )
                 for game in schedule
@@ -126,7 +133,10 @@ class DailyPipeline:
         if fixture:
             exchange_by_game = {
                 int(game["game_pk"]): fixture.get("exchange_by_game", {}).get(
-                    str(game["game_pk"]), unavailable_exchange_market(game, observed_at, "fixture omits Kalshi exchange market")
+                    str(game["game_pk"]),
+                    unavailable_exchange_market(
+                        game, observed_at, "fixture omits Kalshi exchange market"
+                    ),
                 )
                 for game in schedule
             }
@@ -317,7 +327,11 @@ class DailyPipeline:
     def _odds_health(odds_by_game: dict[int, dict[str, Any]]) -> dict[str, Any]:
         states = [str(value.get("state")) for value in odds_by_game.values()]
         return {
-            "state": "available" if states and all(state == "current" for state in states) else "partial" if "current" in states else "unavailable",
+            "state": "available"
+            if states and all(state == "current" for state in states)
+            else "partial"
+            if "current" in states
+            else "unavailable",
             "source": "No authorized live sportsbook provider configured",
             "current_games": states.count("current"),
             "stale_games": states.count("stale"),
@@ -329,7 +343,11 @@ class DailyPipeline:
     def _exchange_health(exchange_by_game: dict[int, dict[str, Any]]) -> dict[str, Any]:
         states = [str(value.get("state")) for value in exchange_by_game.values()]
         return {
-            "state": "available" if states and all(state == "observed_unknown_age" for state in states) else "partial" if "observed_unknown_age" in states else "unavailable",
+            "state": "available"
+            if states and all(state == "observed_unknown_age" for state in states)
+            else "partial"
+            if "observed_unknown_age" in states
+            else "unavailable",
             "source": "Kalshi public market-data API",
             "observed_unknown_age_games": states.count("observed_unknown_age"),
             "unavailable_games": states.count("unavailable"),

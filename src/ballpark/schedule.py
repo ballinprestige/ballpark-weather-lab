@@ -66,9 +66,7 @@ def parse_schedule_document(document: Any, target_date: date) -> list[dict[str, 
                     "game_pk": int(game_pk),
                     "game_date": target_date.isoformat(),
                     "game_time": str(raw.get("gameDate") or ""),
-                    "game_status": str(
-                        (raw.get("status") or {}).get("detailedState") or "Unknown"
-                    ),
+                    "game_status": str((raw.get("status") or {}).get("detailedState") or "Unknown"),
                     "game_number": int(raw.get("gameNumber") or 1),
                     "doubleheader": str(raw.get("doubleHeader") or "N"),
                     "home_team": home_team,

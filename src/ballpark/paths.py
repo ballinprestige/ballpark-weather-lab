@@ -27,4 +27,3 @@ class ProjectPaths:
                     web=candidate / "web",
                 )
         raise FileNotFoundError("could not locate the Ballpark project root")
-

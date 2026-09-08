@@ -21,9 +21,7 @@ def test_schema_accepts_canonical_payload(
         (lambda value: value.update(status="unexpected"), "status"),
         (lambda value: value["games"][0]["weather"].pop("basis"), "weather.*basis"),
         (
-            lambda value: value["games"][0]["factors"].update(
-                weather_multiplier_runs=1.5
-            ),
+            lambda value: value["games"][0]["factors"].update(weather_multiplier_runs=1.5),
             "weather_multiplier_runs",
         ),
     ],

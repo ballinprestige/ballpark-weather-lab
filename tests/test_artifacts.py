@@ -43,7 +43,7 @@ def _write_inventory(
         "assets/models/runs_weather_model.json": b"{}\n",
         "assets/models/hr_weather_model.json": b"{}\n",
         "assets/data/hr_baselines_2026.json": b"{}\n",
-        "assets/data/venue_orientation_provenance.json": b"{\"schema_version\":1,\"venues\":{}}\n",
+        "assets/data/venue_orientation_provenance.json": b'{"schema_version":1,"venues":{}}\n',
         "web/public/park_geometry.json": b"{}\n",
     }
     entries: dict[str, dict[str, object]] = {

@@ -84,9 +84,11 @@ def test_validator_command_fails_nonzero_for_an_unsafe_workflow(tmp_path: Path) 
             "          set -euo pipefail\n          python -m ruff",
             1,
         ),
-        lambda text: text
-        + "\n  privileged-bypass:\n    runs-on: ubuntu-latest\n    permissions: write-all\n"
-        + "    steps:\n      - run: gh api --method POST /repos/example/example/issues\n",
+        lambda text: (
+            text
+            + "\n  privileged-bypass:\n    runs-on: ubuntu-latest\n    permissions: write-all\n"
+            + "    steps:\n      - run: gh api --method POST /repos/example/example/issues\n"
+        ),
         lambda text: text.replace(
             "    name: PR verification", "    if : false\n    name: PR verification", 1
         ),
@@ -119,9 +121,11 @@ def test_validator_command_fails_nonzero_for_an_unsafe_workflow(tmp_path: Path) 
             "types: [opened, reopened, ready_for_review]",
             1,
         ),
-        lambda text: text
-        + "\n  attacker :\n    runs-on: ubuntu-latest\n    permissions : write-all\n"
-        + "    steps:\n      - run: gh api --method POST /repos/example/example/issues\n",
+        lambda text: (
+            text
+            + "\n  attacker :\n    runs-on: ubuntu-latest\n    permissions : write-all\n"
+            + "    steps:\n      - run: gh api --method POST /repos/example/example/issues\n"
+        ),
         lambda text: text.replace(
             "name: PR verification", "name: duplicate\nname: PR verification", 1
         ),
@@ -197,7 +201,7 @@ def test_fail_closed_command_stops_after_an_intentional_failure() -> None:
             "-euo",
             "pipefail",
             "-c",
-            "python -c \"raise SystemExit(23)\"; echo unreachable",
+            'python -c "raise SystemExit(23)"; echo unreachable',
         ]
     )
     completed = subprocess.run(

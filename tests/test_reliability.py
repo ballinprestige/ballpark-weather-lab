@@ -58,14 +58,10 @@ def receipt_for(slate_date: date, *, generated_at: str | None = None) -> tuple[d
     )
 
 
-def client_for(
-    rows_and_content: list[tuple[dict, bytes]], *, prefix: str = ""
-) -> RouteClient:
+def client_for(rows_and_content: list[tuple[dict, bytes]], *, prefix: str = "") -> RouteClient:
     rows = [row for row, _content in rows_and_content]
     routes: dict[str, bytes | Exception] = {
-        f"{prefix}/archive/index.json": canonical_json_bytes(
-            {"schema_version": 1, "dates": rows}
-        )
+        f"{prefix}/archive/index.json": canonical_json_bytes({"schema_version": 1, "dates": rows})
     }
     for row, content in rows_and_content:
         routes[f"{prefix}/archive/{row['date']}.json"] = content
@@ -79,9 +75,7 @@ def test_two_day_streak_is_reported_as_provisional() -> None:
         prefix="/demo",
     )
 
-    result = verify_publication_streak(
-        "https://example.invalid/demo/", ending, client=client
-    )
+    result = verify_publication_streak("https://example.invalid/demo/", ending, client=client)
 
     assert result["state"] == "provisional"
     assert result["same_day_archive_gate_met"] is False
@@ -113,9 +107,7 @@ def test_missing_current_receipt_reports_zero_without_claiming_reliability() -> 
     ending = date(2026, 8, 28)
     client = client_for([receipt_for(ending - timedelta(days=1))])
 
-    result = verify_publication_streak(
-        "https://example.invalid/", ending, client=client
-    )
+    result = verify_publication_streak("https://example.invalid/", ending, client=client)
 
     assert result["progress"] == "0/7"
     assert result["same_day_archive_gate_met"] is False
@@ -130,9 +122,7 @@ def test_hash_mismatch_stops_the_streak() -> None:
     row["payload_sha256"] = "0" * 64
     client = client_for([(row, content)])
 
-    result = verify_publication_streak(
-        "https://example.invalid/", ending, client=client
-    )
+    result = verify_publication_streak("https://example.invalid/", ending, client=client)
 
     assert result["progress"] == "0/7"
     assert "do not match" in result["stop_reason"]
@@ -151,9 +141,7 @@ def test_same_day_uses_new_york_calendar_boundary(
     ending = date(2026, 8, 28)
     client = client_for([receipt_for(ending, generated_at=generated_at)])
 
-    result = verify_publication_streak(
-        "https://example.invalid/", ending, client=client
-    )
+    result = verify_publication_streak("https://example.invalid/", ending, client=client)
 
     assert result["progress"] == expected_progress
 
@@ -216,9 +204,7 @@ def test_duplicate_receipt_date_is_not_silently_deduplicated() -> None:
     row, content = receipt_for(ending)
     client = client_for([(row, content), (deepcopy(row), content)])
 
-    result = verify_publication_streak(
-        "https://example.invalid/", ending, client=client
-    )
+    result = verify_publication_streak("https://example.invalid/", ending, client=client)
 
     assert result["progress"] == "0/7"
     assert "duplicate" in result["stop_reason"]
@@ -261,18 +247,14 @@ def test_public_reads_retry_within_a_bounded_attempt_count() -> None:
 
 def test_public_url_requires_http() -> None:
     with pytest.raises(ValueError, match="http or https"):
-        verify_publication_streak(
-            "file:///tmp/site", date(2026, 8, 28), client=RouteClient({})
-        )
+        verify_publication_streak("file:///tmp/site", date(2026, 8, 28), client=RouteClient({}))
 
 
 @pytest.mark.parametrize(
     ("attempts", "delay_seconds", "message"),
     [(0, 0, "attempts"), (11, 0, "attempts"), (1, -1, "delay"), (1, 11, "delay")],
 )
-def test_retry_bounds_are_enforced(
-    attempts: int, delay_seconds: float, message: str
-) -> None:
+def test_retry_bounds_are_enforced(attempts: int, delay_seconds: float, message: str) -> None:
     with pytest.raises(ValueError, match=message):
         verify_publication_streak(
             "https://example.invalid/",
