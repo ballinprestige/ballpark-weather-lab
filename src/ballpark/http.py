@@ -65,12 +65,18 @@ class HttpClient:
             session = self.session
         response = None
         try:
-            response = session.get(
-                url,
-                params=params,
-                timeout=timeout,
-                stream=True,
-            )
+            request: dict[str, Any] = {
+                "params": params,
+                "timeout": timeout,
+                "stream": True,
+            }
+            if deadline_at is not None:
+                # A redirect is a second provider-controlled request with a fresh
+                # timeout. Deadline-bound source work admits exactly one GET.
+                request["allow_redirects"] = False
+            response = session.get(url, **request)
+            if deadline_at is not None and response.is_redirect:
+                raise RuntimeError("HTTP redirects are not permitted for deadline-bound requests")
             response.raise_for_status()
             declared = response.headers.get("Content-Length")
             if declared is not None and int(declared) > self.maximum_bytes:

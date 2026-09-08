@@ -480,6 +480,33 @@ function retainedExchangePayload(): BallparkPayload {
   return payload;
 }
 
+function retainedSportsbookPayload(): BallparkPayload {
+  const payload = readyPayload();
+  for (const game of payload.games) {
+    game.odds = {
+      ...game.odds,
+      state: 'observed_unknown_age',
+      reason: 'Source quote-update time is not supplied; retained after failure.',
+      failure_reason: 'ESPN scoreboard update failed: OSError',
+      provider: 'ESPN',
+      sportsbook_id: 'draftkings',
+      sportsbook_name: 'DraftKings',
+      provider_event_id: `espn-${game.game_pk}`,
+      source_updated_at: null,
+      observed_at: '2026-08-27T16:00:00Z',
+      raw_sha256: 'e'.repeat(64),
+      snapshot_id: 'f'.repeat(64),
+      source_schema_version: 'espn-web-scoreboard-total-v1'
+    };
+  }
+  payload.health.odds = {
+    state: 'partial', source: 'ESPN public scoreboard / DraftKings', current_games: 0,
+    observed_unknown_age_games: 2, stale_games: 0, unavailable_games: 0, optional: false,
+    acquisition_status: 'transport_error', acquisition_error: 'OSError'
+  };
+  return payload;
+}
+
 test('cold game hydrates geometry without waiting for a delayed archive', async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith('desktop'));
   await mockPublication(page, readyPayload());
@@ -634,6 +661,34 @@ test('retained Kalshi asks show the provider failure without becoming current', 
   await page.getByRole('link', { name: 'Data Health' }).click();
   const failureLedger = page.locator('section.warning-ledger').filter({ has: page.getByRole('heading', { name: 'Kalshi update failed' }) });
   await expect(failureLedger).toContainText('Kalshi public market-data request returned 503.');
+});
+
+test('retained ESPN sportsbook odds preserve the capture and expose the failed update', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('desktop'));
+  await mockPublication(page, retainedSportsbookPayload());
+  await page.goto('/#slate');
+  const marketRow = page.locator('.ledger tbody tr').filter({ has: page.locator('[data-game-key="1001"]') });
+  await expect(marketRow).toContainText('DraftKings via ESPN');
+  await expect(marketRow).toContainText('captured Aug 27, 9:00 AM PDT');
+  await expect(marketRow).toContainText('ESPN update failed · showing the captured prices');
+  await expect(page.locator('.slate-meta')).toContainText('source age unknown');
+  await marketRow.getByRole('link').click();
+  const detail = page.getByTestId('game-detail');
+  await expect(detail).toContainText('ESPN update failed. Showing the captured sportsbook prices above');
+  await page.getByRole('link', { name: 'Data Health' }).click();
+  await expect(page.locator('.health-lane-list')).toContainText('Acquisition transport error');
+  await expect(page.locator('.health-lane-list')).toContainText('Source failure: OSError');
+});
+
+test('319px retained ESPN sportsbook row keeps its failure beside the quote', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('mobile'));
+  await page.setViewportSize({ width: 319, height: 480 });
+  await mockPublication(page, retainedSportsbookPayload());
+  await page.goto('/#slate');
+  const row = page.locator('.compact-game-row').first();
+  await expect(row).toContainText('DraftKings via ESPN');
+  await expect(row).toContainText('captured 9:00 AM PDT');
+  await expect(row).toContainText('ESPN update failed · showing the captured prices');
 });
 
 test('retained pregame exchange evidence becomes after-scheduled-start at the controlled clock', async ({ page }, testInfo) => {

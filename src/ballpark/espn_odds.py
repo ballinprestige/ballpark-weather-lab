@@ -10,7 +10,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal, Protocol
 from urllib.parse import urlencode
@@ -44,6 +44,7 @@ class EspnAcquisitionOutcome:
     markets: dict[int, dict[str, Any]]
     source_error: str | None = None
     raw_sha256: str | None = None
+    raw_bytes: bytes | None = None
 
 
 def _utc(value: datetime | str) -> datetime:
@@ -393,13 +394,17 @@ class EspnOddsProvider:
             try:
                 document = json.loads(raw)
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                return self._fallback(
-                    target_date,
-                    schedule,
-                    observed_at,
-                    "schema_error",
-                    f"json_{type(exc).__name__}",
-                    comparison_now,
+                return replace(
+                    self._fallback(
+                        target_date,
+                        schedule,
+                        observed_at,
+                        "schema_error",
+                        f"json_{type(exc).__name__}",
+                        comparison_now,
+                    ),
+                    raw_sha256=hashlib.sha256(raw).hexdigest(),
+                    raw_bytes=raw,
                 )
             outcome = normalize_espn_scoreboard_outcome(
                 document,
@@ -410,13 +415,17 @@ class EspnOddsProvider:
                 comparison_now=comparison_now,
             )
             if outcome.status == "schema_error":
-                return self._fallback(
-                    target_date,
-                    schedule,
-                    observed_at,
-                    "schema_error",
-                    outcome.source_error or "schema_error",
-                    comparison_now,
+                return replace(
+                    self._fallback(
+                        target_date,
+                        schedule,
+                        observed_at,
+                        "schema_error",
+                        outcome.source_error or "schema_error",
+                        comparison_now,
+                    ),
+                    raw_sha256=hashlib.sha256(raw).hexdigest(),
+                    raw_bytes=raw,
                 )
             if self.cache is not None:
                 schedule_by_id = {int(game["game_pk"]): game for game in schedule}
@@ -430,7 +439,7 @@ class EspnOddsProvider:
                         self._official_bindings[(target_date, game_pk)] = self._binding(
                             scheduled, target_date
                         )
-            return outcome
+            return replace(outcome, raw_bytes=raw)
         except Exception as exc:
             return self._fallback(
                 target_date,

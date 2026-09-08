@@ -10,7 +10,13 @@ from typing import Any
 from ballpark.artifacts import ArtifactReceipt, verify_artifacts
 from ballpark.contract import validate_payload
 from ballpark.errors import DataContractError
-from ballpark.espn_odds import EspnAcquisitionOutcome, EspnOddsProvider
+from ballpark.espn_odds import (
+    EspnAcquisitionOutcome,
+    EspnOddsProvider,
+)
+from ballpark.espn_odds import (
+    unavailable_market as unavailable_espn_market,
+)
 from ballpark.geometry_artifact import verify_exported_geometry
 from ballpark.http import HttpClient
 from ballpark.kalshi import KalshiExchangeProvider
@@ -75,6 +81,30 @@ def _public_lineup(lineup: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _runtime_espn_acquisition(value: object) -> EspnAcquisitionOutcome:
+    """Rehydrate only the public outcome metadata from a private source receipt."""
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        raise DataContractError("runtime sportsbook acquisition receipt is malformed")
+    status = value.get("status")
+    if status not in {"observed", "no_quote", "schema_error", "transport_error"}:
+        raise DataContractError("runtime sportsbook acquisition state is invalid")
+    source_error, raw_sha256 = value.get("source_error"), value.get("raw_sha256")
+    if not isinstance(source_error, (str, type(None))) or not isinstance(
+        raw_sha256, (str, type(None))
+    ):
+        raise DataContractError("runtime sportsbook acquisition receipt is malformed")
+    if raw_sha256 is not None and (
+        len(raw_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in raw_sha256)
+    ):
+        raise DataContractError("runtime sportsbook acquisition raw digest is invalid")
+    if not isinstance(value.get("retained"), bool) or not isinstance(
+        value.get("attempted_at"), str
+    ):
+        raise DataContractError("runtime sportsbook acquisition receipt is malformed")
+    return EspnAcquisitionOutcome(status, {}, source_error, raw_sha256)
+
+
 class DailyPipeline:
     def __init__(
         self,
@@ -111,6 +141,7 @@ class DailyPipeline:
                 or not isinstance(source_bundle.get("schedule"), list)
                 or not isinstance(source_bundle.get("weather_by_game"), dict)
                 or not isinstance(source_bundle.get("lineups_by_game"), dict)
+                or not isinstance(source_bundle.get("odds_by_game"), dict)
                 or not isinstance(source_bundle.get("exchange_by_game"), dict)
             ):
                 raise DataContractError(
@@ -137,12 +168,13 @@ class DailyPipeline:
         observed_at = self.clock().astimezone(UTC)
         acquisition: EspnAcquisitionOutcome | None = None
         if inputs is not None:
-            from ballpark.odds import unavailable_market as legacy_unavailable_market
+            if source_bundle is not None:
+                acquisition = _runtime_espn_acquisition(source_bundle.get("odds_acquisition"))
 
             odds_by_game = {
                 int(game["game_pk"]): inputs.get("odds_by_game", {}).get(
                     str(game["game_pk"]),
-                    legacy_unavailable_market(
+                    unavailable_espn_market(
                         int(game["game_pk"]),
                         target_date,
                         "fixture omits market" if fixture else "runtime source bundle omits market",

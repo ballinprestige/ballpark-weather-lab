@@ -1,0 +1,790 @@
+{
+  "derived_from": "ESPN 2026-09-08 public scoreboard capture; selected provider total fields only",
+  "source_raw_sha256": "8ef74591579e168bd9f8a5af23e129cd7b8eee2f1f8bd7020df7937792686132",
+  "events": [
+    {
+      "id": "401816854",
+      "competitions": [
+        {
+          "startDate": "2026-09-08T22:35Z",
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "status": {
+            "type": {
+              "state": "pre",
+              "completed": false
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "home",
+              "team": {
+                "abbreviation": "BAL"
+              }
+            },
+            {
+              "homeAway": "away",
+              "team": {
+                "abbreviation": "CLE"
+              }
+            }
+          ],
+          "odds": [
+            {
+              "provider": {
+                "id": "100",
+                "name": "DraftKings"
+              },
+              "total": {
+                "displayName": "Total Runs",
+                "over": {
+                  "close": {
+                    "line": "o8.5",
+                    "odds": "-117"
+                  }
+                },
+                "under": {
+                  "close": {
+                    "line": "u8.5",
+                    "odds": "-103"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816856",
+      "competitions": [
+        {
+          "startDate": "2026-09-08T22:40Z",
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "status": {
+            "type": {
+              "state": "pre",
+              "completed": false
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "home",
+              "team": {
+                "abbreviation": "PHI"
+              }
+            },
+            {
+              "homeAway": "away",
+              "team": {
+                "abbreviation": "HOU"
+              }
+            }
+          ],
+          "odds": [
+            {
+              "provider": {
+                "id": "100",
+                "name": "DraftKings"
+              },
+              "total": {
+                "displayName": "Total Runs",
+                "over": {
+                  "close": {
+                    "line": "o8.5",
+                    "odds": "-115"
+                  }
+                },
+                "under": {
+                  "close": {
+                    "line": "u8.5",
+                    "odds": "-105"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816857",
+      "competitions": [
+        {
+          "startDate": "2026-09-08T22:40Z",
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "status": {
+            "type": {
+              "state": "pre",
+              "completed": false
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "home",
+              "team": {
+                "abbreviation": "DET"
+              }
+            },
+            {
+              "homeAway": "away",
+              "team": {
+                "abbreviation": "MIN"
+              }
+            }
+          ],
+          "odds": [
+            {
+              "provider": {
+                "id": "100",
+                "name": "DraftKings"
+              },
+              "total": {
+                "displayName": "Total Runs",
+                "over": {
+                  "close": {
+                    "line": "o8",
+                    "odds": "-119"
+                  }
+                },
+                "under": {
+                  "close": {
+                    "line": "u8",
+                    "odds": "-101"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816858",
+      "competitions": [
+        {
+          "startDate": "2026-09-08T22:40Z",
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "status": {
+            "type": {
+              "state": "pre",
+              "completed": false
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "home",
+              "team": {
+                "abbreviation": "MIA"
+              }
+            },
+            {
+              "homeAway": "away",
+              "team": {
+                "abbreviation": "NYM"
+              }
+            }
+          ],
+          "odds": [
+            {
+              "provider": {
+                "id": "100",
+                "name": "DraftKings"
+              },
+              "total": {
+                "displayName": "Total Runs",
+                "over": {
+                  "close": {
+                    "line": "o8",
+                    "odds": "-111"
+                  }
+                },
+                "under": {
+                  "close": {
+                    "line": "u8",
+                    "odds": "-109"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816853",
+      "competitions": [
+        {
+          "startDate": "2026-09-08T22:45Z",
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "status": {
+            "type": {
+              "state": "pre",
+              "completed": false
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "home",
+              "team": {
+                "abbreviation": "BOS"
+              }
+            },
+            {
+              "homeAway": "away",
+              "team": {
+                "abbreviation": "LAA"
+              }
+            }
+          ],
+          "odds": [
+            {
+              "provider": {
+                "id": "100",
+                "name": "DraftKings"
+              },
+              "total": {
+                "displayName": "Total Runs",
+                "over": {
+                  "close": {
+                    "line": "o7.5",
+                    "odds": "-117"
+                  }
+                },
+                "under": {
+                  "close": {
+                    "line": "u7.5",
+                    "odds": "-103"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816855",
+      "competitions": [
+        {
+          "startDate": "2026-09-08T23:05Z",
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "status": {
+            "type": {
+              "state": "pre",
+              "completed": false
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "home",
+              "team": {
+                "abbreviation": "NYY"
+              }
+            },
+            {
+              "homeAway": "away",
+              "team": {
+                "abbreviation": "COL"
+              }
+            }
+          ],
+          "odds": [
+            {
+              "provider": {
+                "id": "100",
+                "name": "DraftKings"
+              },
+              "total": {
+                "displayName": "Total Runs",
+                "over": {
+                  "close": {
+                    "line": "o8",
+                    "odds": "-112"
+                  }
+                },
+                "under": {
+                  "close": {
+                    "line": "u8",
+                    "odds": "-108"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816859",
+      "competitions": [
+        {
+          "startDate": "2026-09-08T23:15Z",
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "status": {
+            "type": {
+              "state": "pre",
+              "completed": false
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "home",
+              "team": {
+                "abbreviation": "ATL"
+              }
+            },
+            {
+              "homeAway": "away",
+              "team": {
+                "abbreviation": "TB"
+              }
+            }
+          ],
+          "odds": [
+            {
+              "provider": {
+                "id": "100",
+                "name": "DraftKings"
+              },
+              "total": {
+                "displayName": "Total Runs",
+                "over": {
+                  "close": {
+                    "line": "o8.5",
+                    "odds": "-103"
+                  }
+                },
+                "under": {
+                  "close": {
+                    "line": "u8.5",
+                    "odds": "-117"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816860",
+      "competitions": [
+        {
+          "startDate": "2026-09-08T23:40Z",
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "status": {
+            "type": {
+              "state": "pre",
+              "completed": false
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "home",
+              "team": {
+                "abbreviation": "KC"
+              }
+            },
+            {
+              "homeAway": "away",
+              "team": {
+                "abbreviation": "ARI"
+              }
+            }
+          ],
+          "odds": [
+            {
+              "provider": {
+                "id": "100",
+                "name": "DraftKings"
+              },
+              "total": {
+                "displayName": "Total Runs",
+                "over": {
+                  "close": {
+                    "line": "o9.5",
+                    "odds": "-106"
+                  }
+                },
+                "under": {
+                  "close": {
+                    "line": "u9.5",
+                    "odds": "-114"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816861",
+      "competitions": [
+        {
+          "startDate": "2026-09-08T23:40Z",
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "status": {
+            "type": {
+              "state": "pre",
+              "completed": false
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "home",
+              "team": {
+                "abbreviation": "MIL"
+              }
+            },
+            {
+              "homeAway": "away",
+              "team": {
+                "abbreviation": "CHC"
+              }
+            }
+          ],
+          "odds": [
+            {
+              "provider": {
+                "id": "100",
+                "name": "DraftKings"
+              },
+              "total": {
+                "displayName": "Total Runs",
+                "over": {
+                  "close": {
+                    "line": "o7.5",
+                    "odds": "-112"
+                  }
+                },
+                "under": {
+                  "close": {
+                    "line": "u7.5",
+                    "odds": "-108"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816862",
+      "competitions": [
+        {
+          "startDate": "2026-09-08T23:40Z",
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "status": {
+            "type": {
+              "state": "pre",
+              "completed": false
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "home",
+              "team": {
+                "abbreviation": "CHW"
+              }
+            },
+            {
+              "homeAway": "away",
+              "team": {
+                "abbreviation": "PIT"
+              }
+            }
+          ],
+          "odds": [
+            {
+              "provider": {
+                "id": "100",
+                "name": "DraftKings"
+              },
+              "total": {
+                "displayName": "Total Runs",
+                "over": {
+                  "close": {
+                    "line": "o8.5",
+                    "odds": "-106"
+                  }
+                },
+                "under": {
+                  "close": {
+                    "line": "u8.5",
+                    "odds": "-113"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816866",
+      "competitions": [
+        {
+          "startDate": "2026-09-09T01:40Z",
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "status": {
+            "type": {
+              "state": "pre",
+              "completed": false
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "home",
+              "team": {
+                "abbreviation": "ATH"
+              }
+            },
+            {
+              "homeAway": "away",
+              "team": {
+                "abbreviation": "TOR"
+              }
+            }
+          ],
+          "odds": [
+            {
+              "provider": {
+                "id": "100",
+                "name": "DraftKings"
+              },
+              "total": {
+                "displayName": "Total Runs",
+                "over": {
+                  "close": {
+                    "line": "o9.5",
+                    "odds": "-118"
+                  }
+                },
+                "under": {
+                  "close": {
+                    "line": "u9.5",
+                    "odds": "-102"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816867",
+      "competitions": [
+        {
+          "startDate": "2026-09-09T01:40Z",
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "status": {
+            "type": {
+              "state": "pre",
+              "completed": false
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "home",
+              "team": {
+                "abbreviation": "SD"
+              }
+            },
+            {
+              "homeAway": "away",
+              "team": {
+                "abbreviation": "WSH"
+              }
+            }
+          ],
+          "odds": [
+            {
+              "provider": {
+                "id": "100",
+                "name": "DraftKings"
+              },
+              "total": {
+                "displayName": "Total Runs",
+                "over": {
+                  "close": {
+                    "line": "o7.5",
+                    "odds": "-118"
+                  }
+                },
+                "under": {
+                  "close": {
+                    "line": "u7.5",
+                    "odds": "-102"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816864",
+      "competitions": [
+        {
+          "startDate": "2026-09-09T01:45Z",
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "status": {
+            "type": {
+              "state": "pre",
+              "completed": false
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "home",
+              "team": {
+                "abbreviation": "SF"
+              }
+            },
+            {
+              "homeAway": "away",
+              "team": {
+                "abbreviation": "STL"
+              }
+            }
+          ],
+          "odds": [
+            {
+              "provider": {
+                "id": "100",
+                "name": "DraftKings"
+              },
+              "total": {
+                "displayName": "Total Runs",
+                "over": {
+                  "close": {
+                    "line": "o7.5",
+                    "odds": "-116"
+                  }
+                },
+                "under": {
+                  "close": {
+                    "line": "u7.5",
+                    "odds": "-104"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816863",
+      "competitions": [
+        {
+          "startDate": "2026-09-09T02:10Z",
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "status": {
+            "type": {
+              "state": "pre",
+              "completed": false
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "home",
+              "team": {
+                "abbreviation": "LAD"
+              }
+            },
+            {
+              "homeAway": "away",
+              "team": {
+                "abbreviation": "CIN"
+              }
+            }
+          ],
+          "odds": [
+            {
+              "provider": {
+                "id": "100",
+                "name": "DraftKings"
+              },
+              "total": {
+                "displayName": "Total Runs",
+                "over": {
+                  "close": {
+                    "line": "o8",
+                    "odds": "-118"
+                  }
+                },
+                "under": {
+                  "close": {
+                    "line": "u8",
+                    "odds": "-102"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -8,6 +8,7 @@ import os
 import re
 import tempfile
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -405,8 +406,15 @@ class KalshiSnapshotCache:
 
 
 class KalshiExchangeProvider:
-    def __init__(self, client: HttpClient, *, cache_path: Path) -> None:
+    def __init__(
+        self,
+        client: HttpClient,
+        *,
+        cache_path: Path,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
         self.client, self.cache = client, KalshiSnapshotCache(cache_path)
+        self.clock = clock or (lambda: datetime.now(UTC))
 
     def _json(
         self, route: str, params: dict[str, Any], *, deadline_at: float | None = None
@@ -452,7 +460,7 @@ class KalshiExchangeProvider:
         except Exception as exc:
             reason = f"Kalshi public market request failed: {type(exc).__name__}"
             return {
-                int(game["game_pk"]): self.cache.get(game, datetime.now(UTC), reason)
+                int(game["game_pk"]): self.cache.get(game, self.clock(), reason)
                 or {**results[int(game["game_pk"])], "reason": reason}
                 for game in schedule
             }
@@ -468,7 +476,7 @@ class KalshiExchangeProvider:
         for game in schedule:
             if deadline_at is not None and time.monotonic() >= deadline_at:
                 reason = "Kalshi batch deadline elapsed"
-                results[int(game["game_pk"])] = self.cache.get(game, datetime.now(UTC), reason) or {
+                results[int(game["game_pk"])] = self.cache.get(game, self.clock(), reason) or {
                     **results[int(game["game_pk"])],
                     "reason": reason,
                 }
@@ -522,7 +530,7 @@ class KalshiExchangeProvider:
                     else:
                         # The public API has no quote-update timestamp.  Record completion of
                         # this paired market/orderbook retrieval, never the pipeline start time.
-                        quote["observed_at"] = _stamp(datetime.now(UTC))
+                        quote["observed_at"] = _stamp(self.clock())
                         phase, terminal = _phase(game, _utc(quote["observed_at"]))
                         if terminal:
                             quote = unavailable_market(game, _utc(quote["observed_at"]), terminal)
@@ -540,7 +548,7 @@ class KalshiExchangeProvider:
                 self.cache.accept(quote)
             except Exception as exc:
                 reason = f"Kalshi public market request failed: {type(exc).__name__}"
-                results[int(game["game_pk"])] = self.cache.get(game, datetime.now(UTC), reason) or {
+                results[int(game["game_pk"])] = self.cache.get(game, self.clock(), reason) or {
                     **results[int(game["game_pk"])],
                     "reason": reason,
                 }

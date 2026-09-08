@@ -6,6 +6,7 @@ restart, no-slate, and calendar testing without waiting for a future slate.
 
 from __future__ import annotations
 
+import base64
 import gzip
 import hashlib
 import json
@@ -24,6 +25,14 @@ from zoneinfo import ZoneInfo
 
 from ballpark.contract import validate_payload
 from ballpark.errors import DataContractError
+from ballpark.espn_odds import (
+    EspnAcquisitionOutcome,
+    EspnOddsProvider,
+    normalize_espn_scoreboard_outcome,
+)
+from ballpark.espn_odds import (
+    unavailable_market as unavailable_espn_market,
+)
 from ballpark.http import HttpClient
 from ballpark.kalshi import KalshiExchangeProvider
 from ballpark.lineups import fetch_lineup
@@ -42,6 +51,8 @@ _DEFAULT_MIN_FREE_BYTES = 64 * 1024 * 1024
 _DEFAULT_MAX_OBJECT_BYTES = 32 * 1024 * 1024
 _DEFAULT_CLEANUP_MAX_BYTES = 64 * 1024 * 1024
 _DEFAULT_CLEANUP_MAX_SECONDS = 1
+_SPORTSBOOK_RECEIPT_VERSION = 1
+_MAX_SPORTSBOOK_RAW_BYTES = 5 * 1024 * 1024
 
 
 def _environment_limit(name: str, default: int) -> int:
@@ -75,6 +86,14 @@ def _safe_child(root: Path, name: str) -> Path:
 
 def _catalog_stamp(value: datetime) -> str:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _context_now(context: JobContext) -> datetime:
+    clock = context.clock or (lambda: datetime.now(UTC))
+    value = clock()
+    if value.tzinfo is None:
+        raise RuntimeError("runtime context clock must include an offset")
+    return value.astimezone(UTC)
 
 
 def _is_reparse(path: Path) -> bool:
@@ -128,10 +147,11 @@ def _durable_object_write(
     *,
     token: str,
     catalog: PublicationCatalog,
+    created_at: str,
 ) -> None:
     """Write immutable bytes only after their temporary ownership is recorded."""
     temporary = objects / f".{target.name}.{token}.{uuid.uuid4().hex}.tmp"
-    catalog.register_object_temp(token, temporary.name, _stamp())
+    catalog.register_object_temp(token, temporary.name, created_at)
     try:
         descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "wb") as handle:
@@ -150,7 +170,7 @@ def _registered_pipeline_candidate(
     context: JobContext, candidate: Path, publication_date: date
 ) -> None:
     catalog = PublicationCatalog(context.publication_dir)
-    created_at = _stamp()
+    created_at = _catalog_stamp(_context_now(context))
     catalog.register_candidate(
         context.token, candidate, created_at, _catalog_stamp(context.deadline_at)
     )
@@ -339,12 +359,15 @@ def _stamp() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-def _deadline(context: JobContext) -> float:
-    return time.monotonic() + max(0, (context.deadline_at - datetime.now(UTC)).total_seconds())
+def _deadline(context: JobContext, clock: Callable[[], datetime] | None = None) -> float:
+    """Translate the business-clock deadline once into the HTTP monotonic clock."""
+    now = (clock or (lambda: datetime.now(UTC)))().astimezone(UTC)
+    return time.monotonic() + max(0, (context.deadline_at - now).total_seconds())
 
 
-def _require_time(context: JobContext) -> None:
-    if datetime.now(UTC) >= context.deadline_at:
+def _require_time(context: JobContext, clock: Callable[[], datetime] | None = None) -> None:
+    now = (clock or (lambda: datetime.now(UTC)))().astimezone(UTC)
+    if now >= context.deadline_at:
         raise TimeoutError(f"{context.name} attempt deadline elapsed")
 
 
@@ -352,7 +375,7 @@ def _market_check_complete(quotes: dict[int, dict[str, Any]]) -> bool:
     """Recognize explicit no-contract evidence without treating provider failure as fresh."""
     for quote in quotes.values():
         state, reason = quote.get("state"), str(quote.get("reason") or "")
-        if state == "observed_unknown_age":
+        if state == "observed_unknown_age" and not quote.get("failure_reason"):
             continue
         if state != "unavailable":
             return False
@@ -362,6 +385,350 @@ def _market_check_complete(quotes: dict[int, dict[str, Any]]) -> bool:
             continue
         return False
     return True
+
+
+def _source_stamp(value: datetime) -> str:
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _source_time(value: object, message: str) -> datetime:
+    if not isinstance(value, str):
+        raise RuntimeError(message)
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise RuntimeError(message) from exc
+    if parsed.tzinfo is None:
+        raise RuntimeError(message)
+    return parsed.astimezone(UTC)
+
+
+def _source_raw(value: object, digest: object, message: str) -> bytes:
+    if not isinstance(value, str) or not _is_digest(digest):
+        raise RuntimeError(message)
+    try:
+        raw = base64.b64decode(value.encode("ascii"), validate=True)
+    except (UnicodeError, ValueError) as exc:
+        raise RuntimeError(message) from exc
+    if not raw or len(raw) > _MAX_SPORTSBOOK_RAW_BYTES:
+        raise RuntimeError(message)
+    if hashlib.sha256(raw).hexdigest() != digest:
+        raise RuntimeError(message)
+    return raw
+
+
+def _sportsbook_bindings(
+    schedule: list[dict[str, Any]], target_date: date, game_ids: set[int]
+) -> dict[str, list[str]]:
+    bindings: dict[str, list[str]] = {}
+    for game in schedule:
+        game_pk = int(game["game_pk"])
+        if game_pk not in game_ids:
+            continue
+        binding = EspnOddsProvider._binding(game, target_date)
+        if binding is None:
+            raise RuntimeError("official schedule cannot bind sportsbook receipt")
+        bindings[str(game_pk)] = list(binding)
+    if len(bindings) != len(game_ids):
+        raise RuntimeError("sportsbook receipt does not bind every observed game")
+    return bindings
+
+
+def _decoded_sportsbook_outcome(
+    *,
+    raw: bytes,
+    raw_sha256: str,
+    target_date: date,
+    schedule: list[dict[str, Any]],
+    observed_at: datetime,
+    comparison_now: datetime,
+) -> EspnAcquisitionOutcome:
+    try:
+        document = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("sportsbook receipt raw response is invalid") from exc
+    outcome = normalize_espn_scoreboard_outcome(
+        document,
+        target_date=target_date,
+        schedule=schedule,
+        observed_at=observed_at,
+        raw_sha256=raw_sha256,
+        comparison_now=comparison_now,
+    )
+    if outcome.status == "schema_error":
+        raise RuntimeError("sportsbook receipt response no longer validates")
+    return outcome
+
+
+def _verified_last_good_sportsbook(
+    value: object,
+    *,
+    target_date: date,
+    schedule: list[dict[str, Any]],
+    comparison_now: datetime,
+) -> dict[int, dict[str, Any]] | None:
+    """Rebuild retained markets from raw bytes and their original official binding."""
+    if not isinstance(value, dict):
+        return None
+    try:
+        captured_at = _source_time(
+            value.get("captured_at"), "sportsbook receipt capture is invalid"
+        )
+        raw_sha256 = value["raw_sha256"]
+        raw = _source_raw(
+            value.get("raw_response_b64"), raw_sha256, "sportsbook receipt raw is invalid"
+        )
+        if captured_at > comparison_now + timedelta(minutes=5):
+            return None
+        outcome = _decoded_sportsbook_outcome(
+            raw=raw,
+            raw_sha256=raw_sha256,
+            target_date=target_date,
+            schedule=schedule,
+            observed_at=captured_at,
+            comparison_now=comparison_now,
+        )
+        stored = value.get("markets")
+        if not isinstance(stored, dict) or not isinstance(value.get("bindings"), dict):
+            return None
+        expected = {
+            str(game_pk): market
+            for game_pk, market in outcome.markets.items()
+            if market.get("state") == "observed_unknown_age"
+        }
+        if not expected or canonical_json_bytes(stored) != canonical_json_bytes(expected):
+            return None
+        bindings = _sportsbook_bindings(schedule, target_date, {int(key) for key in expected})
+        if canonical_json_bytes(value["bindings"]) != canonical_json_bytes(bindings):
+            return None
+        return {int(key): dict(market) for key, market in expected.items()}
+    except (KeyError, RuntimeError, TypeError, ValueError):
+        return None
+
+
+def _sportsbook_receipt(
+    outcome: EspnAcquisitionOutcome,
+    *,
+    target_date: date,
+    schedule: list[dict[str, Any]],
+    attempted_at: datetime,
+    prior: object,
+) -> dict[str, Any]:
+    """Produce one private, restart-verifiable ESPN acquisition receipt."""
+    attempted_at = attempted_at.astimezone(UTC)
+    prior_good = (
+        _verified_last_good_sportsbook(
+            prior.get("last_good") if isinstance(prior, dict) else None,
+            target_date=target_date,
+            schedule=schedule,
+            comparison_now=attempted_at,
+        )
+        if prior
+        else None
+    )
+    raw = outcome.raw_bytes
+    raw_sha256 = outcome.raw_sha256
+    raw_b64: str | None = None
+    if raw is not None:
+        if len(raw) > _MAX_SPORTSBOOK_RAW_BYTES or not _is_digest(raw_sha256):
+            raise RuntimeError("sportsbook provider returned an invalid raw receipt")
+        if hashlib.sha256(raw).hexdigest() != raw_sha256:
+            raise RuntimeError("sportsbook provider raw receipt digest is invalid")
+        raw_b64 = base64.b64encode(raw).decode("ascii")
+    latest: dict[str, Any] = {
+        "attempted_at": _source_stamp(attempted_at),
+        "status": outcome.status,
+        "source_error": outcome.source_error,
+        "raw_sha256": raw_sha256,
+        "raw_response_b64": raw_b64,
+    }
+    if outcome.status in {"observed", "no_quote"}:
+        if raw is None or not _is_digest(raw_sha256):
+            raise RuntimeError("successful sportsbook acquisition lacks raw evidence")
+        expected = _decoded_sportsbook_outcome(
+            raw=raw,
+            raw_sha256=raw_sha256,
+            target_date=target_date,
+            schedule=schedule,
+            observed_at=attempted_at,
+            comparison_now=attempted_at,
+        )
+        if expected.status != outcome.status or canonical_json_bytes(
+            expected.markets
+        ) != canonical_json_bytes(outcome.markets):
+            raise RuntimeError("sportsbook provider outcome does not bind its raw response")
+        latest["markets"] = {str(key): market for key, market in outcome.markets.items()}
+        latest["bindings"] = _sportsbook_bindings(
+            schedule,
+            target_date,
+            {
+                int(key)
+                for key, market in latest["markets"].items()
+                if market.get("state") == "observed_unknown_age"
+            },
+        )
+        observed = {
+            str(key): market
+            for key, market in outcome.markets.items()
+            if market.get("state") == "observed_unknown_age"
+        }
+        if observed:
+            last_good: dict[str, Any] | None = {
+                "captured_at": _source_stamp(attempted_at),
+                "raw_sha256": raw_sha256,
+                "raw_response_b64": raw_b64,
+                "bindings": _sportsbook_bindings(
+                    schedule, target_date, {int(key) for key in observed}
+                ),
+                "markets": observed,
+            }
+        else:
+            last_good = (
+                prior.get("last_good")
+                if prior_good is not None and isinstance(prior, dict)
+                else None
+            )
+        markets = {int(key): dict(market) for key, market in latest["markets"].items()}
+        retained = False
+    else:
+        retained = prior_good is not None
+        failure = f"ESPN scoreboard update failed: {outcome.source_error or outcome.status}"
+        markets = {
+            int(game["game_pk"]): (
+                {
+                    **prior_good[int(game["game_pk"])],
+                    "failure_reason": failure,
+                    "reason": (
+                        "source quote-update time is not supplied; retained after failure: "
+                        f"{failure}"
+                    ),
+                }
+                if prior_good is not None and int(game["game_pk"]) in prior_good
+                else {
+                    **outcome.markets[int(game["game_pk"])],
+                    "failure_reason": failure,
+                }
+            )
+            for game in schedule
+        }
+        latest["markets"] = {str(key): market for key, market in markets.items()}
+        latest["bindings"] = {}
+        last_good = prior.get("last_good") if retained and isinstance(prior, dict) else None
+    return {
+        "schema_version": _SPORTSBOOK_RECEIPT_VERSION,
+        "date": target_date.isoformat(),
+        "latest": latest,
+        "last_good": last_good,
+        "markets": {str(key): market for key, market in markets.items()},
+        "acquisition": {
+            "schema_version": _SPORTSBOOK_RECEIPT_VERSION,
+            "status": outcome.status,
+            "source_error": outcome.source_error,
+            "raw_sha256": raw_sha256,
+            "attempted_at": _source_stamp(attempted_at),
+            "retained": retained,
+        },
+    }
+
+
+def _load_sportsbook_receipt(
+    cache_dir: Path,
+    target_date: date,
+    schedule: list[dict[str, Any]],
+    *,
+    comparison_now: datetime,
+) -> dict[str, Any]:
+    receipt = _load_snapshot(cache_dir, "sportsbook", target_date)
+    if receipt.get("schema_version") != _SPORTSBOOK_RECEIPT_VERSION:
+        raise RuntimeError("sportsbook receipt version is invalid")
+    latest = receipt.get("latest")
+    acquisition = receipt.get("acquisition")
+    markets = receipt.get("markets")
+    if (
+        not isinstance(latest, dict)
+        or not isinstance(acquisition, dict)
+        or not isinstance(markets, dict)
+    ):
+        raise RuntimeError("sportsbook receipt is malformed")
+    if latest.get("status") != acquisition.get("status"):
+        raise RuntimeError("sportsbook receipt outcome is inconsistent")
+    if latest.get("raw_sha256") != acquisition.get("raw_sha256"):
+        raise RuntimeError("sportsbook receipt raw digest is inconsistent")
+    if latest.get("attempted_at") != acquisition.get("attempted_at"):
+        raise RuntimeError("sportsbook receipt attempt is inconsistent")
+    status = acquisition.get("status")
+    if status not in {"observed", "no_quote", "schema_error", "transport_error"}:
+        raise RuntimeError("sportsbook receipt acquisition state is invalid")
+    if not isinstance(acquisition.get("source_error"), (str, type(None))):
+        raise RuntimeError("sportsbook receipt acquisition error is invalid")
+    if not isinstance(acquisition.get("retained"), bool):
+        raise RuntimeError("sportsbook receipt retention is invalid")
+    attempted_at = _source_time(
+        acquisition.get("attempted_at"), "sportsbook receipt attempt is invalid"
+    )
+    if attempted_at > comparison_now + timedelta(minutes=5):
+        raise RuntimeError("sportsbook receipt attempt is in the future")
+    raw_sha256 = latest.get("raw_sha256")
+    raw_b64 = latest.get("raw_response_b64")
+    if (raw_b64 is None) != (raw_sha256 is None):
+        raise RuntimeError("sportsbook receipt raw evidence is incomplete")
+    if raw_b64 is not None:
+        _source_raw(raw_b64, raw_sha256, "sportsbook receipt raw is invalid")
+    if status in {"observed", "no_quote"}:
+        raw = _source_raw(raw_b64, raw_sha256, "sportsbook receipt raw is invalid")
+        normalized = _decoded_sportsbook_outcome(
+            raw=raw,
+            raw_sha256=raw_sha256,
+            target_date=target_date,
+            schedule=schedule,
+            observed_at=attempted_at,
+            comparison_now=comparison_now,
+        )
+        expected = {str(key): market for key, market in normalized.markets.items()}
+        if normalized.status != status or canonical_json_bytes(markets) != canonical_json_bytes(
+            expected
+        ):
+            raise RuntimeError("sportsbook receipt markets do not bind raw evidence")
+        expected_bindings = _sportsbook_bindings(
+            schedule,
+            target_date,
+            {
+                key
+                for key, market in normalized.markets.items()
+                if market.get("state") == "observed_unknown_age"
+            },
+        )
+        if canonical_json_bytes(latest.get("bindings")) != canonical_json_bytes(expected_bindings):
+            raise RuntimeError("sportsbook receipt official binding is invalid")
+    else:
+        retained = _verified_last_good_sportsbook(
+            receipt.get("last_good"),
+            target_date=target_date,
+            schedule=schedule,
+            comparison_now=comparison_now,
+        )
+        if bool(retained) != acquisition["retained"]:
+            raise RuntimeError("sportsbook receipt retention does not validate")
+        expected_keys = {str(int(game["game_pk"])) for game in schedule}
+        if set(markets) != expected_keys:
+            raise RuntimeError("sportsbook failure receipt does not cover the schedule")
+        for key, market in markets.items():
+            if not isinstance(market, dict) or not isinstance(market.get("failure_reason"), str):
+                raise RuntimeError("sportsbook failure is not visible on its market")
+            if retained is not None and int(key) in retained:
+                for field in (
+                    "game_pk",
+                    "slate_date",
+                    "line",
+                    "over_price",
+                    "under_price",
+                    "observed_at",
+                    "raw_sha256",
+                    "snapshot_id",
+                ):
+                    if market.get(field) != retained[int(key)].get(field):
+                        raise RuntimeError("retained sportsbook market was altered")
+    return receipt
 
 
 def _snapshot(context: JobContext, name: str, value: Any) -> None:
@@ -416,12 +783,56 @@ def _validate_payload(payload: object) -> dict[str, Any]:
     if parsed.tzinfo is None:
         raise RuntimeError("staged payload generated_at is invalid")
     try:
-        validate_payload(
-            payload, ProjectPaths.discover().schemas / "slate.schema.json"
-        )
+        validate_payload(payload, ProjectPaths.discover().schemas / "slate.schema.json")
     except DataContractError as exc:
         raise RuntimeError(f"staged payload schema is invalid: {exc}") from exc
     return payload
+
+
+def _durable_json_write(path: Path, value: dict[str, Any]) -> None:
+    """Persist small operation state with the same file and directory durability as CAS bytes."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(canonical_json_bytes(value))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        _fsync_directory(path.parent)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _record_maintenance_operation(
+    state_dir: Path,
+    *,
+    observed_at: datetime,
+    result: dict[str, Any] | None,
+    error: Exception | None,
+) -> dict[str, Any]:
+    path = state_dir / "operations.json"
+    prior: list[dict[str, Any]] = []
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(value, dict) and isinstance(value.get("maintenance_history"), list):
+            prior = [item for item in value["maintenance_history"] if isinstance(item, dict)][-7:]
+    except (OSError, json.JSONDecodeError):
+        pass
+    entry: dict[str, Any] = {"observed_at": _source_stamp(observed_at)}
+    if error is None:
+        entry.update({"state": "succeeded", "result": result or {}})
+    else:
+        entry.update({"state": "failed", "error": f"{type(error).__name__}: {error}"})
+    document = {
+        "schema_version": 1,
+        "maintenance": entry,
+        "maintenance_history": [*prior, entry],
+    }
+    _durable_json_write(path, document)
+    return entry
 
 
 def _accept_stage_impl(context: JobContext) -> None:
@@ -430,6 +841,7 @@ def _accept_stage_impl(context: JobContext) -> None:
     maximum = _environment_limit("BALLPARK_MAX_OBJECT_BYTES", _DEFAULT_MAX_OBJECT_BYTES)
     minimum_free = _environment_limit("BALLPARK_MIN_FREE_BYTES", _DEFAULT_MIN_FREE_BYTES)
     publication = context.publication_dir
+    observed_at = _catalog_stamp(_context_now(context))
     catalog = PublicationCatalog(publication)
     staged = _safe_child(publication / ".staged", context.token)
     if not staged.is_dir():
@@ -437,9 +849,9 @@ def _accept_stage_impl(context: JobContext) -> None:
     # Normal publishers register before stage writes. This idempotent fallback
     # keeps the supported manual/import acceptance entry point recoverable.
     catalog.register_candidate(
-        context.token, staged, _stamp(), _catalog_stamp(context.deadline_at)
+        context.token, staged, observed_at, _catalog_stamp(context.deadline_at)
     )
-    catalog.begin_accept(context.token)
+    catalog.begin_accept(context.token, now=observed_at)
     data_path, release_path, index_path = (
         staged / "data" / "data.json",
         staged / "data" / "release.json",
@@ -478,7 +890,7 @@ def _accept_stage_impl(context: JobContext) -> None:
         target = _safe_child(objects, f"{object_digest}.json.gz")
         # A reused object still gains a reference from this candidate. The
         # original writer is never treated as the only owner of its digest.
-        catalog.register_object(object_digest, context.token, target.name, _stamp())
+        catalog.register_object(object_digest, context.token, target.name, observed_at)
         if target.exists():
             if _read_object(objects, object_digest, maximum) != raw:
                 raise RuntimeError("immutable object corruption")
@@ -491,6 +903,7 @@ def _accept_stage_impl(context: JobContext) -> None:
             gzip.compress(raw, mtime=0),
             token=context.token,
             catalog=catalog,
+            created_at=observed_at,
         )
         if _read_object(objects, object_digest, maximum) != raw:
             raise RuntimeError("immutable object write verification failed")
@@ -538,14 +951,15 @@ def _accept_stage_impl(context: JobContext) -> None:
         if canonical_json_bytes(existing) != canonical_json_bytes(manifest):
             raise RuntimeError("publication token conflicts with accepted content")
         catalog.set_candidate_manifest(context.token, manifest)
-        catalog.commit(context.token, manifest, digests, _stamp())
+        catalog.commit(context.token, manifest, digests, observed_at, now=observed_at)
         return
-    _require_time(context)
+    observed_at = _catalog_stamp(_context_now(context))
+    _require_time(context, lambda: _context_now(context))
     if shutil.disk_usage(publication).free < minimum_free:
         raise RuntimeError("publication disk reserve fell below minimum")
     catalog.set_candidate_manifest(context.token, manifest)
     try:
-        catalog.commit(context.token, manifest, digests, _stamp())
+        catalog.commit(context.token, manifest, digests, observed_at, now=observed_at)
     except Exception:
         # A durable catalog commit is success even when a later local action
         # raises. The stored candidate manifest proves this is the same content.
@@ -624,7 +1038,11 @@ def _accept_stage(context: JobContext) -> None:
         catalog = PublicationCatalog(context.publication_dir)
         if catalog.candidate_matches_accepted(context.token):
             return
-        catalog.fail_candidate(context.token, f"{type(exc).__name__}: {exc}", _stamp())
+        catalog.fail_candidate(
+            context.token,
+            f"{type(exc).__name__}: {exc}",
+            _catalog_stamp(_context_now(context)),
+        )
         raise
 
 
@@ -727,9 +1145,29 @@ def run_live_worker(
     cache_dir: Path,
     publication_dir: Path,
     once: bool,
+    clock: Callable[[], datetime] | None = None,
+    client_factory: Callable[[], HttpClient] | None = None,
+    sportsbook_provider_factory: Callable[[HttpClient], EspnOddsProvider] | None = None,
+    exchange_provider_factory: (
+        Callable[[HttpClient, Path, Callable[[], datetime]], KalshiExchangeProvider] | None
+    ) = None,
 ) -> dict[str, Any]:
-    """Run authorized MLB/Open-Meteo/Kalshi reads independently and assemble receipts."""
+    """Run independently scheduled MLB, weather, ESPN and Kalshi source jobs."""
     stopping = False
+    business_clock = clock or (lambda: datetime.now(UTC))
+    make_client = client_factory or HttpClient
+    make_sportsbook = sportsbook_provider_factory or (lambda client: EspnOddsProvider(client))
+    make_exchange = exchange_provider_factory or (
+        lambda client, path, source_clock: KalshiExchangeProvider(
+            client, cache_path=path, clock=source_clock
+        )
+    )
+
+    def business_now() -> datetime:
+        current = business_clock()
+        if current.tzinfo is None:
+            raise RuntimeError("live worker business clock must include an offset")
+        return current.astimezone(UTC)
 
     def stop(_signal: int, _frame: object) -> None:
         nonlocal stopping
@@ -740,8 +1178,8 @@ def run_live_worker(
     last: dict[str, Any] = {"state": "not_run"}
     try:
         while not stopping:
-            target_date = datetime.now(ZoneInfo("America/New_York")).date()
-            client = HttpClient()
+            target_date = business_now().astimezone(ZoneInfo("America/New_York")).date()
+            client = make_client()
             receipt: dict[str, Any] = {"date": target_date.isoformat()}
 
             def schedule(
@@ -752,11 +1190,13 @@ def run_live_worker(
             ) -> None:
                 receipt["schedule_due"] = True
                 try:
-                    value = fetch_schedule(target_date, client, deadline_at=_deadline(context))
+                    value = fetch_schedule(
+                        target_date, client, deadline_at=_deadline(context, business_now)
+                    )
                 except Exception:
                     receipt["schedule_failed"] = True
                     raise
-                _require_time(context)
+                _require_time(context, business_now)
                 _snapshot(context, "schedule", {"date": target_date.isoformat(), "games": value})
                 receipt["schedule"] = value
                 receipt["schedule_succeeded"] = True
@@ -773,11 +1213,14 @@ def run_live_worker(
                     raise RuntimeError("schedule acquisition is unavailable for this pass")
                 value = {
                     str(game["game_pk"]): fetch_game_weather(
-                        game, VENUES[game["home_team"]], client, deadline_at=_deadline(context)
+                        game,
+                        VENUES[game["home_team"]],
+                        client,
+                        deadline_at=_deadline(context, business_now),
                     )
                     for game in schedule_value
                 }
-                _require_time(context)
+                _require_time(context, business_now)
                 _snapshot(
                     context,
                     "weather",
@@ -804,11 +1247,11 @@ def run_live_worker(
                     raise RuntimeError("schedule acquisition is unavailable for lineups")
                 value = {
                     str(game["game_pk"]): fetch_lineup(
-                        int(game["game_pk"]), client, deadline_at=_deadline(context)
+                        int(game["game_pk"]), client, deadline_at=_deadline(context, business_now)
                     )
                     for game in schedule_value
                 }
-                _require_time(context)
+                _require_time(context, business_now)
                 _snapshot(context, "lineups", {"date": target_date.isoformat(), "games": value})
                 receipt["lineups_succeeded"] = True
 
@@ -823,26 +1266,87 @@ def run_live_worker(
                 schedule_value = _load_snapshot(cache_dir, "schedule", target_date).get("games")
                 if not isinstance(schedule_value, list):
                     raise RuntimeError("schedule acquisition is unavailable for this pass")
-                quotes = KalshiExchangeProvider(
-                    client, cache_path=cache_dir / "kalshi-exchange.json"
+                quotes = make_exchange(
+                    client, cache_dir / "kalshi-exchange.json", business_now
                 ).fetch(
                     schedule_value,
-                    observed_at=datetime.now(UTC),
-                    deadline_at=_deadline(context),
+                    observed_at=business_now(),
+                    deadline_at=_deadline(context, business_now),
                 )
-                if schedule_value and not _market_check_complete(quotes):
-                    raise RuntimeError("Kalshi provider failed without usable market evidence")
-                _require_time(context)
+                _require_time(context, business_now)
                 _snapshot(context, "markets", {"date": target_date.isoformat(), "exchange": quotes})
                 receipt["markets"] = quotes
+                if schedule_value and not _market_check_complete(quotes):
+                    raise RuntimeError("Kalshi provider failed without usable market evidence")
                 receipt["markets_succeeded"] = True
+
+            def sportsbook(
+                context: JobContext,
+                target_date: date = target_date,
+                client: HttpClient = client,
+                receipt: dict[str, Any] = receipt,
+            ) -> None:
+                receipt["sportsbook_due"] = True
+                schedule_value = _load_snapshot(cache_dir, "schedule", target_date).get("games")
+                if not isinstance(schedule_value, list):
+                    raise RuntimeError("schedule acquisition is unavailable for sportsbook")
+                attempted_at = business_now()
+                outcome = make_sportsbook(client).acquire(
+                    target_date,
+                    schedule_value,
+                    observed_at=attempted_at,
+                    deadline_at=_deadline(context, business_now),
+                    comparison_now=attempted_at,
+                )
+                deadline_elapsed = business_now() >= context.deadline_at
+                if deadline_elapsed:
+                    # A response arriving after its job budget cannot become a fresh
+                    # quote. Retain its raw receipt as the latest failed attempt, then
+                    # allow only independently verified prior evidence to reappear.
+                    outcome = EspnAcquisitionOutcome(
+                        "transport_error",
+                        {
+                            int(game["game_pk"]): unavailable_espn_market(
+                                int(game["game_pk"]),
+                                target_date,
+                                "ESPN source job deadline elapsed",
+                                observed_at=attempted_at,
+                            )
+                            for game in schedule_value
+                        },
+                        "source_job_deadline_elapsed",
+                        outcome.raw_sha256,
+                        outcome.raw_bytes,
+                    )
+                try:
+                    prior = _load_snapshot(cache_dir, "sportsbook", target_date)
+                except RuntimeError:
+                    prior = None
+                value = _sportsbook_receipt(
+                    outcome,
+                    target_date=target_date,
+                    schedule=schedule_value,
+                    attempted_at=attempted_at,
+                    prior=prior,
+                )
+                # Source errors and elapsed deadlines are durable outcomes. Writing
+                # the receipt before raising keeps a restart from presenting the prior
+                # success as this pass's source state.
+                _snapshot(context, "sportsbook", value)
+                receipt["sportsbook"] = value
+                if deadline_elapsed:
+                    raise TimeoutError("sportsbook attempt deadline elapsed")
+                if outcome.status in {"schema_error", "transport_error"}:
+                    error = outcome.source_error or outcome.status
+                    raise RuntimeError(f"ESPN sportsbook acquisition failed: {error}")
+                receipt["sportsbook_succeeded"] = True
 
             def publish(
                 context: JobContext,
                 target_date: date = target_date,
                 receipt: dict[str, Any] = receipt,
             ) -> None:
-                for name in ("schedule", "weather", "lineups", "markets"):
+                for name in ("schedule", "weather", "lineups"):
                     if receipt.get(f"{name}_due") and not receipt.get(f"{name}_succeeded"):
                         raise RuntimeError(f"required {name} refresh failed in this pass")
                 schedule_value = _load_snapshot(cache_dir, "schedule", target_date).get("games")
@@ -850,11 +1354,21 @@ def run_live_worker(
                 weather_value = weather_receipt.get("games")
                 lineup_value = _load_snapshot(cache_dir, "lineups", target_date).get("games")
                 market_value = _load_snapshot(cache_dir, "markets", target_date).get("exchange")
+                sportsbook_receipt = _load_sportsbook_receipt(
+                    cache_dir,
+                    target_date,
+                    schedule_value if isinstance(schedule_value, list) else [],
+                    comparison_now=business_now(),
+                )
+                sportsbook_value = sportsbook_receipt.get("markets")
+                sportsbook_acquisition = sportsbook_receipt.get("acquisition")
                 if (
                     not isinstance(schedule_value, list)
                     or not isinstance(weather_value, dict)
                     or not isinstance(lineup_value, dict)
                     or not isinstance(market_value, dict)
+                    or not isinstance(sportsbook_value, dict)
+                    or not isinstance(sportsbook_acquisition, dict)
                 ):
                     raise RuntimeError("dated source receipts are incomplete")
                 source_bundle = {
@@ -862,17 +1376,18 @@ def run_live_worker(
                     "schedule": schedule_value,
                     "weather_by_game": weather_value,
                     "lineups_by_game": lineup_value,
-                    "odds_by_game": {},
+                    "odds_by_game": sportsbook_value,
+                    "odds_acquisition": sportsbook_acquisition,
                     "exchange_by_game": market_value,
                     "model_source_receipts": weather_receipt.get("model_source_receipts", {}),
                 }
                 candidate = context.publication_dir / ".staged" / context.token
                 _registered_pipeline_candidate(context, candidate, target_date)
-                DailyPipeline(paths).build_and_publish(
+                DailyPipeline(paths, clock=business_now).build_and_publish(
                     target_date,
                     candidate,
                     source_bundle=source_bundle,
-                    generated_at=_stamp(),
+                    generated_at=_source_stamp(business_now()),
                 )
 
             worker = RuntimeWorker(
@@ -881,6 +1396,7 @@ def run_live_worker(
                     JobSpec("weather", 900, 60),
                     JobSpec("lineups", 300, 60),
                     JobSpec("markets", 60, 120),
+                    JobSpec("sportsbook", 300, 30),
                     JobSpec("publish", 60, 30),
                 ],
                 {
@@ -888,6 +1404,7 @@ def run_live_worker(
                     "weather": weather,
                     "lineups": lineups,
                     "markets": markets,
+                    "sportsbook": sportsbook,
                     "publish": publish,
                 },
                 state_dir=state_dir,
@@ -895,6 +1412,7 @@ def run_live_worker(
                 publication_dir=publication_dir,
                 acceptors={"publish": _accept_stage},
                 acceptance_reconcilers={"publish": _catalog_acceptance_reconciled},
+                clock=business_now,
             )
             try:
                 try:
@@ -907,9 +1425,27 @@ def run_live_worker(
             finally:
                 client.close()
             try:
-                maintain_publication_store(publication_dir)
-            except (OSError, RuntimeError):
-                pass
+                maintenance_result = maintain_publication_store(publication_dir, now=business_now())
+                maintenance_error: Exception | None = None
+            except (OSError, RuntimeError) as exc:
+                maintenance_result = None
+                maintenance_error = exc
+            try:
+                maintenance = _record_maintenance_operation(
+                    state_dir,
+                    observed_at=business_now(),
+                    result=maintenance_result,
+                    error=maintenance_error,
+                )
+            except (OSError, RuntimeError) as exc:
+                # An operations-volume failure must not convert a source outage
+                # into a worker restart loop. The live result remains observable.
+                maintenance = {
+                    "observed_at": _source_stamp(business_now()),
+                    "state": "failed",
+                    "error": f"operations receipt unavailable: {type(exc).__name__}: {exc}",
+                }
+            last["maintenance"] = maintenance
             if once:
                 return last
             time.sleep(1)

@@ -438,7 +438,10 @@ class PublicationCatalog:
         manifest: dict[str, Any],
         digests: set[str],
         accepted_at: str,
+        *,
+        now: str | None = None,
     ) -> bool:
+        observed = now or _stamp()
         encoded = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -469,7 +472,7 @@ class PublicationCatalog:
                         raise RuntimeError("publication token conflicts with candidate content")
                     # Recheck after BEGIN IMMEDIATE: waiting for maintenance must
                     # not permit an expired candidate to resurrect.
-                    if str(deadline_at) <= _stamp():
+                    if str(deadline_at) <= observed:
                         db.execute(
                             "UPDATE pending_candidates SET state='failed',error=? WHERE token=?",
                             ("publication candidate deadline elapsed before commit", token),

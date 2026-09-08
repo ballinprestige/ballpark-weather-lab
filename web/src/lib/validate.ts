@@ -234,6 +234,7 @@ function nullableNumberAt(value: unknown, path: string, minimum: number, maximum
 function validateOdds(value: unknown, path: string, gamePk: number, gameDate: string): GameOdds {
   if (value === undefined) return {
     game_pk: gamePk, slate_date: gameDate, state: 'unavailable', reason: 'This legacy release predates quoted full-game totals.',
+    failure_reason: null,
     provider_event_id: null, sport: 'MLB', market_type: 'total', period: 'full_game', eligibility: 'pregame',
     sportsbook_id: null, sportsbook_name: null, provider: 'Not recorded', source_url: null, line: null, over_price: null, under_price: null,
     source_updated_at: null, observed_at: null, raw_sha256: null, snapshot_id: null, source_schema_version: 'legacy-without-markets'
@@ -242,7 +243,7 @@ function validateOdds(value: unknown, path: string, gamePk: number, gameDate: st
   const state = enumAt(row.state, `${path}.state`, ['current', 'stale', 'observed_unknown_age', 'unavailable']);
   const market: GameOdds = {
     game_pk: integerAt(row.game_pk, `${path}.game_pk`, 1), slate_date: isoDateAt(row.slate_date, `${path}.slate_date`), state,
-    reason: nullableStringAt(row.reason, `${path}.reason`), provider_event_id: nullableStringAt(row.provider_event_id, `${path}.provider_event_id`),
+    reason: nullableStringAt(row.reason, `${path}.reason`), failure_reason: nullableStringAt(row.failure_reason ?? null, `${path}.failure_reason`), provider_event_id: nullableStringAt(row.provider_event_id, `${path}.provider_event_id`),
     sport: enumAt(row.sport, `${path}.sport`, ['MLB']), market_type: enumAt(row.market_type, `${path}.market_type`, ['total']),
     period: enumAt(row.period, `${path}.period`, ['full_game']), eligibility: enumAt(row.eligibility, `${path}.eligibility`, ['pregame', 'live', 'final']),
     sportsbook_id: nullableStringAt(row.sportsbook_id, `${path}.sportsbook_id`), sportsbook_name: nullableStringAt(row.sportsbook_name, `${path}.sportsbook_name`),

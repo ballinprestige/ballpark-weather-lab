@@ -66,6 +66,55 @@ For a deterministic, network-free demonstration:
 Successful operation leaves the complete static build in `web/dist`. The command itself checks
 that the distribution's payload bytes match `web/dist/data/release.json`.
 
+## Runtime source service
+
+The runtime service is a separate local publication path. It uses the keyless ESPN MLB scoreboard
+as the canonical DraftKings full-game-total source. The `sportsbook` job runs every five minutes;
+each attempt makes one scoreboard bulk GET for the selected New York slate, with a 30-second job
+budget. Its HTTP request has the remaining absolute monotonic deadline, a 3-second connect cap,
+an 8-second read cap, one deadline-bound attempt with redirects rejected, and a 5 MiB response limit. No API key is read.
+
+Kalshi is a supplemental, independent lane. Its one-minute refresh cannot replace sportsbook
+prices or hide a sportsbook failure; a Kalshi failure records its own retained-quote failure
+reason. Schedule, weather, and lineup receipts remain required before a publication, while a
+source-lane outage leaves a valid prior or degraded source lane available for publication.
+
+Start the worker and the local read-only server from the repository root with durable local
+directories chosen by the operator:
+
+```bash
+.venv/bin/python -m ballpark runtime-worker \
+  --state-dir ./runtime-state --cache-dir ./runtime-cache --publication-dir ./runtime-publication
+.venv/bin/python -m ballpark runtime-server \
+  --state-dir ./runtime-state --publication-dir ./runtime-publication --web-dir web/dist --port 8080
+.venv/bin/python -m ballpark runtime-probe --state-dir ./runtime-state
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m ballpark runtime-worker `
+  --state-dir .\runtime-state --cache-dir .\runtime-cache --publication-dir .\runtime-publication
+.\.venv\Scripts\python.exe -m ballpark runtime-server `
+  --state-dir .\runtime-state --publication-dir .\runtime-publication --web-dir web\dist --port 8080
+.\.venv\Scripts\python.exe -m ballpark runtime-probe --state-dir .\runtime-state
+```
+
+The worker retains `cache-dir/sources/sportsbook.json`: the latest attempt, its original attempt
+clock and raw-response digest, plus restart-validated last-good normalized markets, original
+official game bindings, raw response bytes, and capture clocks. The raw response and bindings are
+private source evidence; the accepted publication records the source receipt in its private CAS
+input receipts under `publication-dir/objects`, never in the public payload. Maintenance outcomes
+and errors are retained as the bounded `state-dir/operations.json` history. The scheduler ledger
+remains `state-dir/runtime-state.sqlite3`; `/healthz`, `/readiness`, `/data/data.json`, and
+`/data/release.json` provide the normal service checks.
+
+`observed_unknown_age` means the source supplied a complete observed total but no quote-level
+update timestamp; the displayed capture time remains the original retrieval time. `retained` means
+the prior raw receipt, normalized market, exact teams, slate date, and start time all validated
+again after restart. An `Update failed` label means the latest provider attempt failed while the
+displayed retained observation remains identifiable; it does not turn that quote into a current
+one. A healthy ESPN response with no matching quote remains an explicit no-quote result and does
+not overwrite the separate last-good receipt.
+
 ## Preflight verification
 
 Linux x86_64:

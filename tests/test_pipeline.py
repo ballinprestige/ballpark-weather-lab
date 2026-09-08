@@ -74,6 +74,14 @@ def test_trusted_runtime_bundle_keeps_live_provenance_and_private_model_receipt(
     _stub_pipeline(monkeypatch, verified_receipt)
     bundle = json.loads((fixture_root / "normal_slate.json").read_text(encoding="utf-8"))
     bundle["odds_by_game"] = {}
+    bundle["odds_acquisition"] = {
+        "schema_version": 1,
+        "status": "no_quote",
+        "source_error": None,
+        "raw_sha256": "a" * 64,
+        "attempted_at": GENERATED_AT,
+        "retained": False,
+    }
     bundle["exchange_by_game"] = {}
     selected_weather = valid_weather()
     bundle["weather_by_game"] = {"810001": dict(selected_weather)}

@@ -297,6 +297,7 @@
         "slate_date": { "type": "string", "format": "date" },
         "state": { "enum": ["current", "stale", "observed_unknown_age", "unavailable"] },
         "reason": { "type": ["string", "null"] },
+        "failure_reason": { "type": ["string", "null"] },
         "provider_event_id": { "type": ["string", "null"] },
         "sport": { "const": "MLB" }, "market_type": { "const": "total" }, "period": { "const": "full_game" },
         "eligibility": { "enum": ["pregame", "live", "final"] },

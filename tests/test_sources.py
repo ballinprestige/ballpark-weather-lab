@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import time
 from datetime import date
 from typing import Any
 
 import pytest
 
+import ballpark.http as http_module
 from ballpark.errors import DataContractError, SourceUnavailable
 from ballpark.http import HttpClient
 from ballpark.lineups import fetch_lineup, parse_lineup_document
@@ -192,6 +194,44 @@ def test_http_client_configures_bounded_retries_and_timeouts() -> None:
     client.session.get = get  # type: ignore[method-assign]
     assert client.get_json("https://example.invalid/data") == {"ok": True}
     assert calls == [{"params": None, "timeout": (2.5, 7.5), "stream": True}]
+
+
+def test_deadline_bound_http_rejects_redirect_without_a_second_get(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = HttpClient()
+    calls: list[dict[str, Any]] = []
+
+    class Redirect:
+        headers = {"Location": "https://redirect.invalid/next"}
+        is_redirect = True
+
+        def raise_for_status(self) -> None:
+            raise AssertionError("deadline redirect must be rejected first")
+
+        def close(self) -> None:
+            return None
+
+    class Session:
+        headers: dict[str, str] = {}
+
+        def mount(self, _prefix: str, _adapter: object) -> None:
+            return None
+
+        def get(self, _url: str, **kwargs: Any) -> Redirect:
+            calls.append(kwargs)
+            return Redirect()
+
+        def close(self) -> None:
+            return None
+
+    session = Session()
+    monkeypatch.setattr(http_module.requests, "Session", lambda: session)
+    with pytest.raises(RuntimeError, match="redirects are not permitted"):
+        client.get_bytes("https://example.invalid/source", deadline_at=time.monotonic() + 30)
+    assert calls and len(calls) == 1
+    assert calls[0]["allow_redirects"] is False
+    assert calls[0]["stream"] is True
 
 
 def test_forecast_rejects_an_hour_outside_the_game_window() -> None:

@@ -26,6 +26,7 @@ export interface GameOdds {
   slate_date: string;
   state: 'current' | 'stale' | 'observed_unknown_age' | 'unavailable';
   reason: string | null;
+  failure_reason?: string | null;
   provider_event_id: string | null;
   sport: 'MLB';
   market_type: 'total';

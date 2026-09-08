@@ -55,6 +55,7 @@ class JobContext:
     state_dir: Path
     cache_dir: Path
     publication_dir: Path
+    clock: Callable[[], datetime] | None = None
 
 
 class RuntimeBusyError(RuntimeError):
@@ -248,6 +249,7 @@ class RuntimeWorker:
                 self.ledger.state_dir,
                 self.cache_dir,
                 self.publication_dir,
+                self.clock,
             )
 
         return self.ledger.update(claim)
