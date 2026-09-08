@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import gzip
 import hashlib
 import json
 from datetime import date
@@ -10,7 +9,18 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from ballpark.runtime_app import runtime_readiness
+from ballpark.runtime_app import (
+    _DEFAULT_MAX_OBJECT_BYTES,
+    _environment_limit,
+    _is_digest,
+    _is_token,
+    _load_json,
+    _load_object_json,
+    _read_object,
+    _safe_child,
+    _validated_index,
+    runtime_readiness,
+)
 
 
 class RuntimeHandler(SimpleHTTPRequestHandler):
@@ -51,37 +61,57 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
             path.startswith("/archive/") and archive_name == f"{archive_date}.json"
         ):
             try:
-                pointer = json.loads((self.publication_dir / "pointer.json").read_text())
-                token = pointer["current"]["token"]
-                if not isinstance(token, str) or len(token) != 32 or not token.isalnum():
-                    raise ValueError("invalid release token")
-                manifest = json.loads(
-                    (self.publication_dir / "releases" / token / "manifest.json").read_text()
+                maximum = _environment_limit("BALLPARK_MAX_OBJECT_BYTES", _DEFAULT_MAX_OBJECT_BYTES)
+                pointer = _load_json(
+                    self.publication_dir / "pointer.json", maximum, "accepted pointer is malformed"
                 )
+                if not isinstance(pointer, dict) or not isinstance(pointer.get("current"), dict):
+                    raise RuntimeError("accepted pointer is malformed")
+                token = pointer["current"].get("token")
+                if not _is_token(token):
+                    raise RuntimeError("invalid release token")
+                manifest = _load_json(
+                    _safe_child(self.publication_dir / "releases", token) / "manifest.json",
+                    maximum,
+                    "accepted manifest is malformed",
+                )
+                if not isinstance(manifest, dict) or manifest.get("token") != token:
+                    raise RuntimeError("accepted manifest is malformed")
                 field = {
                     "/data/data.json": "data_sha256",
                     "/data/release.json": "release_sha256",
                     "/archive/index.json": "archive_index_sha256",
                 }.get(path)
-                index = json.loads(
-                    gzip.decompress(
-                        (
-                            self.publication_dir
-                            / "objects"
-                            / f"{manifest['archive_index_sha256']}.json.gz"
-                        ).read_bytes()
-                    )
+                objects = self.publication_dir / "objects"
+                index = _load_object_json(
+                    objects,
+                    manifest.get("archive_index_sha256"),
+                    maximum,
+                    "accepted archive index is malformed",
                 )
+                rows = _validated_index(index, require_object=True)
                 if archive_date is not None:
-                    row = next(row for row in index["dates"] if row["date"] == archive_date)
+                    row = next(row for row in rows if row["date"] == archive_date)
                     field_value = row["object_sha256"]
                 else:
                     field_value = manifest[field]  # type: ignore[index]
-                target = self.publication_dir / "objects" / f"{field_value}.json.gz"
-                body = gzip.decompress(target.read_bytes())
-                if hashlib.sha256(body).hexdigest() != field_value:
-                    raise ValueError("object digest mismatch")
-            except (OSError, KeyError, TypeError, json.JSONDecodeError):
+                if not _is_digest(field_value):
+                    raise RuntimeError("accepted object digest is malformed")
+                body = _read_object(objects, field_value, maximum)
+                if archive_date is not None and (
+                    hashlib.sha256(body).hexdigest() != row["payload_sha256"]
+                ):
+                    raise RuntimeError("accepted archive object digest is malformed")
+            except (
+                EOFError,
+                OSError,
+                KeyError,
+                StopIteration,
+                TypeError,
+                ValueError,
+                RuntimeError,
+                json.JSONDecodeError,
+            ):
                 self._json(404, {"state": "not_published"})
                 return
             self.send_response(200)

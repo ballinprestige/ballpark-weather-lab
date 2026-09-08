@@ -10,6 +10,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import time
@@ -28,6 +29,198 @@ from ballpark.runtime import JobContext, JobSpec, RuntimeBusyError, RuntimeWorke
 from ballpark.schedule import fetch_schedule
 from ballpark.venues import VENUES
 from ballpark.weather import build_model_source_receipts, fetch_game_weather
+
+_HEX64 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
+_TOKEN = re.compile(r"[0-9a-f]{32}\Z", re.ASCII)
+_DEFAULT_MIN_FREE_BYTES = 64 * 1024 * 1024
+_DEFAULT_MAX_OBJECT_BYTES = 32 * 1024 * 1024
+
+
+def _environment_limit(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer") from exc
+    if value < 0:
+        raise RuntimeError(f"{name} cannot be negative")
+    return value
+
+
+def _is_digest(value: object) -> bool:
+    return isinstance(value, str) and _HEX64.fullmatch(value) is not None
+
+
+def _is_token(value: object) -> bool:
+    return isinstance(value, str) and _TOKEN.fullmatch(value) is not None
+
+
+def _safe_child(root: Path, name: str) -> Path:
+    """Return one owned direct child, never a path assembled from traversal text."""
+    if not name or Path(name).name != name:
+        raise RuntimeError("runtime storage child name is invalid")
+    base = root.resolve()
+    child = (root / name).resolve()
+    if child.parent != base:
+        raise RuntimeError("runtime storage path escapes its owned directory")
+    return child
+
+
+def _read_bounded(path: Path, maximum: int) -> bytes:
+    try:
+        if not path.is_file() or path.stat().st_size > maximum:
+            raise RuntimeError("runtime storage object exceeds its size limit")
+        with path.open("rb") as handle:
+            raw = handle.read(maximum + 1)
+    except OSError as exc:
+        raise RuntimeError("runtime storage object is unavailable") from exc
+    if len(raw) > maximum:
+        raise RuntimeError("runtime storage object exceeds its size limit")
+    return raw
+
+
+def _read_object(objects: Path, digest: object, maximum: int) -> bytes:
+    if not _is_digest(digest):
+        raise RuntimeError("runtime object digest is invalid")
+    path = _safe_child(objects, f"{digest}.json.gz")
+    try:
+        with gzip.open(path, "rb") as handle:
+            raw = handle.read(maximum + 1)
+            # Force gzip to validate its trailer before accepting the object.
+            if handle.read(1):
+                raise RuntimeError("runtime object exceeds its size limit")
+    except (EOFError, OSError, gzip.BadGzipFile) as exc:
+        raise RuntimeError("runtime object is unreadable") from exc
+    if len(raw) > maximum:
+        raise RuntimeError("runtime object exceeds its size limit")
+    if hashlib.sha256(raw).hexdigest() != digest:
+        raise RuntimeError("runtime object digest is invalid")
+    return raw
+
+
+def _load_object_json(objects: Path, digest: object, maximum: int, message: str) -> object:
+    try:
+        return json.loads(_read_object(objects, digest, maximum))
+    except (UnicodeDecodeError, json.JSONDecodeError, RuntimeError) as exc:
+        raise RuntimeError(message) from exc
+
+
+def _canonical_date(value: object) -> str:
+    if not isinstance(value, str):
+        raise RuntimeError("archive date is invalid")
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise RuntimeError("archive date is invalid") from exc
+    if parsed.isoformat() != value:
+        raise RuntimeError("archive date is invalid")
+    return value
+
+
+def _validated_index(value: object, *, require_object: bool) -> list[dict[str, Any]]:
+    if not isinstance(value, dict) or not isinstance(value.get("dates"), list):
+        raise RuntimeError("archive index is malformed")
+    rows: list[dict[str, Any]] = []
+    dates: set[str] = set()
+    for row in value["dates"]:
+        if not isinstance(row, dict):
+            raise RuntimeError("archive index is malformed")
+        date_value = _canonical_date(row.get("date"))
+        payload_digest = row.get("payload_sha256")
+        if not _is_digest(payload_digest) or date_value in dates:
+            raise RuntimeError("archive index is malformed")
+        checked = dict(row)
+        checked["date"] = date_value
+        if require_object:
+            if not _is_digest(checked.get("object_sha256")):
+                raise RuntimeError("accepted archive history is malformed")
+        rows.append(checked)
+        dates.add(date_value)
+    return rows
+
+
+def _load_json(path: Path, maximum: int, message: str) -> object:
+    try:
+        return json.loads(_read_bounded(path, maximum))
+    except (UnicodeDecodeError, json.JSONDecodeError, RuntimeError) as exc:
+        raise RuntimeError(message) from exc
+
+
+def _cleanup_store(
+    publication: Path, *, current: str, previous: dict[str, Any] | None, maximum: int
+) -> None:
+    """Bound owned debris only after pointer promotion; malformed history is retained."""
+    try:
+        grace = _environment_limit("BALLPARK_STORE_GRACE_SECONDS", 3600)
+        cutoff = time.time() - grace
+        retained = {current}
+        if isinstance(previous, dict) and _is_token(previous.get("token")):
+            retained.add(previous["token"])
+        releases = publication / "releases"
+        for release in releases.iterdir() if releases.is_dir() else ():
+            if (
+                release.is_dir()
+                and _is_token(release.name)
+                and release.name not in retained
+                and release.stat().st_mtime <= cutoff
+            ):
+                shutil.rmtree(release)
+        staged_root = publication / ".staged"
+        for staged in staged_root.iterdir() if staged_root.is_dir() else ():
+            if (
+                staged.is_dir()
+                and _is_token(staged.name)
+                and staged.name != current
+                and staged.stat().st_mtime <= cutoff
+            ):
+                shutil.rmtree(staged)
+
+        # Retain every object referenced by each retained release. If a manifest is
+        # malformed, leave all objects alone; cleanup must never turn corruption into
+        # data loss.
+        referenced: set[str] = set()
+        for token in retained:
+            manifest = _load_json(
+                _safe_child(releases, token) / "manifest.json",
+                maximum,
+                "accepted manifest is malformed",
+            )
+            if not isinstance(manifest, dict):
+                raise RuntimeError("accepted manifest is malformed")
+            for field in ("data_sha256", "release_sha256", "archive_index_sha256"):
+                digest = manifest.get(field)
+                if not _is_digest(digest):
+                    raise RuntimeError("accepted manifest is malformed")
+                referenced.add(digest)
+            receipts = manifest.get("input_receipts")
+            if not isinstance(receipts, dict) or not all(
+                _is_digest(value) for value in receipts.values()
+            ):
+                raise RuntimeError("accepted manifest is malformed")
+            referenced.update(receipts.values())
+            index = _load_object_json(
+                publication / "objects",
+                manifest["archive_index_sha256"],
+                maximum,
+                "accepted archive history is malformed",
+            )
+            for row in _validated_index(index, require_object=True):
+                referenced.add(row["object_sha256"])
+        objects = publication / "objects"
+        for object_path in objects.iterdir() if objects.is_dir() else ():
+            name = object_path.name
+            digest = name.removesuffix(".json.gz")
+            if (
+                object_path.is_file()
+                and name == f"{digest}.json.gz"
+                and _is_digest(digest)
+                and digest not in referenced
+                and object_path.stat().st_mtime <= cutoff
+            ):
+                object_path.unlink()
+    except (OSError, RuntimeError):
+        # Pointer promotion succeeded. A later worker may retry bounded cleanup;
+        # it must not reinterpret a successful immutable publication as a failed job.
+        return
 
 
 def _stamp() -> str:
@@ -92,79 +285,109 @@ def _load_snapshot(cache_dir: Path, name: str, target_date: date) -> Any:
 
 
 def _accept_stage(context: JobContext) -> None:
-    staged = context.publication_dir / ".staged" / context.token
-    if (
-        not (staged / "data" / "data.json").is_file()
-        or not (staged / "data" / "release.json").is_file()
-    ):
+    if not _is_token(context.token):
+        raise RuntimeError("publication token is invalid")
+    maximum = _environment_limit("BALLPARK_MAX_OBJECT_BYTES", _DEFAULT_MAX_OBJECT_BYTES)
+    minimum_free = _environment_limit("BALLPARK_MIN_FREE_BYTES", _DEFAULT_MIN_FREE_BYTES)
+    publication = context.publication_dir
+    staging_root, releases, objects = (
+        publication / ".staged",
+        publication / "releases",
+        publication / "objects",
+    )
+    staged = _safe_child(staging_root, context.token)
+    if not staged.is_dir():
         raise RuntimeError("staged publication is incomplete")
-    releases = context.publication_dir / "releases"
-    releases.mkdir(parents=True, exist_ok=True)
-    accepted = releases / context.token
-    if accepted.exists():
-        raise RuntimeError("publication token was already accepted")
-    objects = context.publication_dir / "objects"
-    minimum_free = int(os.environ.get("BALLPARK_MIN_FREE_BYTES", "0"))
-    free_before = shutil.disk_usage(context.publication_dir).free
+    data_path = staged / "data" / "data.json"
+    release_path = staged / "data" / "release.json"
+    index_path = staged / "archive" / "index.json"
+    if not data_path.is_file() or not release_path.is_file() or not index_path.is_file():
+        raise RuntimeError("staged publication is incomplete")
+    free_before = shutil.disk_usage(publication).free
     if free_before < minimum_free:
         raise RuntimeError(
             f"publication disk reserve is below minimum: {free_before} < {minimum_free} bytes"
         )
+    data_raw = _read_bounded(data_path, maximum)
+    release_raw = _read_bounded(release_path, maximum)
+    data = _load_json(data_path, maximum, "staged data is malformed")
+    if not isinstance(data, dict):
+        raise RuntimeError("staged data is malformed")
+    payload_date = _canonical_date(data.get("date"))
+    candidate_rows = _validated_index(
+        _load_json(index_path, maximum, "staged archive index is malformed"), require_object=False
+    )
+    candidate_by_date = {row["date"]: row for row in candidate_rows}
+    if payload_date not in candidate_by_date:
+        raise RuntimeError("staged archive index omits its data date")
+
+    releases.mkdir(parents=True, exist_ok=True)
+    accepted = _safe_child(releases, context.token)
+    if accepted.exists():
+        raise RuntimeError("publication token was already accepted")
 
     def store(raw: bytes) -> str:
+        if len(raw) > maximum:
+            raise RuntimeError("runtime storage object exceeds its size limit")
         digest = hashlib.sha256(raw).hexdigest()
-        target = objects / f"{digest}.json.gz"
+        target = _safe_child(objects, f"{digest}.json.gz")
         if target.exists():
-            if gzip.decompress(target.read_bytes()) != raw:
+            if _read_object(objects, digest, maximum) != raw:
                 raise RuntimeError("immutable object hash collision or corruption")
             return digest
         objects.mkdir(parents=True, exist_ok=True)
         atomic_write(target, gzip.compress(raw, mtime=0))
+        # A write that cannot be read and rehashed is never admitted to a manifest.
+        if _read_object(objects, digest, maximum) != raw:
+            raise RuntimeError("immutable object write verification failed")
         return digest
 
-    data_raw = (staged / "data" / "data.json").read_bytes()
-    release_raw = (staged / "data" / "release.json").read_bytes()
-    index = json.loads((staged / "archive" / "index.json").read_text(encoding="utf-8"))
-    payload_date = str(json.loads(data_raw)["date"])
-    archive_raw = (staged / "archive" / f"{payload_date}.json").read_bytes()
-    archive_object = store(archive_raw)
-    rows = {
-        row["date"]: row
-        for row in index["dates"]
-        if isinstance(row, dict) and isinstance(row.get("date"), str)
-    }
-    rows[payload_date] = {**rows[payload_date], "object_sha256": archive_object}
-    previous: dict[str, Any] | None = None
-    pointer_path = context.publication_dir / "pointer.json"
-    if pointer_path.exists():
-        previous = json.loads(pointer_path.read_text(encoding="utf-8")).get("current")
-        if not isinstance(previous, dict):
-            raise RuntimeError("accepted pointer is malformed")
-        prior_manifest = json.loads((releases / previous["token"] / "manifest.json").read_text())
-        prior_index = json.loads(
-            gzip.decompress(
-                (objects / f"{prior_manifest['archive_index_sha256']}.json.gz").read_bytes()
-            )
+    rows: dict[str, dict[str, Any]] = {}
+    for row in candidate_rows:
+        archive_raw = _read_bounded(
+            _safe_child(staged / "archive", f"{row['date']}.json"), maximum
         )
-        for row in prior_index["dates"]:
-            try:
-                date.fromisoformat(row["date"])
-                digest = row["object_sha256"]
-                raw = gzip.decompress((objects / f"{digest}.json.gz").read_bytes())
-            except (KeyError, OSError, TypeError, ValueError, gzip.BadGzipFile) as exc:
-                raise RuntimeError("accepted archive history is malformed") from exc
-            if hashlib.sha256(raw).hexdigest() != digest:
-                raise RuntimeError("accepted archive history object digest is invalid")
-            if row["date"] not in rows:
-                rows[row["date"]] = row
+        if hashlib.sha256(archive_raw).hexdigest() != row["payload_sha256"]:
+            raise RuntimeError("staged archive payload digest is invalid")
+        rows[row["date"]] = {**row, "object_sha256": store(archive_raw)}
+
+    previous: dict[str, Any] | None = None
+    pointer_path = publication / "pointer.json"
+    if pointer_path.exists():
+        pointer = _load_json(pointer_path, maximum, "accepted pointer is malformed")
+        if not isinstance(pointer, dict) or not isinstance(pointer.get("current"), dict):
+            raise RuntimeError("accepted pointer is malformed")
+        prior_token = pointer["current"].get("token")
+        if not _is_token(prior_token):
+            raise RuntimeError("accepted pointer is malformed")
+        previous = {"token": prior_token}
+        prior_manifest = _load_json(
+            _safe_child(releases, prior_token) / "manifest.json",
+            maximum,
+            "accepted manifest is malformed",
+        )
+        if not isinstance(prior_manifest, dict) or prior_manifest.get("token") != prior_token:
+            raise RuntimeError("accepted manifest is malformed")
+        prior_index = _load_object_json(
+            objects,
+            prior_manifest.get("archive_index_sha256"),
+            maximum,
+            "accepted archive history is malformed",
+        )
+        for row in _validated_index(prior_index, require_object=True):
+            raw = _read_object(objects, row["object_sha256"], maximum)
+            if hashlib.sha256(raw).hexdigest() != row["payload_sha256"]:
+                raise RuntimeError("accepted archive history payload digest is invalid")
+            rows.setdefault(row["date"], row)
+
     merged_index = {
         "schema_version": 2,
         "dates": sorted(rows.values(), key=lambda row: row["date"], reverse=True),
     }
     input_receipts = {
-        path.stem: store(path.read_bytes())
+        path.stem: store(_read_bounded(path, maximum))
         for path in sorted((context.cache_dir / "sources").glob("*.json"))
-        if path.is_file()
+        if path.is_file() and Path(path.name).stem == path.stem
     }
     manifest = {
         "schema_version": 2,
@@ -179,23 +402,25 @@ def _accept_stage(context: JobContext) -> None:
     for path in (staged / "data", staged / "archive"):
         shutil.rmtree(path)
     os.replace(staged, accepted)
+    receipt = {
+        "token": context.token,
+        "free_before_bytes": free_before,
+        "free_after_bytes": shutil.disk_usage(publication).free,
+        "input_receipt_count": len(input_receipts),
+    }
+    # The receipt is durable before pointer promotion. Any failure leaves the old
+    # pointer valid and an unreachable release that later bounded cleanup can reclaim.
+    atomic_write(publication / "receipts" / f"{context.token}.json", canonical_json_bytes(receipt))
+    free_after_receipt = shutil.disk_usage(publication).free
+    if free_after_receipt < minimum_free:
+        raise RuntimeError("publication disk reserve fell below minimum before pointer promotion")
     atomic_write(
         pointer_path,
         canonical_json_bytes(
             {"schema_version": 2, "current": {"token": context.token}, "previous": previous}
         ),
     )
-    atomic_write(
-        context.publication_dir / "receipts" / f"{context.token}.json",
-        canonical_json_bytes(
-            {
-                "token": context.token,
-                "free_before_bytes": free_before,
-                "free_after_bytes": shutil.disk_usage(context.publication_dir).free,
-                "input_receipt_count": len(input_receipts),
-            }
-        ),
-    )
+    _cleanup_store(publication, current=context.token, previous=previous, maximum=maximum)
 
 
 def run_fixture_worker(
