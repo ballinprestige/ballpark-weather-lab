@@ -56,6 +56,9 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if path.startswith("/data/"):
+            self._json(404, {"state": "not_found"})
+            return
         self.directory = str(self.web_dir)
         super().do_GET()
 
