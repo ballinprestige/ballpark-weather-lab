@@ -115,6 +115,7 @@ class RuntimeLedger:
 
 
 JobHandler = Callable[[JobContext], None]
+JobAcceptor = Callable[[JobContext], None]
 
 
 class RuntimeWorker:
@@ -127,11 +128,15 @@ class RuntimeWorker:
         cache_dir: Path,
         publication_dir: Path,
         clock: Callable[[], datetime] | None = None,
+        acceptors: dict[str, JobAcceptor] | None = None,
     ) -> None:
         self.specs = {spec.name: spec for spec in specs}
         if set(handlers) != set(self.specs):
             raise ValueError("every expected job needs exactly one handler")
         self.handlers, self.ledger = handlers, RuntimeLedger(state_dir)
+        self.acceptors = acceptors or {}
+        if not set(self.acceptors).issubset(self.specs):
+            raise ValueError("acceptors must name expected jobs")
         self.cache_dir, self.publication_dir = cache_dir, publication_dir
         self.clock = clock or (lambda: datetime.now(UTC))
 
@@ -165,8 +170,15 @@ class RuntimeWorker:
             if state.get("writer", {}).get("token") != writer:
                 raise RuntimeBusyError("writer lease lost")
             job = state["jobs"].setdefault(
-                spec.name, {"attempt": 0, "missed_slots": 0, "next_slot_at": utc_stamp(now)}
+                spec.name,
+                {
+                    "attempt": 0,
+                    "interval_seconds": spec.interval_seconds,
+                    "missed_slots": 0,
+                    "next_slot_at": utc_stamp(now),
+                },
             )
+            job["interval_seconds"] = spec.interval_seconds
             flight = job.get("in_flight")
             if isinstance(flight, dict) and parse_stamp(flight["deadline_at"]) > now:
                 return None
@@ -246,8 +258,18 @@ class RuntimeWorker:
                 utc_stamp(finished),
             )
             if error_value is None:
+                acceptor = self.acceptors.get(context.name)
+                if acceptor is not None:
+                    # This executes inside the same SQLite IMMEDIATE transaction
+                    # that still owns the writer and attempt fencing tokens.
+                    acceptor(context)
                 job.update(
-                    {"attempt": 0, "last_error": None, "last_success_at": utc_stamp(finished)}
+                    {
+                        "attempt": 0,
+                        "last_error": None,
+                        "last_success_at": utc_stamp(finished),
+                        "last_success_token": context.token,
+                    }
                 )
                 return "succeeded"
             job["last_error"] = f"{type(error_value).__name__}: {error_value}"
@@ -318,9 +340,14 @@ def probe_runtime(
         problems.append("worker heartbeat is missing or invalid")
     for name in state.get("expected_jobs", []):
         try:
-            if now > parse_stamp(state["jobs"][name]["next_slot_at"]) + timedelta(
-                seconds=max_job_lag_seconds
-            ):
+            job = state["jobs"][name]
+            interval = int(job["interval_seconds"])
+            last_success = parse_stamp(job["last_success_at"])
+            if now > last_success + timedelta(seconds=interval + max_job_lag_seconds):
+                problems.append(f"job lacks a fresh successful receipt: {name}")
+            if job.get("last_error") and job.get("attempt") == 0:
+                problems.append(f"job exhausted its retry budget: {name}")
+            if now > parse_stamp(job["next_slot_at"]) + timedelta(seconds=max_job_lag_seconds):
                 problems.append(f"job is overdue: {name}")
         except (KeyError, TypeError, ValueError):
             problems.append(f"job state is missing: {name}")

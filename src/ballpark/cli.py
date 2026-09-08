@@ -77,6 +77,13 @@ def _build_parser() -> argparse.ArgumentParser:
     probe.add_argument("--max-heartbeat-age-seconds", type=int, default=180)
     probe.add_argument("--max-job-lag-seconds", type=int, default=30)
 
+    server = commands.add_parser("runtime-server")
+    server.add_argument("--state-dir", type=Path, required=True)
+    server.add_argument("--publication-dir", type=Path, required=True)
+    server.add_argument("--web-dir", type=Path, required=True)
+    server.add_argument("--port", type=int, default=8080)
+    server.add_argument("--host", choices=("127.0.0.1", "0.0.0.0"), default="127.0.0.1")
+
     commands.add_parser("verify-artifacts")
     return parser
 
@@ -144,6 +151,18 @@ def main(argv: list[str] | None = None) -> int:
             )
             _print(result)
             return 0 if result["state"] == "ready" else 3
+
+        if args.command == "runtime-server":
+            from ballpark.runtime_server import serve
+
+            serve(
+                web_dir=args.web_dir.resolve(),
+                publication_dir=args.publication_dir.resolve(),
+                state_dir=args.state_dir.resolve(),
+                host=args.host,
+                port=args.port,
+            )
+            return 0
 
         if args.command in {"build", "daily"}:
             from ballpark.pipeline import DailyPipeline

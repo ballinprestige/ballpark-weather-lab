@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
 from ballpark.paths import ProjectPaths
 from ballpark.pipeline import DailyPipeline, load_fixture
+from ballpark.publication import atomic_write, canonical_json_bytes
 from ballpark.runtime import JobContext, JobSpec, RuntimeWorker, probe_runtime
 
 
@@ -31,6 +33,27 @@ def _snapshot(context: JobContext, name: str, value: Any) -> None:
             {"observed_at": _stamp(), "sha256": hashlib.sha256(raw).hexdigest(), "value": value},
             sort_keys=True,
         ).encode()
+    )
+
+
+def _accept_stage(context: JobContext) -> None:
+    staged = context.publication_dir / ".staged" / context.token
+    if (
+        not (staged / "data" / "data.json").is_file()
+        or not (staged / "data" / "release.json").is_file()
+    ):
+        raise RuntimeError("staged publication is incomplete")
+    releases = context.publication_dir / "releases"
+    releases.mkdir(parents=True, exist_ok=True)
+    accepted = releases / context.token
+    if accepted.exists():
+        raise RuntimeError("publication token was already accepted")
+    os.replace(staged, accepted)
+    atomic_write(
+        context.publication_dir / "current.json",
+        canonical_json_bytes(
+            {"schema_version": 1, "token": context.token, "accepted_at": _stamp()}
+        ),
     )
 
 
@@ -84,6 +107,7 @@ def run_fixture_worker(
         state_dir=state_dir,
         cache_dir=cache_dir,
         publication_dir=publication_dir,
+        acceptors={"publish": _accept_stage},
     )
     return worker.run_once() if once else worker.run_once()
 
