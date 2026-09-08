@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -8,15 +9,18 @@ import pytest
 import ballpark.pipeline as pipeline_module
 from ballpark.artifacts import ArtifactReceipt
 from ballpark.errors import ArtifactError, DataContractError
+from ballpark.espn_odds import EspnAcquisitionOutcome
 from ballpark.paths import ProjectPaths
 from ballpark.pipeline import DailyPipeline
 from ballpark.publication import canonical_json_bytes, sha256_bytes
+from ballpark.weather import build_model_source_receipts
 from tests.support import (
     GENERATED_AT,
     TARGET_DATE,
     FakeParkFactorModel,
     FakePhysicsEngine,
     fast_trajectory,
+    valid_weather,
 )
 
 
@@ -37,14 +41,12 @@ def test_normal_slate_builds_valid_payload_and_publishes(
     tmp_path: Path,
 ) -> None:
     _stub_pipeline(monkeypatch, verified_receipt)
-
     payload, release = DailyPipeline(project_paths).build_and_publish(
         TARGET_DATE,
         tmp_path / "site",
         fixture_path=fixture_root / "normal_slate.json",
         generated_at=GENERATED_AT,
     )
-
     assert payload["status"] == "ready"
     assert payload["health"]["weather"] == {
         "state": "available",
@@ -63,6 +65,37 @@ def test_normal_slate_builds_valid_payload_and_publishes(
     assert json.loads((tmp_path / "site" / "data" / "data.json").read_text()) == payload
 
 
+def test_trusted_runtime_bundle_keeps_live_provenance_and_private_model_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+    project_paths: ProjectPaths,
+    fixture_root: Path,
+    verified_receipt: ArtifactReceipt,
+) -> None:
+    _stub_pipeline(monkeypatch, verified_receipt)
+    bundle = json.loads((fixture_root / "normal_slate.json").read_text(encoding="utf-8"))
+    bundle["odds_by_game"] = {}
+    bundle["odds_acquisition"] = {
+        "schema_version": 1,
+        "status": "no_quote",
+        "source_error": None,
+        "raw_sha256": "a" * 64,
+        "attempted_at": GENERATED_AT,
+        "retained": False,
+    }
+    bundle["exchange_by_game"] = {}
+    selected_weather = valid_weather()
+    bundle["weather_by_game"] = {"810001": dict(selected_weather)}
+    bundle["model_source_receipts"] = build_model_source_receipts({"810001": selected_weather})
+    payload = DailyPipeline(project_paths).build(
+        TARGET_DATE, source_bundle=bundle, generated_at=GENERATED_AT
+    )
+    assert payload["health"]["schedule"]["source"] == "MLB Stats API"
+    assert payload["health"]["weather"]["source"] == "Open-Meteo"
+    assert payload["health"]["lineups"]["source"] == "MLB Stats API game feeds"
+    assert payload["games"][0]["factors"]["state"] == "modeled"
+    assert "model_source_receipts" not in json.dumps(payload)
+
+
 def test_explicit_no_slate_is_a_publishable_state(
     monkeypatch: pytest.MonkeyPatch,
     project_paths: ProjectPaths,
@@ -71,14 +104,12 @@ def test_explicit_no_slate_is_a_publishable_state(
     tmp_path: Path,
 ) -> None:
     _stub_pipeline(monkeypatch, verified_receipt)
-
     payload, release = DailyPipeline(project_paths).build_and_publish(
         TARGET_DATE,
         tmp_path / "site",
         fixture_path=fixture_root / "no_slate.json",
         generated_at=GENERATED_AT,
     )
-
     assert payload["status"] == "no_slate"
     assert payload["no_slate_reason"]
     assert payload["games"] == []
@@ -90,7 +121,7 @@ def test_explicit_no_slate_is_a_publishable_state(
     assert FakeParkFactorModel.initializations == 0
 
 
-def test_missing_weather_publishes_held_seasonal_factors(
+def test_no_slate_rejects_geometry_drift_before_publication(
     monkeypatch: pytest.MonkeyPatch,
     project_paths: ProjectPaths,
     fixture_root: Path,
@@ -99,13 +130,36 @@ def test_missing_weather_publishes_held_seasonal_factors(
 ) -> None:
     _stub_pipeline(monkeypatch, verified_receipt)
 
+    def reject_drift(_root: Path) -> None:
+        raise ValueError("park geometry artifact is not the canonical venue-registry export")
+
+    monkeypatch.setattr(pipeline_module, "verify_exported_geometry", reject_drift)
+    output = tmp_path / "site"
+    with pytest.raises(ValueError, match="canonical venue-registry export"):
+        DailyPipeline(project_paths).build_and_publish(
+            TARGET_DATE,
+            output,
+            fixture_path=fixture_root / "no_slate.json",
+            generated_at=GENERATED_AT,
+        )
+    assert not output.exists()
+    assert FakeParkFactorModel.initializations == 0
+
+
+def test_missing_weather_publishes_held_seasonal_factors(
+    monkeypatch: pytest.MonkeyPatch,
+    project_paths: ProjectPaths,
+    fixture_root: Path,
+    verified_receipt: ArtifactReceipt,
+    tmp_path: Path,
+) -> None:
+    _stub_pipeline(monkeypatch, verified_receipt)
     payload, _release = DailyPipeline(project_paths).build_and_publish(
         TARGET_DATE,
         tmp_path / "site",
         fixture_path=fixture_root / "missing_weather.json",
         generated_at=GENERATED_AT,
     )
-
     game = payload["games"][0]
     assert payload["status"] == "degraded"
     assert payload["health"]["weather"]["state"] == "unavailable"
@@ -131,13 +185,11 @@ def test_confirmed_lineup_is_reported_but_c_is_held_without_verified_weather(
     document["weather_by_game"] = {}
     replay = tmp_path / "missing-weather-confirmed-lineup.json"
     replay.write_text(json.dumps(document), encoding="utf-8")
-
     payload = DailyPipeline(project_paths).build(
         TARGET_DATE,
         fixture_path=replay,
         generated_at=GENERATED_AT,
     )
-
     game = payload["games"][0]
     assert payload["health"]["lineups"]["state"] == "available"
     assert game["lineup"]["state"] == "confirmed"
@@ -153,14 +205,12 @@ def test_missing_lineup_publishes_approach_b_with_c_unavailable(
     tmp_path: Path,
 ) -> None:
     _stub_pipeline(monkeypatch, verified_receipt)
-
     payload, _release = DailyPipeline(project_paths).build_and_publish(
         TARGET_DATE,
         tmp_path / "site",
         fixture_path=fixture_root / "missing_lineup.json",
         generated_at=GENERATED_AT,
     )
-
     game = payload["games"][0]
     assert payload["status"] == "ready"
     assert payload["health"]["lineups"]["state"] == "not_yet_available"
@@ -190,14 +240,12 @@ def test_malformed_optional_approach_c_artifact_still_publishes_b(
         stadium_geometries=verified_receipt.stadium_geometries,
     )
     _stub_pipeline(monkeypatch, receipt)
-
     payload, release = DailyPipeline(project_paths).build_and_publish(
         TARGET_DATE,
         tmp_path / "site",
         fixture_path=fixture_root / "normal_slate.json",
         generated_at=GENERATED_AT,
     )
-
     game = payload["games"][0]
     assert payload["status"] == "ready"
     assert payload["health"]["artifacts"]["state"] == "partial"
@@ -231,21 +279,20 @@ def test_malformed_critical_model_rejects_without_overwriting_prior_output(
         web=isolated / "web",
     )
     monkeypatch.setattr(pipeline_module, "verify_artifacts", lambda _paths: verified_receipt)
+    monkeypatch.setattr(pipeline_module, "verify_exported_geometry", lambda _root: None)
     output = tmp_path / "site"
     (output / "data").mkdir(parents=True)
     prior_payload = b'{"state":"last-good"}\n'
     prior_release = b'{"payload_sha256":"last-good"}\n'
     (output / "data" / "data.json").write_bytes(prior_payload)
     (output / "data" / "release.json").write_bytes(prior_release)
-
-    with pytest.raises(ArtifactError, match="runs weather model is malformed"):
+    with pytest.raises(ArtifactError, match="reviewed model identity mismatch"):
         DailyPipeline(paths).build_and_publish(
             TARGET_DATE,
             output,
             fixture_path=fixture_root / "normal_slate.json",
             generated_at=GENERATED_AT,
         )
-
     assert (output / "data" / "data.json").read_bytes() == prior_payload
     assert (output / "data" / "release.json").read_bytes() == prior_release
     assert not (output / "archive").exists()
@@ -263,7 +310,6 @@ def test_duplicate_schedule_ids_reject_without_publication(
     (output / "data").mkdir(parents=True)
     prior = b'{"state":"last-good"}\n'
     (output / "data" / "data.json").write_bytes(prior)
-
     with pytest.raises(DataContractError, match="duplicate game IDs"):
         DailyPipeline(project_paths).build_and_publish(
             TARGET_DATE,
@@ -271,7 +317,6 @@ def test_duplicate_schedule_ids_reject_without_publication(
             fixture_path=fixture_root / "duplicate_game_ids.json",
             generated_at=GENERATED_AT,
         )
-
     assert (output / "data" / "data.json").read_bytes() == prior
     assert not (output / "data" / "release.json").exists()
     assert FakeParkFactorModel.initializations == 0
@@ -294,3 +339,102 @@ def test_fixture_inventory_is_sanitized(fixture_root: Path) -> None:
     for path in fixture_files:
         text = path.read_text(encoding="utf-8").casefold()
         assert not any(token in text for token in forbidden), path.name
+
+
+def test_live_pipeline_uses_one_espn_acquisition_with_real_capture_clock(
+    monkeypatch: pytest.MonkeyPatch,
+    project_paths: ProjectPaths,
+    fixture_root: Path,
+    verified_receipt: ArtifactReceipt,
+) -> None:
+    _stub_pipeline(monkeypatch, verified_receipt)
+    fixture = json.loads((fixture_root / "normal_slate.json").read_text(encoding="utf-8"))
+    schedule = fixture["schedule"]
+    captured = datetime.fromisoformat("2026-08-26T16:04:00+00:00")
+    observed = {
+        "game_pk": 810001,
+        "slate_date": TARGET_DATE.isoformat(),
+        "state": "observed_unknown_age",
+        "reason": "ESPN does not provide a quote-level update timestamp",
+        "provider_event_id": "event-1",
+        "sport": "MLB",
+        "market_type": "total",
+        "period": "full_game",
+        "eligibility": "pregame",
+        "sportsbook_id": "draftkings",
+        "sportsbook_name": "DraftKings",
+        "provider": "ESPN",
+        "source_url": "https://site.web.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates=20260826&limit=100",
+        "line": 8.5,
+        "over_price": -110,
+        "under_price": -110,
+        "source_updated_at": None,
+        "observed_at": "2026-08-26T16:04:00Z",
+        "raw_sha256": "b" * 64,
+        "snapshot_id": "c" * 64,
+        "source_schema_version": "espn-web-scoreboard-total-v1",
+    }
+
+    class Provider:
+        calls: list[dict[str, object]] = []
+
+        def acquire(
+            self, _date: date, _schedule: list[dict[str, object]], **kwargs: object
+        ) -> EspnAcquisitionOutcome:
+            self.calls.append(kwargs)
+            captured_at = kwargs["observed_at"]
+            assert isinstance(captured_at, datetime)
+            market = {
+                **observed,
+                "observed_at": captured_at.isoformat().replace("+00:00", "Z"),
+            }
+            return EspnAcquisitionOutcome("observed", {810001: market}, raw_sha256="b" * 64)
+
+    class Exchange:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def fetch(
+            self, games: list[dict[str, object]], **_kwargs: object
+        ) -> dict[int, dict[str, object]]:
+            return {
+                int(game["game_pk"]): pipeline_module.unavailable_exchange_market(
+                    game, captured, "test"
+                )
+                for game in games
+            }
+
+    monkeypatch.setattr(pipeline_module, "fetch_schedule", lambda *_args, **_kwargs: schedule)
+    monkeypatch.setattr(
+        pipeline_module,
+        "fetch_game_weather",
+        lambda game, *_args: fixture["weather_by_game"][str(game["game_pk"])],
+    )
+    monkeypatch.setattr(
+        pipeline_module, "fetch_lineup", lambda *_args: fixture["lineups_by_game"]["810001"]
+    )
+    monkeypatch.setattr(pipeline_module, "KalshiExchangeProvider", Exchange)
+    provider = Provider()
+    payload = DailyPipeline(project_paths, espn_provider=provider, clock=lambda: captured).build(
+        TARGET_DATE, generated_at=GENERATED_AT
+    )
+    assert len(provider.calls) == 1
+    assert provider.calls[0]["observed_at"] == captured
+    assert payload["games"][0]["odds"]["sportsbook_name"] == "DraftKings"
+    assert payload["health"]["odds"] == {
+        "state": "partial",
+        "source": "ESPN public scoreboard / DraftKings",
+        "current_games": 0,
+        "observed_unknown_age_games": 1,
+        "stale_games": 0,
+        "unavailable_games": 0,
+        "optional": False,
+        "acquisition_status": "observed",
+        "acquisition_error": None,
+    }
+    with pytest.raises(DataContractError, match="market retrieval is implausibly later"):
+        DailyPipeline(
+            project_paths,
+            espn_provider=provider,
+            clock=lambda: datetime.fromisoformat("2026-08-26T16:06:00+00:00"),
+        ).build(TARGET_DATE, generated_at=GENERATED_AT)

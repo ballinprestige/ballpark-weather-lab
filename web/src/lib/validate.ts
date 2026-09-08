@@ -3,8 +3,10 @@ import type {
   ArchiveIndex,
   BallparkGame,
   BallparkPayload,
+  GameExchangeMarket,
   GameFactors,
   GameLineup,
+  GameOdds,
   GameTrajectory,
   GameWeather,
   GeometryArtifact,
@@ -225,6 +227,117 @@ function validateTrajectory(value: unknown, path: string): GameTrajectory {
   };
 }
 
+function nullableNumberAt(value: unknown, path: string, minimum: number, maximum: number): number | null {
+  return value === null ? null : numberAt(value, path, minimum, maximum);
+}
+
+function validateOdds(value: unknown, path: string, gamePk: number, gameDate: string): GameOdds {
+  if (value === undefined) return {
+    game_pk: gamePk, slate_date: gameDate, state: 'unavailable', reason: 'This legacy release predates quoted full-game totals.',
+    failure_reason: null,
+    provider_event_id: null, sport: 'MLB', market_type: 'total', period: 'full_game', eligibility: 'pregame',
+    sportsbook_id: null, sportsbook_name: null, provider: 'Not recorded', source_url: null, line: null, over_price: null, under_price: null,
+    source_updated_at: null, observed_at: null, raw_sha256: null, snapshot_id: null, source_schema_version: 'legacy-without-markets'
+  };
+  const row = objectAt(value, path);
+  const state = enumAt(row.state, `${path}.state`, ['current', 'stale', 'observed_unknown_age', 'unavailable']);
+  const market: GameOdds = {
+    game_pk: integerAt(row.game_pk, `${path}.game_pk`, 1), slate_date: isoDateAt(row.slate_date, `${path}.slate_date`), state,
+    reason: nullableStringAt(row.reason, `${path}.reason`), failure_reason: nullableStringAt(row.failure_reason ?? null, `${path}.failure_reason`), provider_event_id: nullableStringAt(row.provider_event_id, `${path}.provider_event_id`),
+    sport: enumAt(row.sport, `${path}.sport`, ['MLB']), market_type: enumAt(row.market_type, `${path}.market_type`, ['total']),
+    period: enumAt(row.period, `${path}.period`, ['full_game']), eligibility: enumAt(row.eligibility, `${path}.eligibility`, ['pregame', 'live', 'final']),
+    sportsbook_id: nullableStringAt(row.sportsbook_id, `${path}.sportsbook_id`), sportsbook_name: nullableStringAt(row.sportsbook_name, `${path}.sportsbook_name`),
+    provider: stringAt(row.provider, `${path}.provider`) as string, source_url: nullableStringAt(row.source_url, `${path}.source_url`),
+    line: nullableNumberAt(row.line, `${path}.line`, 0, 40), over_price: row.over_price === null ? null : integerAt(row.over_price, `${path}.over_price`, -20000, 20000), under_price: row.under_price === null ? null : integerAt(row.under_price, `${path}.under_price`, -20000, 20000),
+    source_updated_at: timestampAt(row.source_updated_at, `${path}.source_updated_at`, true), observed_at: timestampAt(row.observed_at, `${path}.observed_at`, true),
+    raw_sha256: nullableStringAt(row.raw_sha256, `${path}.raw_sha256`), snapshot_id: nullableStringAt(row.snapshot_id, `${path}.snapshot_id`), source_schema_version: stringAt(row.source_schema_version, `${path}.source_schema_version`) as string
+  };
+  if (market.game_pk !== gamePk || market.slate_date !== gameDate) fail(path, 'must identify this exact scheduled game and slate date');
+  const populated = [market.line, market.over_price, market.under_price, market.raw_sha256, market.snapshot_id].some((entry) => entry !== null);
+  if (state !== 'unavailable' || populated) {
+    const requiredObserved = [market.line, market.over_price, market.under_price, market.observed_at, market.raw_sha256, market.snapshot_id, market.sportsbook_id, market.sportsbook_name, market.provider_event_id];
+    if (requiredObserved.some((entry) => entry === null)) {
+      fail(path, 'quoted market must include the line, both prices, book, source/retrieval times, hash, and snapshot');
+    }
+    for (const [label, price] of [['over_price', market.over_price], ['under_price', market.under_price]] as const) {
+      if (price === null || (price > -100 && price < 100)) fail(`${path}.${label}`, 'must be a supported American price (≤ -100 or ≥ +100)');
+    }
+    if (!/^[a-f0-9]{64}$/.test(market.raw_sha256 ?? '') || !/^[a-f0-9]{64}$/.test(market.snapshot_id ?? '')) {
+      fail(path, 'quoted market provenance must use lowercase SHA-256 digests');
+    }
+    const observedMs = Date.parse(market.observed_at!);
+    if (state === 'observed_unknown_age' && market.source_updated_at !== null) {
+      fail(`${path}.source_updated_at`, 'must be null when the sportsbook quote update time is unknown');
+    }
+    if (market.source_updated_at === null) {
+      if (state !== 'unavailable' && state !== 'observed_unknown_age') fail(path, 'current or stale quote must include a trustworthy source update time');
+      return market;
+    }
+    const sourceMs = Date.parse(market.source_updated_at);
+    if (sourceMs > observedMs + 5 * 60_000) fail(path, 'source update cannot be more than five minutes after retrieval');
+    if (state === 'current' && (sourceMs < observedMs - 15 * 60_000 || sourceMs > observedMs)) {
+      fail(path, 'current quote must be within the canonical 15-minute freshness window');
+    }
+  }
+  return market;
+}
+
+function decimalAt(value: unknown, path: string, minimumExclusive = false): string | null {
+  const decimal = nullableStringAt(value, path);
+  if (decimal === null) return null;
+  if (!/^\d+(?:\.\d+)?$/.test(decimal) || (minimumExclusive && Number(decimal) <= 0)) fail(path, 'must be a positive decimal string with source precision');
+  return decimal;
+}
+
+function decimalEqual(left: string, right: string): boolean {
+  const [leftWhole, leftFraction = ''] = left.split('.');
+  const [rightWhole, rightFraction = ''] = right.split('.');
+  const scale = Math.max(leftFraction.length, rightFraction.length);
+  return BigInt(leftWhole + leftFraction.padEnd(scale, '0')) === BigInt(rightWhole + rightFraction.padEnd(scale, '0'));
+}
+
+function dollarsToCents(dollars: string): string {
+  const [whole, fraction = ''] = dollars.split('.');
+  const padded = fraction.padEnd(2, '0');
+  return `${whole}${padded.slice(0, 2)}${padded.length > 2 ? `.${padded.slice(2)}` : ''}`;
+}
+
+function validateExchangeMarket(value: unknown, path: string, gamePk: number, gameDate: string, gameTime: string): GameExchangeMarket | undefined {
+  if (value === undefined) return undefined;
+  const row = objectAt(value, path);
+  const state = enumAt(row.state, `${path}.state`, ['observed_unknown_age', 'unavailable']);
+  const overDollars = decimalAt(row.over_ask_dollars, `${path}.over_ask_dollars`, true);
+  const underDollars = decimalAt(row.under_ask_dollars, `${path}.under_ask_dollars`, true);
+  const overCents = decimalAt(row.over_ask_cents, `${path}.over_ask_cents`, true);
+  const underCents = decimalAt(row.under_ask_cents, `${path}.under_ask_cents`, true);
+  const market: GameExchangeMarket = {
+    game_pk: integerAt(row.game_pk, `${path}.game_pk`, 1), slate_date: isoDateAt(row.slate_date, `${path}.slate_date`), game_time: timestampAt(row.game_time, `${path}.game_time`, true), state,
+    reason: nullableStringAt(row.reason, `${path}.reason`), failure_reason: nullableStringAt(row.failure_reason, `${path}.failure_reason`), game_phase: enumAt(row.game_phase, `${path}.game_phase`, ['pregame', 'in_progress', 'after_scheduled_start', 'final', 'unknown', 'unavailable']), provider: enumAt(row.provider, `${path}.provider`, ['Kalshi']), provider_url: stringAt(row.provider_url, `${path}.provider_url`) as string,
+    event_ticker: nullableStringAt(row.event_ticker, `${path}.event_ticker`), market_ticker: nullableStringAt(row.market_ticker, `${path}.market_ticker`),
+    market_type: enumAt(row.market_type, `${path}.market_type`, ['total']), period: enumAt(row.period, `${path}.period`, ['full_game']),
+    quote_type: enumAt(row.quote_type, `${path}.quote_type`, ['contract_ask']), price_format: enumAt(row.price_format, `${path}.price_format`, ['contract_cents']),
+    currency: enumAt(row.currency, `${path}.currency`, ['USD']), line: nullableNumberAt(row.line, `${path}.line`, 0, 40),
+    over_ask_dollars: overDollars, under_ask_dollars: underDollars,
+    over_ask_cents: overCents, under_ask_cents: underCents, source_updated_at: null,
+    observed_at: timestampAt(row.observed_at, `${path}.observed_at`, true), raw_sha256: nullableStringAt(row.raw_sha256, `${path}.raw_sha256`),
+    snapshot_id: nullableStringAt(row.snapshot_id, `${path}.snapshot_id`), active: booleanAt(row.active, `${path}.active`),
+    condition: nullableStringAt(row.condition, `${path}.condition`), over_ask_size: decimalAt(row.over_ask_size, `${path}.over_ask_size`, true), under_ask_size: decimalAt(row.under_ask_size, `${path}.under_ask_size`, true), source_schema_version: stringAt(row.source_schema_version, `${path}.source_schema_version`) as string
+  };
+  if (row.source_updated_at !== null) fail(`${path}.source_updated_at`, 'must be null when the exchange quote update time is unknown');
+  if (market.game_pk !== gamePk || market.slate_date !== gameDate || market.game_time !== gameTime) fail(path, 'must identify this exact scheduled game, date, and start');
+  const populated = [market.line, market.over_ask_cents, market.under_ask_cents, market.raw_sha256, market.snapshot_id].some((entry) => entry !== null);
+  if (state === 'observed_unknown_age' || populated) {
+    const required = [market.game_time, market.event_ticker, market.market_ticker, market.line, market.over_ask_cents, market.under_ask_cents, market.over_ask_dollars, market.under_ask_dollars, market.over_ask_size, market.under_ask_size, market.observed_at, market.raw_sha256, market.snapshot_id, market.condition];
+    if (required.some((entry) => entry === null)) fail(path, 'observed exchange evidence must include exact game identity, both asks and sizes, retrieval, condition, hash, and snapshot');
+    if (!market.active) fail(path, 'observed exchange evidence must have an active, positive two-sided order');
+    if (!Number.isInteger(market.line! * 2) || Number.isInteger(market.line!)) fail(`${path}.line`, 'must be a half-run threshold without a push ambiguity');
+    if (!/^[a-f0-9]{64}$/.test(market.raw_sha256 ?? '') || !/^[a-f0-9]{64}$/.test(market.snapshot_id ?? '')) fail(path, 'exchange provenance must use lowercase SHA-256 digests');
+    if (!market.condition!.includes(`Over ${market.line}`)) fail(`${path}.condition`, 'must identify the YES contract as the exact Over threshold');
+    if (!decimalEqual(dollarsToCents(market.over_ask_dollars!), market.over_ask_cents!) || !decimalEqual(dollarsToCents(market.under_ask_dollars!), market.under_ask_cents!)) fail(path, 'display cents must preserve the native decimal asks');
+  }
+  return market;
+}
+
 function validateGame(value: unknown, index: number): BallparkGame {
   const path = `games[${index}]`;
   const row = objectAt(value, path);
@@ -236,9 +349,11 @@ function validateGame(value: unknown, index: number): BallparkGame {
   if (!/^[A-Z]{2,3}$/.test(awayTeam)) fail(`${path}.away_team`, 'must be a canonical team code');
   const homePitcher = nullableStringAt(row.home_pitcher, `${path}.home_pitcher`);
   const awayPitcher = nullableStringAt(row.away_pitcher, `${path}.away_pitcher`);
+  const gamePk = integerAt(row.game_pk, `${path}.game_pk`, 1);
+  const gameDate = isoDateAt(row.game_date, `${path}.game_date`);
   return {
-    game_pk: integerAt(row.game_pk, `${path}.game_pk`, 1),
-    game_date: isoDateAt(row.game_date, `${path}.game_date`),
+    game_pk: gamePk,
+    game_date: gameDate,
     game_time: gameTime,
     game_status: stringAt(row.game_status, `${path}.game_status`) as string,
     game_number: integerAt(row.game_number, `${path}.game_number`, 1),
@@ -252,7 +367,9 @@ function validateGame(value: unknown, index: number): BallparkGame {
     factors: validateFactors(row.factors, `${path}.factors`),
     lineup: validateLineup(row.lineup, `${path}.lineup`),
     approach_c: validateApproachC(row.approach_c, `${path}.approach_c`),
-    trajectory: validateTrajectory(row.trajectory, `${path}.trajectory`)
+    trajectory: validateTrajectory(row.trajectory, `${path}.trajectory`),
+    odds: validateOdds(row.odds, `${path}.odds`, gamePk, gameDate),
+    exchange_market: validateExchangeMarket(row.exchange_market, `${path}.exchange_market`, gamePk, gameDate, gameTime)
   };
 }
 
@@ -273,7 +390,69 @@ function validateHealth(value: unknown): PublicationHealth {
     stringAt(record.state, `health.${lane}.state`);
     result[lane] = record;
   }
+  if (health.odds !== undefined) {
+    const odds = objectAt(health.odds, 'health.odds');
+    enumAt(odds.state, 'health.odds.state', ['available', 'partial', 'unavailable', 'not_applicable']);
+    result.odds = odds;
+  } else {
+    result.odds = { state: 'unavailable', source: 'Not recorded', reason: 'This legacy release predates quoted full-game totals.' };
+  }
+  if (health.exchange_markets !== undefined) {
+    const exchange = objectAt(health.exchange_markets, 'health.exchange_markets');
+    enumAt(exchange.state, 'health.exchange_markets.state', ['available', 'partial', 'unavailable']);
+    result.exchange_markets = exchange;
+  }
   return result;
+}
+
+function validateOddsHealth(value: unknown, games: BallparkGame[], requiresOddsLane: boolean): PublicationHealth {
+  const health = validateHealth(value);
+  if (!requiresOddsLane) return health;
+  const odds = objectAt(objectAt(value, 'health').odds, 'health.odds');
+  const state = enumAt(odds.state, 'health.odds.state', ['available', 'partial', 'unavailable', 'not_applicable']);
+  const source = stringAt(odds.source, 'health.odds.source') as string;
+  if (!source || odds.optional !== false) fail('health.odds', 'must identify a non-optional canonical odds lane');
+  const counts = {
+    current: integerAt(odds.current_games, 'health.odds.current_games', 0),
+    observedUnknownAge: integerAt(odds.observed_unknown_age_games ?? 0, 'health.odds.observed_unknown_age_games', 0),
+    stale: integerAt(odds.stale_games, 'health.odds.stale_games', 0),
+    unavailable: integerAt(odds.unavailable_games, 'health.odds.unavailable_games', 0)
+  };
+  const actual = { current: 0, observed_unknown_age: 0, stale: 0, unavailable: 0 };
+  for (const game of games) actual[game.odds.state] += 1;
+  if (counts.current !== actual.current || counts.observedUnknownAge !== actual.observed_unknown_age || counts.stale !== actual.stale || counts.unavailable !== actual.unavailable || counts.current + counts.observedUnknownAge + counts.stale + counts.unavailable !== games.length) {
+    fail('health.odds', 'counts must match every game market state exactly');
+  }
+  const expectedState = actual.current === games.length ? 'available' : actual.current > 0 || actual.observed_unknown_age > 0 ? 'partial' : 'unavailable';
+  if (state !== expectedState) fail('health.odds.state', 'must match the summarized game market states');
+  if ('acquisition_status' in odds) {
+    enumAt(odds.acquisition_status, 'health.odds.acquisition_status', ['observed', 'no_quote', 'schema_error', 'transport_error']);
+    nullableStringAt(odds.acquisition_error, 'health.odds.acquisition_error');
+  }
+  health.odds = odds;
+  return health;
+}
+
+function validateExchangeHealth(value: unknown, health: PublicationHealth, games: BallparkGame[], requiresExchangeLane: boolean): PublicationHealth {
+  if (!requiresExchangeLane) return health;
+  const exchange = objectAt(objectAt(value, 'health').exchange_markets, 'health.exchange_markets');
+  const state = enumAt(exchange.state, 'health.exchange_markets.state', ['available', 'partial', 'unavailable']);
+  if (exchange.optional !== true || !(stringAt(exchange.source, 'health.exchange_markets.source') as string)) {
+    fail('health.exchange_markets', 'must identify this as a non-empty supplemental optional lane');
+  }
+  const counts = {
+    observedUnknownAge: integerAt(exchange.observed_unknown_age_games, 'health.exchange_markets.observed_unknown_age_games', 0),
+    unavailable: integerAt(exchange.unavailable_games, 'health.exchange_markets.unavailable_games', 0),
+  };
+  const actual = { observed_unknown_age: 0, unavailable: 0 };
+  for (const game of games) actual[game.exchange_market!.state] += 1;
+  if (counts.observedUnknownAge !== actual.observed_unknown_age || counts.unavailable !== actual.unavailable || counts.observedUnknownAge + counts.unavailable !== games.length) {
+    fail('health.exchange_markets', 'counts must match every observed-unknown-age or unavailable supplemental market');
+  }
+  const expectedState = actual.observed_unknown_age === games.length ? 'available' : actual.observed_unknown_age > 0 ? 'partial' : 'unavailable';
+  if (state !== expectedState) fail('health.exchange_markets.state', 'must match the summarized supplemental market states');
+  health.exchange_markets = exchange;
+  return health;
 }
 
 function validateModel(value: unknown): JsonRecord {
@@ -304,14 +483,48 @@ export function validatePayload(value: unknown): BallparkPayload {
   if (root.schema_version !== 1) fail('schema_version', 'must equal 1');
   if (root.product !== 'ballpark-weather-lab') fail('product', 'must identify ballpark-weather-lab');
   const date = isoDateAt(root.date, 'date');
+  const generatedAt = timestampAt(root.generated_at, 'generated_at') as string;
   const status = publicationStatusAt(root.status, 'status');
-  const games = arrayAt(root.games, 'games').map(validateGame);
+  const rawGames = arrayAt(root.games, 'games');
+  const rawIds = rawGames.map((game, index) => integerAt(objectAt(game, `games[${index}]`).game_pk, `games[${index}].game_pk`, 1));
+  if (new Set(rawIds).size !== rawIds.length) fail('games', 'duplicates game ID');
+  const oddsFields = rawGames.map((game, index) => 'odds' in objectAt(game, `games[${index}]`));
+  const hasOdds = oddsFields.some(Boolean);
+  if (hasOdds && oddsFields.some((entry) => !entry)) fail('games', 'cannot mix legacy games with quoted-market games');
+  const hasOddsHealth = 'odds' in objectAt(root.health, 'health');
+  if (rawGames.length > 0 && hasOdds !== hasOddsHealth) fail('health.odds', 'must accompany every quoted-market game and no legacy game');
+  const exchangeFields = rawGames.map((game, index) => 'exchange_market' in objectAt(game, `games[${index}]`));
+  const hasExchange = exchangeFields.some(Boolean);
+  if (hasExchange && exchangeFields.some((entry) => !entry)) fail('games', 'cannot mix legacy games with supplemental exchange-market games');
+  const hasExchangeHealth = 'exchange_markets' in objectAt(root.health, 'health');
+  if (rawGames.length > 0 && hasExchange !== hasExchangeHealth) fail('health.exchange_markets', 'must accompany every supplemental exchange-market game and no legacy game');
+  const games = rawGames.map(validateGame);
   const seen = new Set<number>();
   for (const [index, game] of games.entries()) {
     if (seen.has(game.game_pk)) fail(`games[${index}].game_pk`, `duplicates game ID ${game.game_pk}`);
     seen.add(game.game_pk);
     if (game.game_date !== date) fail(`games[${index}].game_date`, 'must match the publication date');
     if (game.weather.game_pk !== game.game_pk) fail(`games[${index}].weather.game_pk`, 'must match the game ID');
+    if (game.odds.state === 'current' && (Date.parse(game.odds.source_updated_at!) > Date.parse(generatedAt) || Date.parse(game.odds.observed_at!) > Date.parse(generatedAt))) {
+      fail(`games[${index}].odds`, 'current quote cannot be sourced or observed after publication generation');
+    }
+    if (
+      game.odds.state === 'observed_unknown_age'
+      && game.odds.observed_at !== null
+      && Date.parse(game.odds.observed_at) > Date.parse(generatedAt) + 5 * 60_000
+    ) {
+      fail(`games[${index}].odds`, 'observed market evidence cannot be retrieved after publication generation');
+    }
+    if (
+      game.exchange_market?.state === 'observed_unknown_age'
+      && game.exchange_market.observed_at !== null
+      && Date.parse(game.exchange_market.observed_at) > Date.parse(generatedAt) + 5 * 60_000
+    ) {
+      fail(
+        `games[${index}].exchange_market`,
+        'observed exchange evidence cannot be retrieved after publication generation'
+      );
+    }
   }
   if (status === 'no_slate' && games.length !== 0) fail('games', 'must be empty when status is no_slate');
   if (status !== 'no_slate' && games.length === 0) fail('games', 'must contain at least one game unless status is no_slate');
@@ -321,11 +534,11 @@ export function validatePayload(value: unknown): BallparkPayload {
     schema_version: 1,
     product: 'ballpark-weather-lab',
     date,
-    generated_at: timestampAt(root.generated_at, 'generated_at') as string,
+    generated_at: generatedAt,
     status,
     no_slate_reason: noSlateReason,
     model: validateModel(root.model),
-    health: validateHealth(root.health),
+    health: validateExchangeHealth(root.health, validateOddsHealth(root.health, games, hasOdds), games, hasExchange),
     games
   };
 }

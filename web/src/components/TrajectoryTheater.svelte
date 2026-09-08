@@ -5,17 +5,18 @@
 
   export let game: BallparkGame;
   let selectedIndex = 0;
+  let tabButtons: HTMLButtonElement[] = [];
 
   $: arcs = game.trajectory.arcs;
   $: if (selectedIndex >= arcs.length) selectedIndex = 0;
   $: selectedArc = arcs[selectedIndex] ?? null;
-  $: neutralPath = selectedArc ? pathFor(selectedArc.neutral_points_ft) : '';
-  $: weatherPath = selectedArc ? pathFor(selectedArc.weather_points_ft) : '';
+  $: plotX = selectedArc ? Math.max(1, ...selectedArc.neutral_points_ft.map(([x]) => x), ...selectedArc.weather_points_ft.map(([x]) => x)) : 1;
+  $: plotY = selectedArc ? Math.max(1, ...selectedArc.neutral_points_ft.map(([, y]) => y), ...selectedArc.weather_points_ft.map(([, y]) => y)) : 1;
+  $: neutralPath = selectedArc ? pathFor(selectedArc.neutral_points_ft, plotX, plotY) : '';
+  $: weatherPath = selectedArc ? pathFor(selectedArc.weather_points_ft, plotX, plotY) : '';
 
-  function pathFor(points: TrajectoryPoint[]): string {
+  function pathFor(points: TrajectoryPoint[], maxX: number, maxY: number): string {
     if (!points.length) return '';
-    const maxX = Math.max(1, ...points.map(([x]) => x));
-    const maxY = Math.max(1, ...points.map(([, y]) => y));
     return points.map(([x, y], index) => {
       const px = 24 + (x / maxX) * 392;
       const py = 210 - (y / maxY) * 174;
@@ -30,13 +31,30 @@
     ].filter(Boolean);
     return arc.archetype || (parts.length ? parts.join(' · ') : `Trajectory ${index + 1}`);
   }
+
+  function selectArc(index: number, focus = false): void {
+    selectedIndex = index;
+    if (focus) requestAnimationFrame(() => tabButtons[index]?.focus());
+  }
+
+  function handleTabKey(event: KeyboardEvent, index: number): void {
+    if (!arcs.length) return;
+    let next: number | null = null;
+    if (event.key === 'ArrowRight') next = (index + 1) % arcs.length;
+    if (event.key === 'ArrowLeft') next = (index - 1 + arcs.length) % arcs.length;
+    if (event.key === 'Home') next = 0;
+    if (event.key === 'End') next = arcs.length - 1;
+    if (next === null) return;
+    event.preventDefault();
+    selectArc(next, true);
+  }
 </script>
 
 <section class="evidence-section trajectory" aria-labelledby={`trajectory-${game.game_pk}`}>
   <div class="section-heading">
     <div>
       <p class="eyebrow">Optional physics context</p>
-      <h3 id={`trajectory-${game.game_pk}`}>Trajectory theater</h3>
+      <h3 id={`trajectory-${game.game_pk}`}>Flight-path comparison</h3>
     </div>
     <span class="section-note">Neutral vs weather</span>
   </div>
@@ -48,12 +66,16 @@
           type="button"
           role="tab"
           aria-selected={selectedIndex === index}
+          aria-controls={`trajectory-panel-${game.game_pk}`}
           tabindex={selectedIndex === index ? 0 : -1}
-          on:click={() => selectedIndex = index}
+          bind:this={tabButtons[index]}
+          on:click={() => selectArc(index)}
+          on:keydown={(event) => handleTabKey(event, index)}
         >{arcLabel(arc, index)}</button>
       {/each}
     </div>
-    <figure class="trajectory-stage">
+    <div class="trajectory-stage" id={`trajectory-panel-${game.game_pk}`} role="tabpanel" aria-label={`${arcLabel(selectedArc, selectedIndex)} flight-path plot`}>
+      <figure>
       <svg viewBox="0 0 440 230" role="img" aria-label={`${arcLabel(selectedArc, selectedIndex)}: neutral and weather-adjusted flight paths`}>
         <path d="M24 210 H416" class="trajectory-ground"></path>
         <path d="M24 35 V210" class="trajectory-axis"></path>
@@ -67,7 +89,8 @@
         <span><i class="legend-line weather" aria-hidden="true"></i> Game-hour weather</span>
         <strong>Carry Δ {formatDelta(selectedArc.carry_delta_ft, 1)} ft</strong>
       </figcaption>
-    </figure>
+      </figure>
+    </div>
     <p class="plain-note">{game.trajectory.integration ?? 'Lookup-table trajectories provide physical context and do not replace the trained park-factor estimate.'}</p>
   {:else}
     <div class="figure-hold">

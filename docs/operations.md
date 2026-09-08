@@ -7,44 +7,130 @@ GitHub Pages artifact, and prove that the public date and payload bytes match th
 
 ## One-time setup
 
-Install Python 3.12 or newer and Node.js 22.x, then run from the repository root:
+The application metadata permits Python 3.12 or newer, but this hash-locked clean setup is verified
+only for **CPython 3.12** on **Linux x86_64** and **Windows x86_64**. The verification-only lock has
+only those PyYAML wheels; macOS and CPython 3.13+ are not supported verification-install targets.
+Install Node.js 22.x, then run from the repository root:
+
+Linux x86_64 (CPython 3.12):
 
 ```bash
-python -m venv .venv
-python -m pip install --require-hashes --requirement requirements.lock
-python -m pip install --no-build-isolation --no-deps --editable .
+python3.12 -m venv .venv
+.venv/bin/python -m pip install --require-hashes --requirement requirements.lock
+.venv/bin/python -m pip install --only-binary=:all: --require-hashes --requirement .github/requirements-verify.txt
+.venv/bin/python -m pip install --no-build-isolation --no-deps --editable .
 npm ci --prefix web
 ```
 
-Activate `.venv` using the normal command for the operating system.
+Windows x86_64 PowerShell (CPython 3.12):
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --require-hashes --requirement requirements.lock
+.\.venv\Scripts\python.exe -m pip install --only-binary=:all: --require-hashes --requirement .github/requirements-verify.txt
+.\.venv\Scripts\python.exe -m pip install --no-build-isolation --no-deps --editable .
+npm ci --prefix web
+```
+
+The documented commands invoke `.venv` directly, so activation is optional and does not affect
+clean-install evidence.
 
 ## One daily command
 
-```bash
-python -m ballpark daily
-```
+Linux x86_64: `.venv/bin/python -m ballpark daily`
+
+Windows x86_64 PowerShell: `.\.venv\Scripts\python.exe -m ballpark daily`
 
 The default date is the current `America/New_York` calendar date. For an explicit date:
 
 ```bash
-python -m ballpark daily --date 2026-08-26
+.venv/bin/python -m ballpark daily --date 2026-08-26
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m ballpark daily --date 2026-08-26
 ```
 
 For a deterministic, network-free demonstration:
 
 ```bash
-python -m ballpark daily --date 2026-08-26 --fixture tests/fixtures/normal_slate.json \
+.venv/bin/python -m ballpark daily --date 2026-08-26 --fixture tests/fixtures/normal_slate.json \
+  --generated-at 2026-08-26T12:00:00Z
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m ballpark daily --date 2026-08-26 --fixture tests/fixtures/normal_slate.json `
   --generated-at 2026-08-26T12:00:00Z
 ```
 
 Successful operation leaves the complete static build in `web/dist`. The command itself checks
 that the distribution's payload bytes match `web/dist/data/release.json`.
 
-## Preflight verification
+## Runtime source service
+
+The runtime service is a separate local publication path. It uses the keyless ESPN MLB scoreboard
+as the canonical DraftKings full-game-total source. The `sportsbook` job runs every five minutes;
+each attempt makes one scoreboard bulk GET for the selected New York slate, with a 30-second job
+budget. Its HTTP request has the remaining absolute monotonic deadline, a 3-second connect cap,
+an 8-second read cap, one deadline-bound attempt with redirects rejected, and a 5 MiB response limit. No API key is read.
+
+Kalshi is a supplemental, independent lane. Its one-minute refresh cannot replace sportsbook
+prices or hide a sportsbook failure; a Kalshi failure records its own retained-quote failure
+reason. Schedule, weather, and lineup receipts remain required before a publication, while a
+source-lane outage leaves a valid prior or degraded source lane available for publication.
+
+Start the worker and the local read-only server from the repository root with durable local
+directories chosen by the operator:
 
 ```bash
-python -m pytest
-python -m ballpark verify-artifacts
+.venv/bin/python -m ballpark runtime-worker \
+  --state-dir ./runtime-state --cache-dir ./runtime-cache --publication-dir ./runtime-publication
+.venv/bin/python -m ballpark runtime-server \
+  --state-dir ./runtime-state --publication-dir ./runtime-publication --web-dir web/dist --port 8080
+.venv/bin/python -m ballpark runtime-probe --state-dir ./runtime-state
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m ballpark runtime-worker `
+  --state-dir .\runtime-state --cache-dir .\runtime-cache --publication-dir .\runtime-publication
+.\.venv\Scripts\python.exe -m ballpark runtime-server `
+  --state-dir .\runtime-state --publication-dir .\runtime-publication --web-dir web\dist --port 8080
+.\.venv\Scripts\python.exe -m ballpark runtime-probe --state-dir .\runtime-state
+```
+
+The worker retains `cache-dir/sources/sportsbook.json`: the latest attempt, its original attempt
+clock and raw-response digest, plus restart-validated last-good normalized markets, original
+official game bindings, raw response bytes, and capture clocks. The raw response and bindings are
+private source evidence; the accepted publication records the source receipt in its private CAS
+input receipts under `publication-dir/objects`, never in the public payload. Maintenance outcomes
+and errors are retained as the bounded `state-dir/operations.json` history. The scheduler ledger
+remains `state-dir/runtime-state.sqlite3`; `/healthz`, `/readiness`, `/data/data.json`, and
+`/data/release.json` provide the normal service checks.
+
+`observed_unknown_age` means the source supplied a complete observed total but no quote-level
+update timestamp; the displayed capture time remains the original retrieval time. `retained` means
+the prior raw receipt, normalized market, exact teams, slate date, and start time all validated
+again after restart. An `Update failed` label means the latest provider attempt failed while the
+displayed retained observation remains identifiable; it does not turn that quote into a current
+one. A healthy ESPN response with no matching quote remains an explicit no-quote result and does
+not overwrite the separate last-good receipt.
+
+## Preflight verification
+
+Linux x86_64:
+
+```bash
+.venv/bin/python -m pytest
+.venv/bin/python -m ballpark verify-artifacts
+npm run verify --prefix web
+npm run test:e2e --prefix web
+```
+
+Windows x86_64 PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m ballpark verify-artifacts
 npm run verify --prefix web
 npm run test:e2e --prefix web
 ```
@@ -87,7 +173,8 @@ The workflow:
 1. Installs the locked direct dependencies.
 2. Runs Python tests, artifact verification, Svelte checks, and frontend unit tests.
 3. Restores valid public history when available.
-4. Runs `python -m ballpark daily`.
+4. Runs the runner's configured Python entrypoint for `ballpark daily` (the hosted runner does not
+   use a local `.venv`).
 5. Uploads `web/dist` as one Pages artifact.
 6. Deploys with GitHub's Pages identity.
 7. Reads back the public date and exact payload SHA-256 with bounded retries.
@@ -143,8 +230,17 @@ The current hosted and public receipts are recorded in [verification.md](verific
 
 Check the rolling evidence gate directly against the public archive:
 
+Linux x86_64:
+
 ```bash
-python -m ballpark verify-reliability \
+.venv/bin/python -m ballpark verify-reliability \
+  --url "https://ballinprestige.github.io/ballpark-weather-lab/"
+```
+
+Windows x86_64 PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m ballpark verify-reliability `
   --url "https://ballinprestige.github.io/ballpark-weather-lab/"
 ```
 
@@ -160,9 +256,19 @@ corresponding successful workflow/public-readback links as the hosted execution 
 
 Given the deployed URL and a local release receipt:
 
+Linux x86_64:
+
 ```bash
-python -m ballpark verify-public \
+.venv/bin/python -m ballpark verify-public \
   --url "https://ballinprestige.github.io/ballpark-weather-lab/" \
+  --receipt web/dist/data/release.json
+```
+
+Windows x86_64 PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m ballpark verify-public `
+  --url "https://ballinprestige.github.io/ballpark-weather-lab/" `
   --receipt web/dist/data/release.json
 ```
 
@@ -223,6 +329,8 @@ Dependabot monitors Python and npm manifests weekly. Review changes rather than 
 `requirements.lock` fixes the transitive Python graph and package hashes; `requirements.in` is the
 reviewable direct-input file. Regenerate it in a reviewed Python 3.12 environment with
 `pip-compile --generate-hashes --allow-unsafe requirements.in`, then verify installation with
-`--require-hashes`.
+`--require-hashes`. `.github/requirements-verify.txt` is a separate, hash-pinned verification-only
+dependency lock for the workflow contract parser. It must be installed before running the default
+pytest suite but is not part of the application runtime dependency graph.
 The official CPU-only XGBoost distribution keeps the hosted runtime small and excludes unused GPU
 libraries. Workflow Actions are pinned to reviewed full commit SHAs.

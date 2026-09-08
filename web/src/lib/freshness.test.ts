@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessPublicationFreshness, dateInTimeZone, MLB_TIME_ZONE } from './freshness';
+import { assessOddsFreshness, assessPublicationFreshness, dateInTimeZone, MLB_TIME_ZONE } from './freshness';
 
 describe('publication freshness', () => {
   it('uses the America/New_York calendar date before and after midnight', () => {
@@ -30,5 +30,19 @@ describe('publication freshness', () => {
 
   it('rejects impossible publication dates', () => {
     expect(() => assessPublicationFreshness('2026-02-30', new Date('2026-08-28T20:55:00Z'))).toThrow(/Invalid ISO publication date/);
+  });
+
+  it('ages a current quote at the canonical boundary and rejects future clocks', () => {
+    const now = new Date('2026-09-07T20:00:00Z');
+    expect(assessOddsFreshness({ state: 'current', reason: null, source_updated_at: '2026-09-07T19:45:00Z', observed_at: '2026-09-07T19:45:00Z' }, now).state).toBe('current');
+    expect(assessOddsFreshness({ state: 'current', reason: null, source_updated_at: '2026-09-07T19:44:59Z', observed_at: '2026-09-07T19:44:59Z' }, now).state).toBe('stale');
+    expect(assessOddsFreshness({ state: 'current', reason: null, source_updated_at: '2026-09-07T20:06:00Z', observed_at: '2026-09-07T20:00:00Z' }, now).state).toBe('unavailable');
+  });
+
+  it('renders only the explicit observed-unknown-age state and rejects a future capture', () => {
+    expect(assessOddsFreshness({ state: 'unavailable', reason: 'source update time not documented', line: 8.5, over_price: -110, under_price: -110, source_updated_at: null, observed_at: '2026-09-07T20:10:00Z' }, new Date('2026-09-07T20:00:00Z')).state).toBe('unavailable');
+    expect(assessOddsFreshness({ state: 'unavailable', reason: 'no verified quote', line: null, over_price: null, under_price: null, source_updated_at: null, observed_at: null }).state).toBe('unavailable');
+    expect(assessOddsFreshness({ state: 'observed_unknown_age', reason: 'quote update time not documented', line: 8.5, over_price: -110, under_price: -110, source_updated_at: null, observed_at: '2026-09-07T20:00:00Z' }, new Date('2026-09-07T20:00:00Z')).state).toBe('observed');
+    expect(assessOddsFreshness({ state: 'observed_unknown_age', reason: 'quote update time not documented', line: 8.5, over_price: -110, under_price: -110, source_updated_at: null, observed_at: '2026-09-07T20:10:00Z' }, new Date('2026-09-07T20:00:00Z')).state).toBe('unavailable');
   });
 });

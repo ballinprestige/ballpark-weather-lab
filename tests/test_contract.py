@@ -21,9 +21,7 @@ def test_schema_accepts_canonical_payload(
         (lambda value: value.update(status="unexpected"), "status"),
         (lambda value: value["games"][0]["weather"].pop("basis"), "weather.*basis"),
         (
-            lambda value: value["games"][0]["factors"].update(
-                weather_multiplier_runs=1.5
-            ),
+            lambda value: value["games"][0]["factors"].update(weather_multiplier_runs=1.5),
             "weather_multiplier_runs",
         ),
     ],
@@ -93,3 +91,23 @@ def test_contract_rejects_weather_receipt_for_another_game(
     payload["games"][0]["weather"]["game_pk"] = 999999
     with pytest.raises(DataContractError, match="weather attached to the wrong game"):
         validate_payload(payload, project_root / "schemas" / "slate.schema.json")
+
+
+def test_contract_accepts_verified_weather_with_explicitly_held_model_adjustment(
+    valid_payload: dict[str, object], project_root: Path
+) -> None:
+    payload = deepcopy(valid_payload)
+    payload["status"] = "degraded"
+    factors = payload["games"][0]["factors"]
+    factors.update(
+        state="held",
+        reason="learned weather adjustment held pending feature-compatibility validation",
+        weather_multiplier_runs=1.0,
+        weather_multiplier_hr=1.0,
+    )
+    factors["game_pf_runs"] = factors["seasonal_pf_runs"]
+    factors["game_pf_hr"] = factors["seasonal_pf_hr"]
+    factors["weather_delta_runs"] = 0.0
+    factors["weather_delta_hr"] = 0.0
+
+    validate_payload(payload, project_root / "schemas" / "slate.schema.json")

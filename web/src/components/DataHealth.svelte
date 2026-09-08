@@ -2,6 +2,7 @@
   import type { BallparkPayload, GeometryArtifact } from '../lib/types';
   import { formatTimestamp, healthReason, healthState, humanizeKey, shortHash } from '../lib/format';
   import { isReadyState } from '../lib/validate';
+  import { oddsHealthDetail } from '../lib/odds_health';
   import StateBadge from './StateBadge.svelte';
 
   export let payload: BallparkPayload;
@@ -11,11 +12,12 @@
   export let isArchive = false;
   export let isStale = false;
 
-  $: lanes = Object.entries(payload.health) as Array<[keyof BallparkPayload['health'], BallparkPayload['health'][keyof BallparkPayload['health']]]>;
+  $: lanes = Object.entries(payload.health).filter(([, lane]) => lane !== undefined) as Array<[keyof BallparkPayload['health'], NonNullable<BallparkPayload['health'][keyof BallparkPayload['health']]>]>;
   $: weatherReady = payload.games.filter((game) => isReadyState(game.weather.state)).length;
   $: factorReady = payload.games.filter((game) => isReadyState(game.factors.state)).length;
   $: lineupsReady = payload.games.filter((game) => isReadyState(game.lineup.state)).length;
   $: trajectoryReady = payload.games.filter((game) => isReadyState(game.trajectory.state)).length;
+  $: exchangeFailures = payload.games.filter((game) => game.exchange_market?.failure_reason).map((game) => `${game.away_team} at ${game.home_team}: ${game.exchange_market?.failure_reason}`);
 </script>
 
 <section class="view health-view" aria-labelledby="health-title">
@@ -47,9 +49,9 @@
     <div class="section-heading">
       <div>
         <p class="eyebrow">Dependency state</p>
-        <h2 id="lanes-title">Four publication lanes</h2>
+        <h2 id="lanes-title">Publication lanes</h2>
       </div>
-      <span class="section-note">Optional never blocks core</span>
+      <span class="section-note">Market failures remain explicit</span>
     </div>
     <div class="health-lane-list">
       {#each lanes as [name, lane], index}
@@ -57,7 +59,7 @@
           <div class="lane-index" aria-hidden="true">{String(index + 1).padStart(2, '0')}</div>
           <div>
             <h3>{humanizeKey(name)}</h3>
-            <p>{healthReason(lane) ?? (isReadyState(healthState(lane)) ? 'Validated for this publication.' : 'This lane did not report additional detail.')}</p>
+            <p>{name === 'odds' ? oddsHealthDetail(lane) : healthReason(lane) ?? (isReadyState(healthState(lane)) ? 'Validated for this publication.' : 'This lane did not report additional detail.')}</p>
           </div>
           <StateBadge state={healthState(lane)} />
         </article>
@@ -81,6 +83,15 @@
     </dl>
     <p class="plain-note">Schedule and validated weather/factors define the core slate. Lineups and trajectory context may arrive later without suppressing ready games.</p>
   </section>
+
+  {#if exchangeFailures.length}
+    <section class="warning-ledger" aria-labelledby="exchange-failure-title">
+      <p class="eyebrow">Supplemental exchange status</p>
+      <h2 id="exchange-failure-title">Kalshi update failed</h2>
+      <p>Captured contract asks may be retained with their original as-of time; they are not a new observation.</p>
+      <ul>{#each exchangeFailures as failure}<li>{failure}</li>{/each}</ul>
+    </section>
+  {/if}
 
   {#if warnings.length}
     <section class="warning-ledger" aria-labelledby="warnings-title">

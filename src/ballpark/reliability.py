@@ -188,9 +188,7 @@ def verify_publication_streak(
         raise ValueError("delay_seconds must be between 0 and 10")
     if urlsplit(base_url).scheme not in {"http", "https"}:
         raise ValueError("public URL must use http or https")
-    schema_path = schema_path or (
-        ProjectPaths.discover().schemas / "slate.schema.json"
-    )
+    schema_path = schema_path or (ProjectPaths.discover().schemas / "slate.schema.json")
     index_url = urljoin(base_url.rstrip("/") + "/", "archive/index.json")
     try:
         raw_index = _get_bytes_with_retries(

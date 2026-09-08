@@ -1,0 +1,194 @@
+name: Linux container runtime smoke
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  container-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Build and verify artifact-complete image
+        run: |
+          set -euo pipefail
+          docker build --tag ballpark-runtime-smoke:ci .
+          docker run --rm --entrypoint ballpark ballpark-runtime-smoke:ci verify-artifacts
+      - name: Prove fixture worker iteration, child failure, and graceful shutdown
+        run: |
+          set -euo pipefail
+          mkdir -p .ci-runtime
+          curl_ci() {
+            curl --fail --silent --show-error --connect-timeout 2 --max-time 5 "$@"
+          }
+          wait_ready() {
+            port="$1"
+            for attempt in $(seq 1 30); do
+              if curl_ci "http://127.0.0.1:${port}/healthz" >/dev/null \
+                && curl_ci "http://127.0.0.1:${port}/readiness" >/dev/null \
+                && curl_ci "http://127.0.0.1:${port}/data/release.json" >/dev/null; then
+                return 0
+              fi
+              sleep 1
+            done
+            return 1
+          }
+          name=ballpark-runtime-smoke
+          cleanup() { docker rm --force "$name" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker run --detach --name "$name" --publish 127.0.0.1:18080:8080 \
+            --env BALLPARK_HOST=0.0.0.0 --env PORT=8080 \
+            --env BALLPARK_FIXTURE=/fixture.json --env BALLPARK_DATE=2026-08-26 \
+            --volume "$PWD/tests/fixtures/no_slate.json:/fixture.json:ro" \
+            ballpark-runtime-smoke:ci service
+          if ! wait_ready 18080; then docker logs "$name"; exit 1; fi
+          curl_ci http://127.0.0.1:18080/data/data.json | grep -F '"status":"no_slate"'
+          heartbeat() {
+            docker exec "$name" python -c 'import json,sqlite3; print(json.loads(sqlite3.connect("/var/lib/ballpark/state/runtime-state.sqlite3").execute("select value from state where id=1").fetchone()[0])["heartbeat_at"])'
+          }
+          first_heartbeat="$(heartbeat)"
+          sleep 2
+          second_heartbeat="$(heartbeat)"
+          test "$first_heartbeat" != "$second_heartbeat"
+          for request in $(seq 1 40); do curl_ci http://127.0.0.1:18080/data/data.json >/dev/null; done
+          docker stats --no-stream --format '{{json .}}' "$name" | tee .ci-runtime/no-slate-container-stats.json
+          docker logs "$name" > .ci-runtime/no-slate-service.log 2>&1
+          docker exec "$name" python -c '
+          import os, signal
+
+          def ppid(pid):
+              for line in open(f"/proc/{pid}/status", encoding="utf-8"):
+                  if line.startswith("PPid:"):
+                      return int(line.split()[1])
+              return -1
+
+          targets = []
+          for entry in os.listdir("/proc"):
+              if not entry.isdigit():
+                  continue
+              pid = int(entry)
+              if pid == os.getpid():
+                  continue
+              try:
+                  argv = open(f"/proc/{pid}/cmdline", "rb").read().split(b"\0")
+                  if b"runtime-worker" in argv and ppid(pid) == 1:
+                      targets.append(pid)
+              except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
+                  continue
+          if len(targets) != 1:
+              raise SystemExit(f"expected exactly one PID 1-owned runtime-worker, found {targets}")
+          os.kill(targets[0], signal.SIGTERM)
+          '
+          for attempt in $(seq 1 15); do docker inspect --format '{{.State.Running}}' "$name" | grep -qx false && break; sleep 1; done
+          test "$(docker inspect --format '{{.State.Running}}' "$name")" = false
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$name")" != 0
+          docker rm "$name"
+          trap - EXIT
+          name=ballpark-runtime-term
+          trap cleanup EXIT
+          docker run --detach --name "$name" --publish 127.0.0.1:18081:8080 \
+            --env BALLPARK_HOST=0.0.0.0 --env PORT=8080 \
+            --env BALLPARK_FIXTURE=/fixture.json --env BALLPARK_DATE=2026-08-26 \
+            --volume "$PWD/tests/fixtures/no_slate.json:/fixture.json:ro" \
+            ballpark-runtime-smoke:ci service
+          if ! wait_ready 18081; then docker logs "$name"; exit 1; fi
+          docker stop --time 12 "$name"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$name")" = 0
+      - name: Profile a generated 15-game fixture under bounded HTTP load
+        run: |
+          set -euo pipefail
+          mkdir -p .ci-runtime
+          python - <<'PY'
+          import copy
+          import json
+          from datetime import datetime, timedelta
+          from pathlib import Path
+
+          source = json.loads(Path("tests/fixtures/normal_slate.json").read_text(encoding="utf-8"))
+          base_game = source["schedule"][0]
+          base_weather = source["weather_by_game"][str(base_game["game_pk"])]
+          base_lineup = source["lineups_by_game"][str(base_game["game_pk"])]
+          start = datetime.fromisoformat(base_game["game_time"].replace("Z", "+00:00"))
+          generated = {"date": source["date"], "schedule": [], "weather_by_game": {}, "lineups_by_game": {}}
+          for number in range(15):
+              game_id = 910000 + number
+              game = copy.deepcopy(base_game)
+              game["game_pk"] = game_id
+              game["game_number"] = number + 1
+              game["game_time"] = (start + timedelta(minutes=number)).isoformat().replace("+00:00", "Z")
+              weather = copy.deepcopy(base_weather)
+              weather["game_pk"] = game_id
+              generated["schedule"].append(game)
+              generated["weather_by_game"][str(game_id)] = weather
+              generated["lineups_by_game"][str(game_id)] = copy.deepcopy(base_lineup)
+          Path(".ci-runtime/synthetic-15-games.json").write_text(
+              json.dumps(generated, sort_keys=True, separators=(",", ":")), encoding="utf-8"
+          )
+          PY
+          name=ballpark-runtime-capacity
+          cleanup() { docker rm --force "$name" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          curl_ci() {
+            curl --fail --silent --show-error --connect-timeout 2 --max-time 5 "$@"
+          }
+          docker run --detach --name "$name" --publish 127.0.0.1:18082:8080 \
+            --env BALLPARK_HOST=0.0.0.0 --env PORT=8080 \
+            --env BALLPARK_FIXTURE=/fixture.json --env BALLPARK_DATE=2026-08-26 \
+            --volume "$PWD/.ci-runtime/synthetic-15-games.json:/fixture.json:ro" \
+            ballpark-runtime-smoke:ci service
+          for attempt in $(seq 1 30); do
+            if curl_ci http://127.0.0.1:18082/readiness >/dev/null \
+              && curl_ci http://127.0.0.1:18082/data/data.json | grep -F '"game_pk":910014' >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl_ci http://127.0.0.1:18082/data/data.json | grep -F '"game_pk":910014' >/dev/null
+          for sample in $(seq 1 5); do
+            docker stats --no-stream --format '{{json .}}' "$name"
+            sleep 1
+          done > .ci-runtime/synthetic-15-container-stats.jsonl
+          seq 1 40 | xargs -n 1 -P 8 sh -c 'curl --fail --silent --show-error --connect-timeout 2 --max-time 5 http://127.0.0.1:18082/data/data.json >/dev/null' sh
+          docker stats --no-stream --format '{{json .}}' "$name" >> .ci-runtime/synthetic-15-container-stats.jsonl
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          units = {"B": 1, "KiB": 1024, "MiB": 1024**2, "GiB": 1024**3}
+          samples = [json.loads(line) for line in Path(".ci-runtime/synthetic-15-container-stats.jsonl").read_text().splitlines()]
+          def memory_bytes(sample):
+              value = sample["MemUsage"].split(" / ", 1)[0]
+              amount, unit = re.fullmatch(r"([0-9.]+)([KMG]?i?B)", value).groups()
+              return int(float(amount) * units[unit])
+          values = [memory_bytes(sample) for sample in samples]
+          Path(".ci-runtime/synthetic-15-capacity-receipt.json").write_text(json.dumps({
+              "fixture": "generated from tests/fixtures/normal_slate.json",
+              "games": 15,
+              "http_requests": 40,
+              "parallelism": 8,
+              "samples": samples,
+              "sample_max_memory_bytes": max(values),
+              "sustained_last_memory_bytes": values[-1],
+          }, sort_keys=True, indent=2) + "\n")
+          PY
+          docker logs "$name" > .ci-runtime/synthetic-15-service.log 2>&1
+          docker stop --time 12 "$name"
+      - name: Upload runtime smoke receipts
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+        with:
+          name: linux-container-runtime-smoke
+          path: .ci-runtime
+          if-no-files-found: warn

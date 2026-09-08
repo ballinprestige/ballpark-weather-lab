@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urljoin, urlsplit
 
+from ballpark.contract import validate_payload
 from ballpark.errors import DataContractError, PublicVerificationError
+from ballpark.paths import ProjectPaths
 
 
 class BytesClient(Protocol):
@@ -201,51 +203,92 @@ def restore_public_history(
     *,
     client: BytesClient,
     maximum_dates: int = 120,
+    strict: bool = False,
+    allow_empty_history: bool = False,
 ) -> dict[str, Any]:
     if maximum_dates < 1 or maximum_dates > 366:
         raise ValueError("maximum_dates must be between 1 and 366")
+    if allow_empty_history and not strict:
+        raise ValueError("allow_empty_history requires strict restoration")
     if urlsplit(base_url).scheme not in {"http", "https"}:
         raise ValueError("public URL must use http or https")
     try:
         raw_index = client.get_bytes(urljoin(base_url.rstrip("/") + "/", "archive/index.json"))
-        index = json.loads(raw_index)
     except Exception as exc:
+        if strict and allow_empty_history:
+            return {"state": "bootstrap", "restored": 0, "reason": None}
+        if strict:
+            raise PublicVerificationError("published archive index is unavailable") from exc
         return {"state": "not_available", "restored": 0, "reason": str(exc)}
+    try:
+        index = json.loads(raw_index)
+    except (TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        if strict:
+            raise PublicVerificationError("published archive index is malformed") from exc
+        return {
+            "state": "not_available",
+            "restored": 0,
+            "reason": "public archive index is malformed",
+        }
     if not isinstance(index, dict) or not isinstance(index.get("dates"), list):
+        if strict:
+            raise PublicVerificationError("published archive index is malformed")
         return {
             "state": "not_available",
             "restored": 0,
             "reason": "public archive index is malformed",
         }
     rows = index["dates"][:maximum_dates]
+    if strict and not rows:
+        if allow_empty_history:
+            return {"state": "bootstrap", "restored": 0, "reason": None}
+        raise PublicVerificationError("published archive index is empty")
     restored = 0
-    accepted: list[dict[str, Any]] = []
+    accepted: list[tuple[dict[str, Any], bytes]] = []
+    seen_dates: set[str] = set()
+
+    def reject(message: str) -> None:
+        if strict:
+            raise PublicVerificationError(f"published archive restoration is incomplete: {message}")
+
     for row in rows:
         if not isinstance(row, dict):
+            reject("archive index row is malformed")
             continue
         date_value = row.get("date")
         expected_hash = row.get("payload_sha256")
         if not isinstance(expected_hash, str) or len(expected_hash) != 64:
+            reject("archive index hash is malformed")
             continue
         try:
             date_value = _validated_iso_date(date_value)
         except DataContractError:
+            reject("archive index date is malformed")
             continue
+        if date_value in seen_dates:
+            reject("archive index contains a duplicate date")
+            continue
+        seen_dates.add(date_value)
         if any(character not in "0123456789abcdef" for character in expected_hash):
+            reject("archive index hash is malformed")
             continue
         try:
             content = client.get_bytes(
                 urljoin(base_url.rstrip("/") + "/", f"archive/{date_value}.json")
             )
         except Exception:
+            reject(f"archive payload is unavailable for {date_value}")
             continue
         if sha256_bytes(content) != expected_hash:
+            reject(f"archive payload hash differs for {date_value}")
             continue
         try:
             payload = json.loads(content)
         except json.JSONDecodeError:
+            reject(f"archive payload is malformed for {date_value}")
             continue
         if not isinstance(payload, dict) or payload.get("date") != date_value:
+            reject(f"archive payload date differs for {date_value}")
             continue
         games = payload.get("games")
         status = payload.get("status")
@@ -255,22 +298,31 @@ def restore_public_history(
             or status not in {"ready", "degraded", "no_slate"}
             or not isinstance(generated_at, str)
         ):
+            reject(f"archive payload schema is malformed for {date_value}")
             continue
-        atomic_write(output_root / "archive" / f"{date_value}.json", content)
-        accepted.append(
-            {
-                "date": date_value,
-                "payload_sha256": expected_hash,
-                "status": status,
-                "game_count": len(games),
-                "generated_at": generated_at,
-            }
-        )
+        try:
+            validate_payload(payload, ProjectPaths.discover().schemas / "slate.schema.json")
+        except DataContractError:
+            reject(f"archive payload schema is invalid for {date_value}")
+            continue
+        accepted_row = {
+            "date": date_value,
+            "payload_sha256": expected_hash,
+            "status": status,
+            "game_count": len(games),
+            "generated_at": generated_at,
+        }
+        if strict and any(row.get(key) != value for key, value in accepted_row.items()):
+            reject(f"archive index metadata differs for {date_value}")
+            continue
+        accepted.append((accepted_row, content))
         restored += 1
     restored_index = {
         "schema_version": 1,
         "updated_at": index.get("updated_at"),
-        "dates": accepted,
+        "dates": [row for row, _content in accepted],
     }
+    for row, content in accepted:
+        atomic_write(output_root / "archive" / f"{row['date']}.json", content)
     atomic_write(output_root / "archive" / "index.json", canonical_json_bytes(restored_index))
     return {"state": "restored", "restored": restored, "reason": None}

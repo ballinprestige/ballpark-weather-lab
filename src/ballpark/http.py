@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -39,14 +40,43 @@ class HttpClient:
         self.session.mount("http://", adapter)
         self.session.headers.update({"User-Agent": self.user_agent, "Accept": "application/json"})
 
-    def _get_bytes(self, url: str, *, params: dict[str, Any] | None = None) -> bytes:
-        response = self.session.get(
-            url,
-            params=params,
-            timeout=(self.connect_timeout, self.read_timeout),
-            stream=True,
-        )
+    def _get_bytes(
+        self,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        deadline_at: float | None = None,
+    ) -> bytes:
+        if deadline_at is not None:
+            remaining = deadline_at - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("HTTP batch deadline elapsed before request")
+            # Requests' adapter retries cannot observe an absolute deadline.  A bounded
+            # batch therefore uses one attempt, while ordinary offline builds retain
+            # the adapter's small retry policy.
+            timeout = (min(self.connect_timeout, remaining), min(self.read_timeout, remaining))
+            session = requests.Session()
+            session.headers.update(self.session.headers)
+            adapter = HTTPAdapter(max_retries=Retry(total=0, connect=0, read=0, status=0))
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+        else:
+            timeout = (self.connect_timeout, self.read_timeout)
+            session = self.session
+        response = None
         try:
+            request: dict[str, Any] = {
+                "params": params,
+                "timeout": timeout,
+                "stream": True,
+            }
+            if deadline_at is not None:
+                # A redirect is a second provider-controlled request with a fresh
+                # timeout. Deadline-bound source work admits exactly one GET.
+                request["allow_redirects"] = False
+            response = session.get(url, **request)
+            if deadline_at is not None and response.is_redirect:
+                raise RuntimeError("HTTP redirects are not permitted for deadline-bound requests")
             response.raise_for_status()
             declared = response.headers.get("Content-Length")
             if declared is not None and int(declared) > self.maximum_bytes:
@@ -54,6 +84,8 @@ class HttpClient:
             chunks: list[bytes] = []
             total = 0
             for chunk in response.iter_content(chunk_size=64 * 1024):
+                if deadline_at is not None and time.monotonic() >= deadline_at:
+                    raise TimeoutError("HTTP batch deadline elapsed while reading response")
                 if not chunk:
                     continue
                 total += len(chunk)
@@ -62,10 +94,19 @@ class HttpClient:
                 chunks.append(chunk)
             return b"".join(chunks)
         finally:
-            response.close()
+            if response is not None:
+                response.close()
+            if deadline_at is not None:
+                session.close()
 
-    def get_json(self, url: str, *, params: dict[str, Any] | None = None) -> Any:
-        return json.loads(self._get_bytes(url, params=params))
+    def get_json(
+        self, url: str, *, params: dict[str, Any] | None = None, deadline_at: float | None = None
+    ) -> Any:
+        return json.loads(self._get_bytes(url, params=params, deadline_at=deadline_at))
 
-    def get_bytes(self, url: str) -> bytes:
-        return self._get_bytes(url)
+    def get_bytes(self, url: str, *, deadline_at: float | None = None) -> bytes:
+        return self._get_bytes(url, deadline_at=deadline_at)
+
+    def close(self) -> None:
+        """Release pooled sockets at the end of a runtime acquisition pass."""
+        self.session.close()

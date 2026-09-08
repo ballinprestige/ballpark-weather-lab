@@ -5,7 +5,7 @@ import json
 import shutil
 import subprocess
 import sys
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -39,6 +39,11 @@ def _build_parser() -> argparse.ArgumentParser:
         command.add_argument("--generated-at")
     commands.choices["daily"].add_argument("--skip-web", action="store_true")
 
+    refresh = commands.add_parser("refresh-exchange")
+    refresh.add_argument("--payload", type=Path, required=True)
+    refresh.add_argument("--output", type=Path, required=True)
+    refresh.add_argument("--generated-at")
+
     verify = commands.add_parser("verify-public")
     verify.add_argument("--url", required=True)
     expected = verify.add_mutually_exclusive_group(required=True)
@@ -52,12 +57,34 @@ def _build_parser() -> argparse.ArgumentParser:
     restore.add_argument("--url", required=True)
     restore.add_argument("--output", type=Path)
     restore.add_argument("--maximum-dates", type=int, default=120)
+    restore.add_argument("--strict", action="store_true")
+    restore.add_argument("--allow-empty-history", action="store_true")
 
     reliability = commands.add_parser("verify-reliability")
     reliability.add_argument("--url", required=True)
     reliability.add_argument("--ending-date", type=_date, default=_default_date())
     reliability.add_argument("--attempts", type=int, default=3)
     reliability.add_argument("--delay", type=float, default=1.0)
+
+    worker = commands.add_parser("runtime-worker")
+    worker.add_argument("--state-dir", type=Path, required=True)
+    worker.add_argument("--cache-dir", type=Path, required=True)
+    worker.add_argument("--publication-dir", type=Path, required=True)
+    worker.add_argument("--fixture", type=Path)
+    worker.add_argument("--date", type=_date, default=_default_date())
+    worker.add_argument("--once", action="store_true")
+
+    probe = commands.add_parser("runtime-probe")
+    probe.add_argument("--state-dir", type=Path, required=True)
+    probe.add_argument("--max-heartbeat-age-seconds", type=int, default=180)
+    probe.add_argument("--max-job-lag-seconds", type=int, default=30)
+
+    server = commands.add_parser("runtime-server")
+    server.add_argument("--state-dir", type=Path, required=True)
+    server.add_argument("--publication-dir", type=Path, required=True)
+    server.add_argument("--web-dir", type=Path, required=True)
+    server.add_argument("--port", type=int, default=8080)
+    server.add_argument("--host", choices=("127.0.0.1", "0.0.0.0"), default="127.0.0.1")
 
     commands.add_parser("verify-artifacts")
     return parser
@@ -93,8 +120,59 @@ def main(argv: list[str] | None = None) -> int:
         paths = ProjectPaths.discover()
         if args.command == "verify-artifacts":
             from ballpark.artifacts import verify_artifacts
+            from ballpark.geometry_artifact import verify_exported_geometry
 
-            _print(verify_artifacts(paths).as_dict())
+            receipt = verify_artifacts(paths)
+            verify_exported_geometry(paths.root)
+            _print(receipt.as_dict())
+            return 0
+
+        if args.command == "runtime-worker":
+            from ballpark.runtime_app import run_fixture_worker, run_live_worker
+
+            result = (
+                run_fixture_worker(
+                    paths,
+                    fixture=args.fixture.resolve(),
+                    target_date=args.date,
+                    state_dir=args.state_dir.resolve(),
+                    cache_dir=args.cache_dir.resolve(),
+                    publication_dir=args.publication_dir.resolve(),
+                    once=args.once,
+                )
+                if args.fixture
+                else run_live_worker(
+                    paths,
+                    state_dir=args.state_dir.resolve(),
+                    cache_dir=args.cache_dir.resolve(),
+                    publication_dir=args.publication_dir.resolve(),
+                    once=args.once,
+                )
+            )
+            _print(result)
+            return 0
+
+        if args.command == "runtime-probe":
+            from ballpark.runtime_app import runtime_readiness
+
+            result = runtime_readiness(
+                args.state_dir.resolve(),
+                heartbeat_seconds=args.max_heartbeat_age_seconds,
+                job_lag_seconds=args.max_job_lag_seconds,
+            )
+            _print(result)
+            return 0 if result["state"] == "ready" else 3
+
+        if args.command == "runtime-server":
+            from ballpark.runtime_server import serve
+
+            serve(
+                web_dir=args.web_dir.resolve(),
+                publication_dir=args.publication_dir.resolve(),
+                state_dir=args.state_dir.resolve(),
+                host=args.host,
+                port=args.port,
+            )
             return 0
 
         if args.command in {"build", "daily"}:
@@ -118,6 +196,52 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "daily" and not args.skip_web:
                 result["web"] = _run_web_build(paths)
             _print(result)
+            return 0
+
+        if args.command == "refresh-exchange":
+            from ballpark.contract import validate_payload
+            from ballpark.http import HttpClient
+            from ballpark.kalshi import KalshiExchangeProvider
+            from ballpark.publication import publish_payload
+
+            payload = json.loads(args.payload.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict) or not isinstance(payload.get("games"), list):
+                raise ValueError("--payload must contain a daily slate object")
+            existing_generated_at = payload.get("generated_at")
+            if not isinstance(existing_generated_at, str):
+                raise ValueError("--payload must retain its original generated_at")
+            if args.generated_at is not None and args.generated_at != existing_generated_at:
+                raise ValueError(
+                    "refresh-exchange cannot replace generated_at; "
+                    "it only refreshes exchange evidence"
+                )
+            observed_at = datetime.now(UTC)
+            quotes = KalshiExchangeProvider(
+                HttpClient(), cache_path=paths.root / ".ballpark-cache" / "kalshi-exchange.json"
+            ).fetch(payload["games"], observed_at=observed_at)
+            for game in payload["games"]:
+                game["exchange_market"] = quotes[int(game["game_pk"])]
+            states = [quote["state"] for quote in quotes.values()]
+            payload["health"]["exchange_markets"] = {
+                "state": "available"
+                if states and all(state == "observed_unknown_age" for state in states)
+                else "partial"
+                if "observed_unknown_age" in states
+                else "unavailable",
+                "source": "Kalshi public market-data API",
+                "observed_unknown_age_games": states.count("observed_unknown_age"),
+                "unavailable_games": states.count("unavailable"),
+                "optional": True,
+            }
+            validate_payload(payload, paths.schemas / "slate.schema.json")
+            release = publish_payload(args.output.resolve(), payload)
+            _print(
+                {
+                    "state": "published-locally",
+                    "output": str(args.output.resolve()),
+                    "release": release,
+                }
+            )
             return 0
 
         if args.command == "verify-public":
@@ -155,6 +279,8 @@ def main(argv: list[str] | None = None) -> int:
                     output,
                     client=HttpClient(),
                     maximum_dates=args.maximum_dates,
+                    strict=args.strict,
+                    allow_empty_history=args.allow_empty_history,
                 )
             )
             return 0

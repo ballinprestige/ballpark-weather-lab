@@ -44,9 +44,11 @@ def parse_lineup_document(document: Any) -> dict[str, Any]:
     }
 
 
-def fetch_lineup(game_pk: int, client: HttpClient) -> dict[str, Any]:
+def fetch_lineup(
+    game_pk: int, client: HttpClient, *, deadline_at: float | None = None
+) -> dict[str, Any]:
     try:
-        document = client.get_json(GAME_FEED_URL.format(game_pk=game_pk))
+        document = client.get_json(GAME_FEED_URL.format(game_pk=game_pk), deadline_at=deadline_at)
         return parse_lineup_document(document)
     except Exception as exc:
         return {
@@ -56,4 +58,3 @@ def fetch_lineup(game_pk: int, client: HttpClient) -> dict[str, Any]:
             "home_batter_ids": [],
             "away_batter_ids": [],
         }
-

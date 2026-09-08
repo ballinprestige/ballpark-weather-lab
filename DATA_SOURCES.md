@@ -11,10 +11,16 @@ public domain or unrestricted.
 | MLB Stats API | Schedule, game identity, teams, game time, probable pitchers | A minimal per-game projection | Required schedule failure stops publication | [Endpoint](https://statsapi.mlb.com/), [MLB terms](https://www.mlb.com/official-information/terms-of-use) |
 | MLB game feed | Official batting-order availability | State, observation time, and batter counts; public payload omits batter IDs | Optional; Approach B still publishes | [Endpoint family](https://statsapi.mlb.com/), [MLB terms](https://www.mlb.com/official-information/terms-of-use) |
 | Open-Meteo Forecast API | Hourly temperature, humidity, wind, and surface pressure | Selected game-hour values, source, valid time, and fetch time | Per-game neutral hold; seasonal baselines remain visible | [API](https://open-meteo.com/en/docs), [license](https://open-meteo.com/en/license), [terms](https://open-meteo.com/en/terms) |
+| Covers MLB odds page (test/source lead only) | Contract-parser evidence for one named sportsbook's quoted full-game total, actual Over and Under prices, page event ID, source update epoch | No runtime fetch or published data | Every affected game is unavailable; never infer a line/price or use consensus | [MLB odds page](https://www.covers.com/sport/baseball/mlb/odds); provider terms require written permission for republication |
 
 Open-Meteo data must retain visible attribution to Open-Meteo. The adapter requests the nearest
 hour and rejects a forecast more than 90 minutes from scheduled game time. It does not represent
 park-level sensor data.
+
+The Covers entry is a credential-free technical source lead, not permission to redistribute its
+data or to publish/poll it in production. BP-004 records the source limitation in
+`docs/odds.md`; an authorized provider configuration and operating basis are required before
+public release.
 
 ## Published compact artifacts
 

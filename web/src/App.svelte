@@ -23,10 +23,13 @@
   let payloadHash = '';
   let loading = true;
   let error: string | null = null;
+  let refreshError: string | null = null;
   let archiveError: string | null = null;
   let loadingArchiveDate: string | null = null;
   let isArchive = false;
   let loadSequence = 0;
+  let activeRequest: AbortController | null = null;
+  let loadingPublication = false;
   let currentInstant = new Date();
   let slateReturn: { gameKey: string; scrollY: number } | null = null;
 
@@ -44,10 +47,18 @@
     routeFromHash(false);
     window.addEventListener('hashchange', handleHashChange);
     const freshnessTimer = window.setInterval(() => currentInstant = new Date(), 60_000);
+    const refreshTimer = window.setInterval(() => void refreshLive(), 5 * 60_000);
+    const refreshOnResume = () => { if (document.visibilityState === 'visible') void refreshLive(); };
+    const refreshOnOnline = () => void refreshLive();
+    document.addEventListener('visibilitychange', refreshOnResume);
+    window.addEventListener('online', refreshOnOnline);
     void loadPublication();
     return () => {
       window.removeEventListener('hashchange', handleHashChange);
       window.clearInterval(freshnessTimer);
+      window.clearInterval(refreshTimer);
+      document.removeEventListener('visibilitychange', refreshOnResume);
+      window.removeEventListener('online', refreshOnOnline);
     };
   });
 
@@ -112,33 +123,60 @@
     if (route !== 'game') slateReturn = null;
   }
 
-  async function loadPublication(): Promise<void> {
-    const sequence = ++loadSequence;
-    loading = true;
-    error = null;
+  function beginRequest(): { sequence: number; controller: AbortController } {
+    activeRequest?.abort();
+    const controller = new AbortController();
+    activeRequest = controller;
+    return { sequence: ++loadSequence, controller };
+  }
+
+  async function loadPublication(background = false): Promise<void> {
+    if (loadingPublication) return;
+    loadingPublication = true;
+    const { sequence, controller } = beginRequest();
+    let coreHash = '';
+    if (!background || !payload) { loading = true; error = null; }
     try {
-      const loaded = await loadCurrentPublication();
-      if (sequence !== loadSequence) return;
+      const loaded = await loadCurrentPublication(controller.signal, (optional) => {
+        if (sequence !== loadSequence || controller.signal.aborted || isArchive || !bundle || bundle.payloadHash !== coreHash) return;
+        // Reassignment is intentional: Svelte must observe independent optional
+        // completion, and stale request generations must never cross routes.
+        bundle = { ...bundle, ...optional, warnings: [...optional.warnings] };
+      });
+      if (sequence !== loadSequence || controller.signal.aborted) return;
+      coreHash = loaded.payloadHash;
       bundle = loaded;
       payload = loaded.payload;
       payloadHash = loaded.payloadHash;
       isArchive = false;
+      refreshError = null;
     } catch (reason) {
-      if (sequence !== loadSequence) return;
-      error = reason instanceof Error ? reason.message : 'The publication could not be loaded.';
+      if (sequence !== loadSequence || controller.signal.aborted) return;
+      const message = reason instanceof Error ? reason.message : 'The publication could not be loaded.';
+      if (payload) refreshError = message;
+      else error = message;
     } finally {
-      if (sequence === loadSequence) loading = false;
+      if (sequence === loadSequence) { loading = false; loadingPublication = false; }
     }
   }
 
+  function refreshLive(): Promise<void> {
+    if (isArchive) return Promise.resolve();
+    return loadPublication(true);
+  }
+
   async function openArchive(entry: ArchiveEntry): Promise<void> {
+    const { sequence, controller } = beginRequest();
+    loadingPublication = false;
+    isArchive = true;
     archiveError = null;
     loadingArchiveDate = entry.date;
     try {
-      const loaded = await loadArchivePublication(entry);
+      const loaded = await loadArchivePublication(entry, controller.signal);
+      if (sequence !== loadSequence || controller.signal.aborted) return;
       payload = loaded.payload;
       payloadHash = loaded.payloadHash;
-      isArchive = entry.date !== bundle?.payload.date;
+      isArchive = true;
       window.location.hash = 'slate';
     } catch (reason) {
       archiveError = reason instanceof Error ? reason.message : 'The archive snapshot could not be loaded.';
@@ -148,11 +186,8 @@
   }
 
   function returnLive(): void {
-    if (!bundle) return;
-    payload = bundle.payload;
-    payloadHash = bundle.payloadHash;
-    isArchive = false;
     archiveError = null;
+    void loadPublication(true);
   }
 
   function showHealth(): void {
@@ -193,7 +228,7 @@
       <strong>{isArchive ? 'ARCHIVE' : publicationIsStale ? 'STALE' : payload.status === 'ready' ? 'READY' : payload.status === 'degraded' ? 'DEGRADED' : 'NO SLATE'}</strong>
       <span>{formatDate(payload.date)}</span>
     </div>
-    <p>{isArchive ? 'Historical snapshot' : publicationIsStale && freshness ? `Showing ${formatDate(payload.date)} while the current MLB date is ${formatDate(freshness.currentDate)} (America/New_York). Do not treat this slate as current.${payload.status === 'degraded' ? ' The dated release also contains held data.' : payload.status === 'no_slate' ? ' The no-slate result applies only to the displayed date.' : ''}` : payload.status === 'degraded' ? 'Some games or optional context are held; ready games remain visible.' : payload.status === 'no_slate' ? (payload.no_slate_reason ?? 'No games are scheduled for this date.') : 'Validated daily park-weather slate.'}</p>
+    <p>{isArchive ? 'Historical snapshot' : refreshError ? `Refresh failed: ${refreshError} Showing the last verified release.` : publicationIsStale && freshness ? `Showing ${formatDate(payload.date)} while the current MLB date is ${formatDate(freshness.currentDate)} (America/New_York). Do not treat this slate as current.${payload.status === 'degraded' ? ' The dated release also contains held data.' : payload.status === 'no_slate' ? ' The no-slate result applies only to the displayed date.' : ''}` : payload.status === 'degraded' ? 'Some games or optional context are held; ready games remain visible.' : payload.status === 'no_slate' ? (payload.no_slate_reason ?? 'No games are scheduled for this date.') : 'Validated daily park-weather slate.'}</p>
     <div class="ribbon-receipt">
       <span>Updated {formatTimestamp(payload.generated_at)}</span>
       <code title={payloadHash}>SHA {shortHash(payloadHash)}</code>
@@ -228,13 +263,13 @@
           onAction={showHealth}
         />
       {:else}
-        <SlateView {payload} geometry={bundle.geometry} onOpenGame={openGame} />
+        <SlateView {payload} onOpenGame={openGame} now={currentInstant} />
       {/if}
     {:else if route === 'game'}
       {#if routedGame}
         <section class="game-route">
-          <a class="station-back" href="#slate">← Back to daily park factors</a>
-          <GameDetail game={routedGame} geometry={bundle.geometry} headingLevel={1} />
+          <a class="station-back" href="#slate">← Back to ballpark board</a>
+          <GameDetail game={routedGame} geometry={bundle.geometry} headingLevel={1} now={currentInstant} />
         </section>
       {:else}
         <StatePanel

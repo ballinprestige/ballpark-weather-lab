@@ -1,21 +1,22 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { BallparkGame, BallparkPayload, GeometryArtifact } from '../lib/types';
-  import { formatDate, formatDelta, formatFactor, formatTime, isGameHeld, stateTone, teamLabel } from '../lib/format';
+  import type { BallparkGame, BallparkPayload } from '../lib/types';
+  import { formatContractCents, formatDate, formatDelta, formatTime, formatTimestamp, gameHoldReason, isGameHeld, isWeatherHeld, teamLabel } from '../lib/format';
   import GameListItem from './GameListItem.svelte';
   import WindFieldStrip from './WindFieldStrip.svelte';
+  import { assessOddsFreshness } from '../lib/freshness';
+  import { effectiveExchangePhase, isUpcomingExchangeMarket } from '../lib/exchange';
 
   type SlateFilter = 'all' | 'open' | 'roof' | 'incomplete';
-  type SlateSort = 'movement' | 'time' | 'wind' | 'venue';
+  type SlateSort = 'upcoming' | 'movement' | 'time' | 'wind' | 'venue';
 
   export let payload: BallparkPayload;
-  export let geometry: GeometryArtifact | null;
   export let onOpenGame: (key: string) => void;
+  export let now = new Date();
 
   let desktop = false;
   let filter: SlateFilter = 'all';
-  let sort: SlateSort = 'movement';
-  let ledger = true;
+  let sort: SlateSort = 'upcoming';
 
   const movementPercent = (game: BallparkGame): number | null => {
     if (isGameHeld(game)) return null;
@@ -30,6 +31,16 @@
   };
 
   const sorted = (games: BallparkGame[], activeSort: SlateSort): BallparkGame[] => [...games].sort((left, right) => {
+    if (activeSort === 'upcoming') {
+      const rank = (game: BallparkGame): number => {
+        const phase = effectiveExchangePhase(game.exchange_market, game.game_time, now);
+        if (phase === 'pregame' || Date.parse(game.game_time) > now.getTime()) return 0;
+        if (phase === 'final' || /final|completed/i.test(game.game_status)) return 2;
+        return 1;
+      };
+      const rankDifference = rank(left) - rank(right);
+      return rankDifference || Date.parse(left.game_time) - Date.parse(right.game_time);
+    }
     const leftHeld = isGameHeld(left);
     const rightHeld = isGameHeld(right);
     if (leftHeld !== rightHeld) return leftHeld ? 1 : -1;
@@ -43,32 +54,31 @@
     return Math.abs(rightMovement) - Math.abs(leftMovement);
   });
 
-  const temperatureRange = (games: BallparkGame[]): string => {
-    const values = games
-      .filter((game) => !game.weather.dome_active && !isGameHeld(game))
-      .map((game) => game.weather.temperature_f)
-      .filter(Number.isFinite);
-    return values.length ? `${Math.round(Math.min(...values))}–${Math.round(Math.max(...values))}°F` : 'temperature held';
+  const american = (price: number | null): string => price === null ? '—' : `${price > 0 ? '+' : ''}${price}`;
+
+  const windContext = (game: BallparkGame): string => {
+    if (isWeatherHeld(game)) return 'Weather held';
+    if (game.weather.dome_active || game.weather.roof_state === 'fixed-roof') return 'Roof active';
+    const carry = game.weather.wind_carry_mph;
+    const cross = game.weather.wind_cross_mph;
+    const direction = carry >= 2 ? 'Out' : carry <= -2 ? 'In' : Math.abs(cross) >= 2 ? 'Cross' : 'Light';
+    return `${direction} · ${formatDelta(carry, 1)} carry · ${Math.abs(cross).toFixed(1)} cross`;
   };
 
-  const firstPitchRange = (games: BallparkGame[]): string => {
-    const values = games
-      .map((game) => game.game_time)
-      .filter((value) => Number.isFinite(Date.parse(value)))
-      .sort((left, right) => Date.parse(left) - Date.parse(right));
-    if (!values.length) return 'time not reported';
-    if (values.length === 1) return formatTime(values[0]);
-    return `${formatTime(values[0])}–${formatTime(values[values.length - 1])}`;
+  const exchangeAsk = (game: BallparkGame): BallparkGame['exchange_market'] | null => {
+    const market = game.exchange_market;
+    if (!market || market.state !== 'observed_unknown_age' || market.line === null || market.over_ask_cents === null || market.under_ask_cents === null) return null;
+    return market;
   };
 
-  const statusLabel = (game: BallparkGame): string => {
-    if (isGameHeld(game)) return 'Incomplete';
-    if (game.weather.dome_active) return 'Roof';
-    return game.weather.basis === 'observation' ? 'Observed' : 'Verified';
-  };
+  function openBoardDetails(event: MouseEvent, key: string): void {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    onOpenGame(key);
+  }
 
   onMount(() => {
-    const media = window.matchMedia('(min-width: 66rem)');
+    const media = window.matchMedia('(min-width: 44rem)');
     const update = () => desktop = media.matches;
     update();
     media.addEventListener('change', update);
@@ -76,29 +86,29 @@
   });
 
   $: games = sorted(payload.games.filter((game) => filtered(game, filter)), sort);
-  $: lift = payload.games.filter((game) => (movementPercent(game) ?? 0) >= 3).length;
-  $: drag = payload.games.filter((game) => (movementPercent(game) ?? 0) <= -3).length;
   $: verified = payload.games.filter((game) => !isGameHeld(game)).length;
-  $: confirmed = payload.games.filter((game) => game.lineup.state === 'confirmed').length;
+  $: currentSportsbook = payload.games.filter((game) => assessOddsFreshness(game.odds, now).state === 'current').length;
+  $: knownSportsbook = payload.games.filter((game) => assessOddsFreshness(game.odds, now).state !== 'unavailable').length;
+  $: observedSportsbook = payload.games.filter((game) => assessOddsFreshness(game.odds, now).state === 'observed').length;
+  $: sportsbookSources = Array.from(new Set(payload.games
+    .filter((game) => assessOddsFreshness(game.odds, now).state !== 'unavailable')
+    .map((game) => `${game.odds.sportsbook_name ?? 'Sportsbook'} via ${game.odds.provider}`)));
+  $: marketSummary = knownSportsbook === 0
+    ? `Sportsbook totals unavailable ${payload.games.length}/${payload.games.length}`
+    : observedSportsbook > 0
+      ? `${observedSportsbook} observed total${observedSportsbook === 1 ? '' : 's'} · ${sportsbookSources.join(', ')} · source age unknown`
+      : `Current sportsbook totals ${currentSportsbook}/${payload.games.length} · ${sportsbookSources.join(', ')}`;
+  $: observedExchange = payload.games.filter((game) => game.exchange_market?.state === 'observed_unknown_age').length;
+  $: upcomingExchange = payload.games.filter((game) => isUpcomingExchangeMarket(game.exchange_market, game.game_time, now)).length;
+  $: exchangeCapture = payload.games.find((game) => game.exchange_market?.state === 'observed_unknown_age')?.exchange_market?.observed_at ?? null;
 </script>
 
 <section class="view slate-view" aria-labelledby="slate-title">
   <section class="slate-intro">
     <div>
       <p class="eyebrow">{formatDate(payload.date)} · {payload.games.length} {payload.games.length === 1 ? 'game' : 'games'}</p>
-      <h1 id="slate-title">Daily park factors</h1>
-      <p class="lede">Game-hour weather compared with each venue’s seasonal baseline.</p>
-    </div>
-    <div class="slate-station">
-      <dl class="slate-counts" aria-label="Slate summary">
-        <div><dt>games</dt><dd>{payload.games.length}</dd></div>
-        <div><dt>lift</dt><dd>{lift}</dd></div>
-        <div><dt>drag</dt><dd>{drag}</dd></div>
-      </dl>
-      <div class="slate-synopsis">
-        <div><span>Game window</span><strong>{firstPitchRange(payload.games)} · {temperatureRange(payload.games)}</strong></div>
-        <div><span>Data coverage</span><strong>{verified}/{payload.games.length} weather · {confirmed}/{payload.games.length} lineups</strong></div>
-      </div>
+      <h1 id="slate-title">Ballpark board</h1>
+      <p class="slate-meta">Weather ready {verified}/{payload.games.length} · {marketSummary}{#if observedExchange} · Kalshi supplemental {observedExchange} observed / {upcomingExchange} upcoming · capture {formatTimestamp(exchangeCapture)}{/if} · Updated {formatTimestamp(payload.generated_at)}</p>
     </div>
   </section>
 
@@ -114,15 +124,13 @@
     <label class="sort-control">
       <span class="control-label">Sort</span>
       <select bind:value={sort}>
+        <option value="upcoming">Upcoming first</option>
         <option value="movement">Largest movement</option>
         <option value="time">First pitch</option>
         <option value="wind">Carry wind</option>
         <option value="venue">Venue</option>
       </select>
     </label>
-    <button class="view-toggle" class:active={ledger} type="button" on:click={() => ledger = !ledger} aria-pressed={ledger}>
-      {ledger ? 'Card view' : 'Table view'}
-    </button>
   </section>
 
   <h2 class="visually-hidden" id="games-heading">Games</h2>
@@ -132,29 +140,25 @@
       <strong>No games match this filter.</strong>
       <button type="button" on:click={() => filter = 'all'}>Show the full slate</button>
     </div>
-  {:else if desktop && ledger}
+  {:else if desktop}
+    <p class="board-definition">Weather adjustment changes this park’s normal run environment; it is not a game-score forecast.</p>
     <div class="ledger-wrap">
       <table class="ledger">
         <thead>
-          <tr><th>Game</th><th>Time</th><th>Venue</th><th class="num">Factor Δ</th><th class="num">Run PF</th><th class="num">HR PF</th><th class="num">Carry</th><th class="num">Cross</th><th class="num">Temp</th><th class="num">Air</th><th>State</th><th>Action</th></tr>
+          <tr><th>Matchup / first pitch</th><th>Total · Over / Under · source</th><th>Park wind</th><th>Weather adjustment</th></tr>
         </thead>
         <tbody>
           {#each games as game (game.game_pk)}
             {@const key = String(game.game_pk)}
             {@const movement = movementPercent(game)}
-            <tr data-tone={stateTone(game.factors.state)}>
-              <td><strong>{game.away_team} <i>at</i> {game.home_team}</strong></td>
-              <td>{formatTime(game.game_time)}</td>
-              <td>{game.venue}</td>
-              <td class="num movement-cell">{movement == null ? '—' : formatDelta(movement, 0) + '%'}</td>
-              <td class="num">{isGameHeld(game) ? '—' : formatFactor(game.factors.game_pf_runs)}</td>
-              <td class="num">{isGameHeld(game) ? '—' : formatFactor(game.factors.game_pf_hr)}</td>
-              <td class="num wind-derived">{isGameHeld(game) ? '—' : formatDelta(game.weather.wind_carry_mph, 1)}</td>
-              <td class="num wind-derived">{isGameHeld(game) ? '—' : formatDelta(game.weather.wind_cross_mph, 1)}</td>
-              <td class="num">{isGameHeld(game) ? '—' : `${Math.round(game.weather.temperature_f)}°`}</td>
-              <td class="num">{isGameHeld(game) ? '—' : game.weather.air_density_index.toFixed(1)}</td>
-              <td><span class="ledger-state" data-tone={isGameHeld(game) ? 'hold' : 'good'}>{statusLabel(game)}</span></td>
-              <td><button class="inspect-button" data-game-key={game.game_pk} type="button" aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} details`} on:click={() => onOpenGame(key)}>Inspect</button></td>
+            {@const market = assessOddsFreshness(game.odds, now)}
+            {@const exchange = exchangeAsk(game)}
+            {@const exchangePhase = effectiveExchangePhase(exchange, game.game_time, now)}
+            <tr data-tone={isGameHeld(game) ? 'hold' : 'ready'}>
+              <td><a class="board-matchup" href={`#game/${key}`} data-game-key={game.game_pk} aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} details`} on:click={(event) => openBoardDetails(event, key)}><strong>{game.away_team} <i>at</i> {game.home_team}</strong><small>{formatTime(game.game_time)} · {game.venue}</small></a></td>
+              <td>{#if market.state !== 'unavailable'}<strong>{game.odds.line}</strong> <span>O {american(game.odds.over_price)} · U {american(game.odds.under_price)}</span><br /><small>{game.odds.sportsbook_name}{market.state === 'observed' ? ` via ${game.odds.provider} · captured ${formatTimestamp(game.odds.observed_at)} · source age unknown` : ` · ${market.state}`}{game.odds.failure_reason ? ' · ESPN update failed · showing the captured prices' : ''}</small>{#if exchange}<small class="exchange-ask">Kalshi total {exchange.line} · Over {formatContractCents(exchange.over_ask_cents)} · Under {formatContractCents(exchange.under_ask_cents)} · {exchangePhase?.replaceAll('_', ' ')} · source age unknown · captured {formatTimestamp(exchange.observed_at)}{exchange.failure_reason ? ` · Update failed: ${exchange.failure_reason}` : ''}</small>{/if}{:else if exchange}<strong>{exchange.line}</strong> <span>Over {formatContractCents(exchange.over_ask_cents)} · Under {formatContractCents(exchange.under_ask_cents)}</span><small class="exchange-ask">Kalshi contract ask · {exchangePhase?.replaceAll('_', ' ')} · source age unknown · observed {formatTimestamp(exchange.observed_at)}{exchange.failure_reason ? ` · Update failed: ${exchange.failure_reason}` : ''}</small>{:else}<strong>Sportsbook unavailable</strong>{/if}</td>
+              <td>{windContext(game)}</td>
+              <td>{movement == null ? (isWeatherHeld(game) ? 'Weather held' : 'Model adjustment held') : `${formatDelta(movement, 0)}% runs`}<br /><small>{isGameHeld(game) ? gameHoldReason(game) : `${Math.round(game.weather.temperature_f)}°F · ${Math.round(game.weather.humidity_pct)}%`}</small></td>
             </tr>
           {/each}
         </tbody>
@@ -167,8 +171,7 @@
         <div class="game-cell">
           <GameListItem
             {game}
-            {geometry}
-            rank={sort === 'movement' && index < 3 ? index + 1 : null}
+            {now}
             onOpen={() => onOpenGame(key)}
           />
         </div>

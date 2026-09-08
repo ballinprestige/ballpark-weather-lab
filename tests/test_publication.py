@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 
 import pytest
 
+import ballpark.cli as cli_module
+import ballpark.http as http_module
 import ballpark.publication as publication_module
 from ballpark.errors import DataContractError, PublicVerificationError
 from ballpark.publication import (
@@ -266,6 +268,201 @@ def test_restore_history_network_failure_is_non_blocking(tmp_path: Path) -> None
     assert result["state"] == "not_available"
     assert result["restored"] == 0
     assert not (tmp_path / "site").exists()
+
+
+def test_strict_restore_refuses_incomplete_history_without_partial_output(tmp_path: Path) -> None:
+    good_payload = valid_payload_document(slate_date="2026-08-26")
+    good = canonical_json_bytes(good_payload)
+    missing_payload = valid_payload_document(slate_date="2026-08-25")
+    missing_payload["generated_at"] = "2026-08-25T16:00:00Z"
+    missing = canonical_json_bytes(missing_payload)
+    index = {
+        "schema_version": 1,
+        "updated_at": "2026-08-26T16:00:00Z",
+        "dates": [
+            {
+                "date": "2026-08-26",
+                "payload_sha256": sha256_bytes(good),
+                "status": good_payload["status"],
+                "game_count": len(good_payload["games"]),
+                "generated_at": good_payload["generated_at"],
+            },
+            {
+                "date": "2026-08-25",
+                "payload_sha256": sha256_bytes(missing),
+                "status": missing_payload["status"],
+                "game_count": len(missing_payload["games"]),
+                "generated_at": missing_payload["generated_at"],
+            },
+        ],
+    }
+    client = RouteClient(
+        {
+            "/archive/index.json": canonical_json_bytes(index),
+            "/archive/2026-08-26.json": good,
+            "/archive/2026-08-25.json": OSError("gone"),
+        }
+    )
+    output = tmp_path / "site"
+    prior_index = output / "archive" / "index.json"
+    prior_index.parent.mkdir(parents=True)
+    prior_index.write_bytes(b"already-staged-history")
+
+    with pytest.raises(PublicVerificationError, match="incomplete.*unavailable.*2026-08-25"):
+        restore_public_history(
+            "https://example.invalid/",
+            output,
+            client=client,
+            maximum_dates=2,
+            strict=True,
+        )
+
+    assert prior_index.read_bytes() == b"already-staged-history"
+    assert not (output / "archive" / "2026-08-26.json").exists()
+
+
+def test_strict_restore_refuses_hash_mismatch_without_partial_output(tmp_path: Path) -> None:
+    good_payload = valid_payload_document(slate_date="2026-08-26")
+    good = canonical_json_bytes(good_payload)
+    bad_payload = valid_payload_document(slate_date="2026-08-25")
+    bad_payload["generated_at"] = "2026-08-25T16:00:00Z"
+    bad = canonical_json_bytes(bad_payload)
+    index = {
+        "schema_version": 1,
+        "updated_at": "2026-08-26T16:00:00Z",
+        "dates": [
+            {
+                "date": "2026-08-26",
+                "payload_sha256": sha256_bytes(good),
+                "status": good_payload["status"],
+                "game_count": len(good_payload["games"]),
+                "generated_at": good_payload["generated_at"],
+            },
+            {
+                "date": "2026-08-25",
+                "payload_sha256": "0" * 64,
+                "status": bad_payload["status"],
+                "game_count": len(bad_payload["games"]),
+                "generated_at": bad_payload["generated_at"],
+            },
+        ],
+    }
+    client = RouteClient(
+        {
+            "/archive/index.json": canonical_json_bytes(index),
+            "/archive/2026-08-26.json": good,
+            "/archive/2026-08-25.json": bad,
+        }
+    )
+    output = tmp_path / "site"
+
+    with pytest.raises(PublicVerificationError, match="incomplete.*hash differs.*2026-08-25"):
+        restore_public_history(
+            "https://example.invalid/",
+            output,
+            client=client,
+            maximum_dates=2,
+            strict=True,
+        )
+
+    assert not (output / "archive").exists()
+
+
+def test_strict_restore_refuses_schema_invalid_payload(tmp_path: Path) -> None:
+    payload = valid_payload_document(slate_date="2026-08-26")
+    del payload["health"]
+    content = canonical_json_bytes(payload)
+    index = {
+        "schema_version": 1,
+        "updated_at": "2026-08-26T16:00:00Z",
+        "dates": [
+            {
+                "date": "2026-08-26",
+                "payload_sha256": sha256_bytes(content),
+                "status": payload["status"],
+                "game_count": len(payload["games"]),
+                "generated_at": payload["generated_at"],
+            }
+        ],
+    }
+    client = RouteClient(
+        {
+            "/archive/index.json": canonical_json_bytes(index),
+            "/archive/2026-08-26.json": content,
+        }
+    )
+
+    with pytest.raises(PublicVerificationError, match="incomplete.*schema is invalid.*2026-08-26"):
+        restore_public_history(
+            "https://example.invalid/", tmp_path / "site", client=client, strict=True
+        )
+
+    assert not (tmp_path / "site" / "archive").exists()
+
+
+def test_strict_restore_requires_archive_index_unless_bootstrapping(tmp_path: Path) -> None:
+    client = RouteClient({"/archive/index.json": OSError("offline")})
+
+    with pytest.raises(PublicVerificationError, match="index is unavailable"):
+        restore_public_history(
+            "https://example.invalid/", tmp_path / "established", client=client, strict=True
+        )
+
+    result = restore_public_history(
+        "https://example.invalid/",
+        tmp_path / "fresh",
+        client=client,
+        strict=True,
+        allow_empty_history=True,
+    )
+    assert result == {"state": "bootstrap", "restored": 0, "reason": None}
+    assert not (tmp_path / "fresh").exists()
+
+
+def test_strict_restore_requires_nonempty_index_unless_bootstrapping(tmp_path: Path) -> None:
+    client = RouteClient(
+        {
+            "/archive/index.json": canonical_json_bytes(
+                {"schema_version": 1, "updated_at": "2026-08-26T16:00:00Z", "dates": []}
+            )
+        }
+    )
+
+    with pytest.raises(PublicVerificationError, match="index is empty"):
+        restore_public_history(
+            "https://example.invalid/", tmp_path / "established", client=client, strict=True
+        )
+
+    result = restore_public_history(
+        "https://example.invalid/",
+        tmp_path / "fresh",
+        client=client,
+        strict=True,
+        allow_empty_history=True,
+    )
+    assert result == {"state": "bootstrap", "restored": 0, "reason": None}
+
+
+def test_cli_strict_restore_exits_before_writing_incomplete_history(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    client = RouteClient({"/archive/index.json": OSError("offline")})
+    monkeypatch.setattr(http_module, "HttpClient", lambda: client)
+    output = tmp_path / "site"
+
+    result = cli_module.main(
+        [
+            "restore-history",
+            "--url",
+            "https://example.invalid/",
+            "--output",
+            str(output),
+            "--strict",
+        ]
+    )
+
+    assert result == 2
+    assert not output.exists()
 
 
 def test_restore_history_skips_archive_path_traversal(tmp_path: Path) -> None:

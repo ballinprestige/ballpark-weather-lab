@@ -11,19 +11,28 @@ export class PublicationLoadError extends Error {
   }
 }
 
-async function fetchText(path: string): Promise<string> {
+async function fetchText(path: string, signal?: AbortSignal): Promise<string> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= REQUEST_ATTEMPTS; attempt += 1) {
+    if (signal?.aborted) {
+      throw new DOMException('Publication request was superseded.', 'AbortError');
+    }
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const abort = () => controller.abort();
     try {
+      signal?.addEventListener('abort', abort, { once: true });
       const response = await fetch(path, { cache: 'no-store', signal: controller.signal });
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       return await response.text();
     } catch (error) {
       lastError = error;
+      // A newer publication generation owns this route.  Do not turn its
+      // cancellation into a retry against the same optional source.
+      if (signal?.aborted) throw error;
       if (attempt < REQUEST_ATTEMPTS) await new Promise((resolve) => window.setTimeout(resolve, 180 * attempt));
     } finally {
+      signal?.removeEventListener('abort', abort);
       window.clearTimeout(timeout);
     }
   }
@@ -47,40 +56,45 @@ export async function sha256Text(text: string): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function loadRelease(): Promise<ReleasePointer> {
-  return validateRelease(parseJson(await fetchText('./data/release.json'), 'Release pointer'));
+async function loadRelease(signal?: AbortSignal): Promise<ReleasePointer> {
+  return validateRelease(parseJson(await fetchText('./data/release.json', signal), 'Release pointer'));
 }
 
-async function loadPayloadWithHash(path: string): Promise<{ payload: BallparkPayload; hash: string }> {
-  const text = await fetchText(path);
+async function loadPayloadWithHash(path: string, signal?: AbortSignal): Promise<{ payload: BallparkPayload; hash: string }> {
+  const text = await fetchText(path, signal);
   return { payload: validatePayload(parseJson(text, 'Payload')), hash: await sha256Text(text) };
 }
 
-async function loadOptionalArchive(warnings: string[]): Promise<ArchiveIndex> {
+async function loadOptionalArchive(warnings: string[], signal?: AbortSignal): Promise<ArchiveIndex> {
   try {
-    return validateArchiveIndex(parseJson(await fetchText('./archive/index.json'), 'Archive index'));
+    return validateArchiveIndex(parseJson(await fetchText('./archive/index.json', signal), 'Archive index'));
   } catch (error) {
     warnings.push(error instanceof Error ? `History unavailable: ${error.message}` : 'History unavailable.');
     return { dates: [] };
   }
 }
 
-async function loadOptionalGeometry(warnings: string[]): Promise<GeometryArtifact | null> {
+async function loadOptionalGeometry(warnings: string[], signal?: AbortSignal): Promise<GeometryArtifact | null> {
   try {
-    return validateGeometry(parseJson(await fetchText('./park_geometry.json'), 'Park geometry'));
+    return validateGeometry(parseJson(await fetchText('./park_geometry.json', signal), 'Park geometry'));
   } catch (error) {
     warnings.push(error instanceof Error ? `Park geometry unavailable: ${error.message}` : 'Park geometry unavailable.');
     return null;
   }
 }
 
-export async function loadCurrentPublication(): Promise<PublicationBundle> {
+export type OptionalPublicationUpdate =
+  | { archive: ArchiveIndex; warnings: string[] }
+  | { geometry: GeometryArtifact | null; warnings: string[] };
+
+export async function loadCurrentPublication(
+  signal?: AbortSignal,
+  onOptional?: (update: OptionalPublicationUpdate) => void
+): Promise<PublicationBundle> {
   const warnings: string[] = [];
-  const [release, payloadResult, archive, geometry] = await Promise.all([
-    loadRelease(),
-    loadPayloadWithHash('./data/data.json'),
-    loadOptionalArchive(warnings),
-    loadOptionalGeometry(warnings)
+  const [release, payloadResult] = await Promise.all([
+    loadRelease(signal),
+    loadPayloadWithHash('./data/data.json', signal)
   ]);
   if (payloadResult.hash !== release.payload_sha256) {
     throw new PublicationLoadError(`Publication hash mismatch. Expected ${release.payload_sha256.slice(0, 12)}…, received ${payloadResult.hash.slice(0, 12)}….`);
@@ -91,18 +105,23 @@ export async function loadCurrentPublication(): Promise<PublicationBundle> {
   if (payloadResult.payload.generated_at !== release.generated_at) {
     throw new PublicationLoadError('Publication timestamp mismatch between release pointer and payload.');
   }
-  return {
+  const bundle: PublicationBundle = {
     payload: payloadResult.payload,
     release,
-    archive,
-    geometry,
+    archive: { dates: [] },
+    geometry: null,
     warnings,
     payloadHash: payloadResult.hash
   };
+  // History and park geometry never hold the verified daily slate hostage.
+  // Each reports independently so a failing archive cannot delay geometry.
+  void loadOptionalArchive(warnings, signal).then((archive) => onOptional?.({ archive, warnings: [...warnings] }));
+  void loadOptionalGeometry(warnings, signal).then((geometry) => onOptional?.({ geometry, warnings: [...warnings] }));
+  return bundle;
 }
 
-export async function loadArchivePublication(entry: ArchiveEntry): Promise<{ payload: BallparkPayload; payloadHash: string }> {
-  const result = await loadPayloadWithHash(`./archive/${encodeURIComponent(entry.date)}.json`);
+export async function loadArchivePublication(entry: ArchiveEntry, signal?: AbortSignal): Promise<{ payload: BallparkPayload; payloadHash: string }> {
+  const result = await loadPayloadWithHash(`./archive/${encodeURIComponent(entry.date)}.json`, signal);
   if (result.hash !== entry.payload_sha256) {
     throw new PublicationLoadError(`Archive hash mismatch for ${entry.date}.`);
   }

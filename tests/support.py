@@ -5,6 +5,7 @@ from datetime import date
 from typing import Any
 
 from ballpark.venues import Venue
+from ballpark.weather import WeatherPayload, model_frame_0deg_from_source
 
 TARGET_DATE = date(2026, 8, 26)
 GENERATED_AT = "2026-08-26T16:00:00Z"
@@ -105,7 +106,7 @@ def fast_trajectory(_venue: Venue, weather: dict[str, Any]) -> dict[str, Any]:
 
 
 def valid_weather(game_pk: int = 810001) -> dict[str, Any]:
-    return {
+    values = {
         "game_pk": game_pk,
         "state": "verified",
         "source": "fixture",
@@ -124,6 +125,12 @@ def valid_weather(game_pk: int = 810001) -> dict[str, Any]:
         "dome_active": False,
         "roof_state": "open-air",
     }
+    return WeatherPayload(
+        values,
+        model_frame_0deg=model_frame_0deg_from_source(
+            temperature_f=78.0, wind_speed_mph=8.0, wind_direction_deg=225.0
+        ),
+    )
 
 
 def valid_payload_document(*, slate_date: str = "2026-08-26") -> dict[str, Any]:

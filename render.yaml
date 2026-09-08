@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ballpark-runtime
+    runtime: docker
+    plan: 1c-2g
+    autoDeployTrigger: off
+    dockerCommand: service
+    healthCheckPath: /healthz
+    disk:
+      name: ballpark-runtime-data
+      mountPath: /var/lib/ballpark
+      sizeGB: 1
+    envVars:
+      - key: BALLPARK_HOST
+        value: 0.0.0.0

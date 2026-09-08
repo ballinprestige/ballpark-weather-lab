@@ -7,6 +7,8 @@ export interface HealthLane extends JsonRecord {
   status?: string;
   reason?: string | null;
   detail?: string | null;
+  acquisition_status?: 'observed' | 'no_quote' | 'schema_error' | 'transport_error';
+  acquisition_error?: string | null;
   updated_at?: string | null;
 }
 
@@ -14,7 +16,72 @@ export interface PublicationHealth {
   schedule: HealthLane;
   weather: HealthLane;
   lineups: HealthLane;
+  odds: HealthLane;
+  exchange_markets?: HealthLane;
   artifacts: HealthLane;
+}
+
+export interface GameOdds {
+  game_pk: number;
+  slate_date: string;
+  state: 'current' | 'stale' | 'observed_unknown_age' | 'unavailable';
+  reason: string | null;
+  failure_reason?: string | null;
+  provider_event_id: string | null;
+  sport: 'MLB';
+  market_type: 'total';
+  period: 'full_game';
+  eligibility: 'pregame' | 'live' | 'final';
+  sportsbook_id: string | null;
+  sportsbook_name: string | null;
+  provider: string;
+  source_url: string | null;
+  line: number | null;
+  over_price: number | null;
+  under_price: number | null;
+  source_updated_at: string | null;
+  observed_at: string | null;
+  raw_sha256: string | null;
+  snapshot_id: string | null;
+  source_schema_version: string;
+}
+
+/**
+ * A supplemental public-exchange observation. This is intentionally separate
+ * from `GameOdds`: contract cents are not American sportsbook prices and do
+ * not satisfy the canonical sportsbook-coverage requirement.
+ */
+export interface GameExchangeMarket {
+  game_pk: number;
+  slate_date: string;
+  game_time: string | null;
+  state: 'observed_unknown_age' | 'unavailable';
+  reason: string | null;
+  failure_reason: string | null;
+  game_phase: 'pregame' | 'in_progress' | 'after_scheduled_start' | 'final' | 'unknown' | 'unavailable';
+  provider: 'Kalshi';
+  provider_url: string;
+  event_ticker: string | null;
+  market_ticker: string | null;
+  market_type: 'total';
+  period: 'full_game';
+  quote_type: 'contract_ask';
+  price_format: 'contract_cents';
+  currency: 'USD';
+  line: number | null;
+  over_ask_dollars: string | null;
+  under_ask_dollars: string | null;
+  over_ask_cents: string | null;
+  under_ask_cents: string | null;
+  over_ask_size: string | null;
+  under_ask_size: string | null;
+  source_updated_at: null;
+  observed_at: string | null;
+  raw_sha256: string | null;
+  snapshot_id: string | null;
+  active: boolean;
+  condition: string | null;
+  source_schema_version: string;
 }
 
 export interface GameWeather {
@@ -109,6 +176,8 @@ export interface BallparkGame {
   lineup: GameLineup;
   approach_c: ApproachC;
   trajectory: GameTrajectory;
+  odds: GameOdds;
+  exchange_market?: GameExchangeMarket;
 }
 
 export interface BallparkPayload {

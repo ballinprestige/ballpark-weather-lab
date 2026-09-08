@@ -29,6 +29,7 @@ export function readyPayload(): BallparkPayload {
       schedule: { state: 'available', source: 'fixture', game_count: 2 },
       weather: { state: 'available', source: 'fixture', verified_games: 2, held_games: 0 },
       lineups: { state: 'partial', source: 'fixture', confirmed_games: 1, optional: true },
+      odds: { state: 'available', source: 'fixture Covers total table', current_games: 2, stale_games: 0, unavailable_games: 0, optional: false },
       artifacts: {
         state: 'verified',
         approach_c_state: 'verified',
@@ -164,6 +165,12 @@ export function readyGame(
           carry_delta_ft: 12
         }
       ]
+    },
+    odds: {
+      game_pk: gamePk, slate_date: '2026-08-27', state: 'current', reason: null, provider_event_id: `covers-${gamePk}`,
+      sport: 'MLB', market_type: 'total', period: 'full_game', eligibility: 'pregame', sportsbook_id: 'bet365', sportsbook_name: 'bet365',
+      provider: 'Covers', source_url: 'https://www.covers.com/sport/baseball/mlb/odds', line: 8.5, over_price: -105, under_price: -115,
+      source_updated_at: '2026-08-27T15:58:00Z', observed_at: '2026-08-27T16:00:00Z', raw_sha256: ARTIFACT_HASH, snapshot_id: 'b'.repeat(64), source_schema_version: 'covers-html-total-table-v1'
     }
   };
 }
@@ -209,6 +216,34 @@ export function missingWeatherPayload(): BallparkPayload {
     reason: 'Trajectory context is hidden without verified game-hour weather.',
     integration: 'bounded Euler approximation',
     arcs: []
+  };
+  payload.games[1].odds = {
+    ...payload.games[1].odds,
+    game_pk: payload.games[1].game_pk,
+    state: 'unavailable', reason: 'Fixture omits a verified full-game total.', provider_event_id: null, sportsbook_id: null, sportsbook_name: null,
+    line: null, over_price: null, under_price: null, source_updated_at: null, observed_at: '2026-08-27T16:00:00Z', raw_sha256: null, snapshot_id: null
+  };
+  payload.health.odds = { state: 'partial', source: 'fixture Covers total table', current_games: 1, stale_games: 0, unavailable_games: 1, optional: false };
+  return payload;
+}
+
+export function modelAdjustmentHeldPayload(): BallparkPayload {
+  const payload = readyPayload();
+  const game = payload.games[1];
+  game.home_team = 'LAD';
+  game.venue = 'Dodger Stadium';
+  game.factors = {
+    state: 'held',
+    reason: 'learned weather adjustment held: sampled LAD training rows use a 0° wind axis; compatibility validation is pending',
+    seasonal_pf_runs: 0.97,
+    seasonal_pf_hr: 1.07,
+    weather_multiplier_runs: 1,
+    weather_multiplier_hr: 1,
+    game_pf_runs: 0.97,
+    game_pf_hr: 1.07,
+    weather_delta_runs: 0,
+    weather_delta_hr: 0,
+    hr_baseline_as_of: '2026-08-27'
   };
   return payload;
 }

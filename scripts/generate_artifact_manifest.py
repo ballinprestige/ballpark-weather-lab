@@ -10,6 +10,7 @@ import json
 import pyarrow.parquet as pq
 
 from ballpark.artifacts import sha256_file
+from ballpark.geometry_artifact import verify_exported_geometry
 from ballpark.paths import ProjectPaths
 
 FILES = {
@@ -18,6 +19,7 @@ FILES = {
     "assets/models/training_manifest.json": {"critical": True},
     "assets/models/feature_importance.json": {"critical": False, "lane": "model_evidence"},
     "assets/data/hr_baselines_2026.json": {"critical": True},
+    "assets/data/venue_orientation_provenance.json": {"critical": True},
     "assets/data/batter_profiles.parquet": {"critical": False, "lane": "approach_c"},
     "assets/data/park_geometry.parquet": {"critical": False, "lane": "approach_c"},
     "assets/data/trajectory_lookup.parquet": {"critical": False, "lane": "approach_c"},
@@ -27,6 +29,7 @@ FILES = {
 
 def main() -> None:
     paths = ProjectPaths.discover()
+    verify_exported_geometry(paths.root)
     entries: dict[str, dict[str, object]] = {}
     for relative, policy in FILES.items():
         path = paths.root / relative
