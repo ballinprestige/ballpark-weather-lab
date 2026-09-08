@@ -232,7 +232,7 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
                     price = odds[price_key]
                     if not isinstance(price, int) or -99 <= price <= 99:
                         raise DataContractError("quoted market has an invalid American price")
-            elif state != "unavailable":
+            elif state not in {"observed_unknown_age", "unavailable"}:
                 raise DataContractError("odds market has an unknown state")
         if "exchange_market" in game:
             exchange = game["exchange_market"]
@@ -392,14 +392,23 @@ def validate_payload(payload: dict[str, Any], schema_path: Path) -> None:
     if "odds" in health:
         if len(odds_states) != len(games):
             raise DataContractError("odds health exists but one or more games have no market state")
-        counts = {state: odds_states.count(state) for state in ("current", "stale", "unavailable")}
-        if any(health["odds"].get(f"{state}_games") != count for state, count in counts.items()):
+        counts = {
+            state: odds_states.count(state)
+            for state in ("current", "observed_unknown_age", "stale", "unavailable")
+        }
+        health_counts = {
+            "current": health["odds"].get("current_games"),
+            "observed_unknown_age": health["odds"].get("observed_unknown_age_games", 0),
+            "stale": health["odds"].get("stale_games"),
+            "unavailable": health["odds"].get("unavailable_games"),
+        }
+        if health_counts != counts:
             raise DataContractError("odds health counts do not match game market states")
         expected_odds_state = (
             "available"
             if counts["current"] == len(games)
             else "partial"
-            if counts["current"]
+            if counts["current"] or counts["observed_unknown_age"]
             else "unavailable"
         )
         if health["odds"].get("state") != expected_odds_state:

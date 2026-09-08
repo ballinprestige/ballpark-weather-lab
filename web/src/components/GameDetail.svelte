@@ -48,8 +48,11 @@
       <StateBadge state={game.game_status} label={capturedPregameAfterStart ? `Status at capture: ${game.game_status}` : null} />
       <span>{pitcherName(game, 'away')} vs {pitcherName(game, 'home')}</span>
     </div>
-    {#if exchangeAvailable}
-      <p class="detail-exchange-line"><strong>{game.exchange_market?.line}</strong> · Over {formatContractCents(game.exchange_market?.over_ask_cents)} · Under {formatContractCents(game.exchange_market?.under_ask_cents)} <span>Kalshi · captured {formatTimestamp(game.exchange_market?.observed_at ?? null)}</span></p>
+    {#if marketFreshness.state !== 'unavailable'}
+      <p class="detail-exchange-line"><strong>{game.odds.line}</strong> · Over {american(game.odds.over_price)} · Under {american(game.odds.under_price)} <span>{game.odds.sportsbook_name} via {game.odds.provider} · captured {formatTimestamp(game.odds.observed_at)}</span></p>
+      {#if exchangeAvailable}<p class="detail-exchange-line">Kalshi total {game.exchange_market?.line} · Over {formatContractCents(game.exchange_market?.over_ask_cents)} · Under {formatContractCents(game.exchange_market?.under_ask_cents)} <span>captured {formatTimestamp(game.exchange_market?.observed_at ?? null)}</span></p>{/if}
+    {:else if exchangeAvailable}
+      <p class="detail-exchange-line"><strong>{game.exchange_market?.line}</strong> · Over {formatContractCents(game.exchange_market?.over_ask_cents)} · Under {formatContractCents(game.exchange_market?.under_ask_cents)} <span>Kalshi contract ask · captured {formatTimestamp(game.exchange_market?.observed_at ?? null)}</span></p>
     {/if}
   </header>
 
@@ -115,8 +118,7 @@
         <div><dt>Sportsbook</dt><dd>{game.odds.sportsbook_name}</dd></div>
       </dl>
       {#if marketFreshness.state === 'stale'}<p class="market-warning">Stale quote: {marketFreshness.reason}. It is not current.</p>{/if}
-      {#if marketFreshness.state === 'observed'}<p class="market-warning">Observed quote: {marketFreshness.reason} It does not satisfy the current sportsbook freshness requirement.</p>{/if}
-      <p class="source-line"><span>{game.odds.provider}</span><span>Source updated {formatTimestamp(game.odds.source_updated_at)}</span><span>Retrieved {formatTimestamp(game.odds.observed_at)}</span></p>
+      <p class="source-line">{#if marketFreshness.state === 'observed'}<span>{game.odds.sportsbook_name} via {game.odds.provider}</span><span>Captured {formatTimestamp(game.odds.observed_at)}</span><span>Quote update age unknown</span>{:else}<span>{game.odds.provider}</span><span>Source updated {formatTimestamp(game.odds.source_updated_at)}</span><span>Retrieved {formatTimestamp(game.odds.observed_at)}</span>{/if}</p>
     {/if}
   </section>
   {/if}

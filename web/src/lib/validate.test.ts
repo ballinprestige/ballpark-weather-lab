@@ -92,13 +92,16 @@ describe('validatePayload', () => {
     expect(() => validatePayload(payload)).toThrow(/must accompany every quoted-market game/i);
   });
 
-  it('accepts complete observed evidence with unknown update age only as unavailable', () => {
+  it('accepts complete ESPN observed evidence with unknown update age and rejects future capture time', () => {
     const payload = readyPayload();
-    payload.games[0].odds = { ...payload.games[0].odds, state: 'unavailable', reason: 'Source does not document quote-update granularity.', source_updated_at: null };
-    payload.health.odds = { state: 'partial', source: 'documented public source', current_games: 1, stale_games: 0, unavailable_games: 1, optional: false };
+    payload.games[0].odds = { ...payload.games[0].odds, state: 'observed_unknown_age', provider: 'ESPN', sportsbook_name: 'DraftKings', reason: 'ESPN does not provide a quote-level update timestamp.', source_updated_at: null };
+    payload.health.odds = { state: 'partial', source: 'ESPN public scoreboard', current_games: 1, observed_unknown_age_games: 1, stale_games: 0, unavailable_games: 0, optional: false };
     expect(validatePayload(payload).games[0].odds.source_updated_at).toBeNull();
-    payload.games[0].odds.state = 'current';
-    expect(() => validatePayload(payload)).toThrow(/trustworthy source update time/i);
+    payload.games[0].odds.source_updated_at = '2026-08-27T16:00:00Z';
+    expect(() => validatePayload(payload)).toThrow(/must be null when the sportsbook quote update time is unknown/i);
+    payload.games[0].odds.source_updated_at = null;
+    payload.games[0].odds.observed_at = '2026-08-27T16:10:01Z';
+    expect(() => validatePayload(payload)).toThrow(/cannot be retrieved after publication generation/i);
   });
 
   it('keeps a supplemental Kalshi contract ask separate, precise, and explicitly unknown-age', () => {

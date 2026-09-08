@@ -7,6 +7,8 @@ export interface HealthLane extends JsonRecord {
   status?: string;
   reason?: string | null;
   detail?: string | null;
+  acquisition_status?: 'observed' | 'no_quote' | 'schema_error' | 'transport_error';
+  acquisition_error?: string | null;
   updated_at?: string | null;
 }
 
@@ -22,7 +24,7 @@ export interface PublicationHealth {
 export interface GameOdds {
   game_pk: number;
   slate_date: string;
-  state: 'current' | 'stale' | 'unavailable';
+  state: 'current' | 'stale' | 'observed_unknown_age' | 'unavailable';
   reason: string | null;
   provider_event_id: string | null;
   sport: 'MLB';

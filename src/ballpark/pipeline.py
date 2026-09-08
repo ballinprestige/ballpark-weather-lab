@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -9,13 +10,13 @@ from typing import Any
 from ballpark.artifacts import ArtifactReceipt, verify_artifacts
 from ballpark.contract import validate_payload
 from ballpark.errors import DataContractError
+from ballpark.espn_odds import EspnAcquisitionOutcome, EspnOddsProvider
 from ballpark.geometry_artifact import verify_exported_geometry
 from ballpark.http import HttpClient
 from ballpark.kalshi import KalshiExchangeProvider
 from ballpark.kalshi import unavailable_market as unavailable_exchange_market
 from ballpark.lineups import fetch_lineup
 from ballpark.model import ParkFactorModel
-from ballpark.odds import unavailable_market
 from ballpark.paths import ProjectPaths
 from ballpark.physics import PhysicsEngine, trajectory_theater
 from ballpark.publication import publish_payload
@@ -75,9 +76,18 @@ def _public_lineup(lineup: dict[str, Any]) -> dict[str, Any]:
 
 
 class DailyPipeline:
-    def __init__(self, paths: ProjectPaths, *, client: HttpClient | None = None):
+    def __init__(
+        self,
+        paths: ProjectPaths,
+        *,
+        client: HttpClient | None = None,
+        espn_provider: EspnOddsProvider | None = None,
+        clock: Callable[[], datetime] | None = None,
+    ):
         self.paths = paths
         self.client = client or HttpClient()
+        self.espn_provider = espn_provider or EspnOddsProvider(self.client)
+        self.clock = clock or (lambda: datetime.now(UTC))
 
     def build(
         self,
@@ -124,12 +134,15 @@ class DailyPipeline:
             validate_payload(payload, self.paths.schemas / "slate.schema.json")
             return payload
 
-        observed_at = datetime.now(UTC)
-        if inputs is not None and isinstance(inputs.get("odds_by_game"), dict):
+        observed_at = self.clock().astimezone(UTC)
+        acquisition: EspnAcquisitionOutcome | None = None
+        if inputs is not None:
+            from ballpark.odds import unavailable_market as legacy_unavailable_market
+
             odds_by_game = {
-                int(game["game_pk"]): inputs["odds_by_game"].get(
+                int(game["game_pk"]): inputs.get("odds_by_game", {}).get(
                     str(game["game_pk"]),
-                    unavailable_market(
+                    legacy_unavailable_market(
                         int(game["game_pk"]),
                         target_date,
                         "fixture omits market" if fixture else "runtime source bundle omits market",
@@ -139,18 +152,16 @@ class DailyPipeline:
                 for game in schedule
             }
         else:
-            # A public Covers page supplied a useful parser sample but its terms do not authorize
-            # republication. Do not silently turn accessibility into a production source grant.
-            odds_by_game = {
-                int(game["game_pk"]): unavailable_market(
-                    int(game["game_pk"]),
-                    target_date,
-                    "no authorized live sportsbook provider is configured; "
-                    "public Covers data is not republished",
-                    observed_at=observed_at,
-                )
-                for game in schedule
-            }
+            # One bounded ESPN scoreboard request supplies the complete slate.
+            capture_at = self.clock().astimezone(UTC)
+            acquisition = self.espn_provider.acquire(
+                target_date,
+                schedule,
+                observed_at=capture_at,
+                comparison_now=capture_at,
+                deadline_at=network_deadline,
+            )
+            odds_by_game = acquisition.markets
         if inputs is not None:
             exchange_by_game = {
                 int(game["game_pk"]): inputs.get("exchange_by_game", {}).get(
@@ -342,7 +353,7 @@ class DailyPipeline:
                     "confirmed_games": lineups_confirmed,
                     "optional": True,
                 },
-                "odds": self._odds_health(odds_by_game),
+                "odds": self._odds_health(odds_by_game, acquisition),
                 "exchange_markets": self._exchange_health(exchange_by_game),
                 "artifacts": receipt.as_dict(),
             },
@@ -369,20 +380,33 @@ class DailyPipeline:
         return payload, publish_payload(output_root, payload)
 
     @staticmethod
-    def _odds_health(odds_by_game: dict[int, dict[str, Any]]) -> dict[str, Any]:
+    def _odds_health(
+        odds_by_game: dict[int, dict[str, Any]],
+        acquisition: EspnAcquisitionOutcome | None = None,
+    ) -> dict[str, Any]:
         states = [str(value.get("state")) for value in odds_by_game.values()]
-        return {
+        observed = states.count("observed_unknown_age")
+        health: dict[str, Any] = {
             "state": "available"
             if states and all(state == "current" for state in states)
             else "partial"
-            if "current" in states
+            if "current" in states or observed
             else "unavailable",
-            "source": "No authorized live sportsbook provider configured",
+            "source": (
+                "ESPN public scoreboard / DraftKings"
+                if acquisition is not None
+                else "Trusted supplied sportsbook markets"
+            ),
             "current_games": states.count("current"),
+            "observed_unknown_age_games": observed,
             "stale_games": states.count("stale"),
             "unavailable_games": states.count("unavailable"),
             "optional": False,
         }
+        if acquisition is not None:
+            health["acquisition_status"] = acquisition.status
+            health["acquisition_error"] = acquisition.source_error
+        return health
 
     @staticmethod
     def _exchange_health(exchange_by_game: dict[int, dict[str, Any]]) -> dict[str, Any]:

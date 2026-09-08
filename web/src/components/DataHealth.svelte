@@ -2,6 +2,7 @@
   import type { BallparkPayload, GeometryArtifact } from '../lib/types';
   import { formatTimestamp, healthReason, healthState, humanizeKey, shortHash } from '../lib/format';
   import { isReadyState } from '../lib/validate';
+  import { oddsHealthDetail } from '../lib/odds_health';
   import StateBadge from './StateBadge.svelte';
 
   export let payload: BallparkPayload;
@@ -58,7 +59,7 @@
           <div class="lane-index" aria-hidden="true">{String(index + 1).padStart(2, '0')}</div>
           <div>
             <h3>{humanizeKey(name)}</h3>
-            <p>{healthReason(lane) ?? (isReadyState(healthState(lane)) ? 'Validated for this publication.' : 'This lane did not report additional detail.')}</p>
+            <p>{name === 'odds' ? oddsHealthDetail(lane) : healthReason(lane) ?? (isReadyState(healthState(lane)) ? 'Validated for this publication.' : 'This lane did not report additional detail.')}</p>
           </div>
           <StateBadge state={healthState(lane)} />
         </article>
