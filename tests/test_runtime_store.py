@@ -180,3 +180,23 @@ def test_same_token_retry_is_idempotent(tmp_path: Path, monkeypatch: pytest.Monk
     accepted = catalog.accepted(token)
     _accept_stage(context(tmp_path, token))
     assert catalog.accepted(token) == accepted
+
+
+def test_postcommit_interruption_reconciles_on_same_token_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BALLPARK_MIN_FREE_BYTES", "0")
+    token = f"{1:032x}"
+    stage(tmp_path, token, "2026-09-02")
+    original = PublicationCatalog.commit
+
+    def commit_then_interrupt(self: PublicationCatalog, *args: object, **kwargs: object) -> bool:
+        original(self, *args, **kwargs)
+        raise OSError("after catalog commit")
+
+    monkeypatch.setattr(PublicationCatalog, "commit", commit_then_interrupt)
+    with pytest.raises(OSError, match="after catalog"):
+        _accept_stage(context(tmp_path, token))
+    monkeypatch.setattr(PublicationCatalog, "commit", original)
+    _accept_stage(context(tmp_path, token))
+    assert PublicationCatalog(tmp_path / "publication").current_manifest()["token"] == token
