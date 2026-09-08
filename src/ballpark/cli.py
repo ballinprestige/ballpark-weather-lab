@@ -115,7 +115,7 @@ def _run_web_build(paths: ProjectPaths) -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
-        paths = ProjectPaths.discover(Path(__file__).resolve())
+        paths = ProjectPaths.discover()
         if args.command == "verify-artifacts":
             from ballpark.artifacts import verify_artifacts
             from ballpark.geometry_artifact import verify_exported_geometry

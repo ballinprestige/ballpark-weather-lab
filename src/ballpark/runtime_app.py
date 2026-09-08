@@ -320,7 +320,7 @@ def _validate_payload(payload: object) -> dict[str, Any]:
         raise RuntimeError("staged payload generated_at is invalid")
     try:
         validate_payload(
-            payload, Path(__file__).resolve().parents[2] / "schemas" / "slate.schema.json"
+            payload, ProjectPaths.discover().schemas / "slate.schema.json"
         )
     except DataContractError as exc:
         raise RuntimeError(f"staged payload schema is invalid: {exc}") from exc
