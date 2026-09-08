@@ -424,6 +424,10 @@ function validateOddsHealth(value: unknown, games: BallparkGame[], requiresOddsL
   }
   const expectedState = actual.current === games.length ? 'available' : actual.current > 0 || actual.observed_unknown_age > 0 ? 'partial' : 'unavailable';
   if (state !== expectedState) fail('health.odds.state', 'must match the summarized game market states');
+  if ('acquisition_status' in odds) {
+    enumAt(odds.acquisition_status, 'health.odds.acquisition_status', ['observed', 'no_quote', 'schema_error', 'transport_error']);
+    nullableStringAt(odds.acquisition_error, 'health.odds.acquisition_error');
+  }
   health.odds = odds;
   return health;
 }

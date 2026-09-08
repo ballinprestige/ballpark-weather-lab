@@ -7,6 +7,8 @@ export interface HealthLane extends JsonRecord {
   status?: string;
   reason?: string | null;
   detail?: string | null;
+  acquisition_status?: 'observed' | 'no_quote' | 'schema_error' | 'transport_error';
+  acquisition_error?: string | null;
   updated_at?: string | null;
 }
 

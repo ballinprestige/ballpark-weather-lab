@@ -125,7 +125,9 @@
         "observed_unknown_age_games": { "type": "integer", "minimum": 0, "maximum": 30 },
         "stale_games": { "type": "integer", "minimum": 0, "maximum": 30 },
         "unavailable_games": { "type": "integer", "minimum": 0, "maximum": 30 },
-        "optional": { "const": false }
+        "optional": { "const": false },
+        "acquisition_status": { "enum": ["observed", "no_quote", "schema_error", "transport_error"] },
+        "acquisition_error": { "type": ["string", "null"] }
       }
     },
     "exchangeHealth": {
