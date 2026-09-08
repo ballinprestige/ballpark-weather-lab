@@ -133,3 +133,16 @@ def test_probe_is_read_only_and_fails_closed_for_silent_or_late_worker(tmp_path:
     assert stale["state"] == "not_ready"
     assert "worker heartbeat is stale" in stale["problems"]
     assert RuntimeLedger(tmp_path / "state").read() == before
+
+
+def test_probe_does_not_create_a_missing_runtime_ledger(tmp_path: Path) -> None:
+    result = probe_runtime(
+        tmp_path / "missing-state",
+        max_heartbeat_age_seconds=30,
+        max_job_lag_seconds=5,
+        now=NOW,
+    )
+
+    assert result["state"] == "not_ready"
+    assert "worker heartbeat is missing or invalid" in result["problems"]
+    assert not (tmp_path / "missing-state").exists()

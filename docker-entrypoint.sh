@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 mode="${1:-server}"
+if [ "$#" -gt 0 ]; then
+  shift
+fi
 worker_command() {
   if [ -n "${BALLPARK_FIXTURE:-}" ]; then
     exec ballpark runtime-worker --state-dir "$BALLPARK_STATE_DIR" --cache-dir "$BALLPARK_CACHE_DIR" --publication-dir "$BALLPARK_PUBLICATION_DIR" --fixture "$BALLPARK_FIXTURE" --date "${BALLPARK_DATE:?BALLPARK_DATE is required with BALLPARK_FIXTURE}"
@@ -9,7 +12,7 @@ worker_command() {
   fi
 }
 server_command() {
-  exec ballpark runtime-server --state-dir "$BALLPARK_STATE_DIR" --publication-dir "$BALLPARK_PUBLICATION_DIR" --web-dir /app/web/dist --host "${BALLPARK_HOST:-127.0.0.1}" --port "${PORT:-8080}"
+  exec ballpark runtime-server --state-dir "$BALLPARK_STATE_DIR" --cache-dir "$BALLPARK_CACHE_DIR" --publication-dir "$BALLPARK_PUBLICATION_DIR" --web-dir /app/web/dist --host "${BALLPARK_HOST:-127.0.0.1}" --port "${PORT:-8080}"
 }
 supervise() {
   worker_command & worker_pid=$!
@@ -50,8 +53,21 @@ case "$mode" in
   probe)
     exec ballpark runtime-probe --state-dir "$BALLPARK_STATE_DIR"
     ;;
+  monitor)
+    : "${BALLPARK_RUNTIME_URL:?BALLPARK_RUNTIME_URL is required for monitor mode}"
+    exec ballpark runtime-monitor --url "$BALLPARK_RUNTIME_URL" "$@"
+    ;;
+  backup)
+    exec ballpark runtime-backup "$@"
+    ;;
+  verify-backup)
+    exec ballpark runtime-verify-backup "$@"
+    ;;
+  restore)
+    exec ballpark runtime-restore "$@"
+    ;;
   *)
-    echo "usage: docker-entrypoint.sh [service|server|worker|probe]" >&2
+    echo "usage: docker-entrypoint.sh [service|server|worker|probe|monitor|backup|verify-backup|restore]" >&2
     exit 2
     ;;
 esac

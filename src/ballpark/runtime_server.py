@@ -10,11 +10,13 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+from ballpark.runtime import parse_stamp
 from ballpark.runtime_app import (
     _DEFAULT_MAX_OBJECT_BYTES,
     _environment_limit,
     _is_digest,
     _load_object_json,
+    _load_snapshot,
     _read_object,
     _validate_archive_metadata,
     _validate_payload,
@@ -29,6 +31,7 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
     web_dir: Path
     publication_dir: Path
     state_dir: Path
+    cache_dir: Path
 
     def _json(self, code: int, value: object) -> None:
         body = json.dumps(value, sort_keys=True).encode()
@@ -64,6 +67,67 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
         _validate_archive_metadata(matching[0], body)
         return matching[0]
 
+    def _source_health(self) -> dict[str, object]:
+        """Publish source freshness clocks without exposing private raw evidence."""
+        path = self.cache_dir / "sources" / "sportsbook.json"
+        try:
+            envelope = json.loads(path.read_text(encoding="utf-8"))
+            value = envelope["value"]
+            if not isinstance(value, dict) or not isinstance(value.get("date"), str):
+                raise RuntimeError("source receipt is invalid")
+            receipt = _load_snapshot(
+                self.cache_dir,
+                "sportsbook",
+                date.fromisoformat(value["date"]),
+            )
+            latest = receipt["latest"]
+            acquisition = receipt["acquisition"]
+            if (
+                not isinstance(receipt, dict)
+                or receipt.get("schema_version") != 1
+                or not isinstance(latest, dict)
+                or not isinstance(acquisition, dict)
+                or date.fromisoformat(receipt["date"]).isoformat() != receipt["date"]
+                or latest.get("status")
+                not in {"observed", "no_quote", "schema_error", "transport_error"}
+                or latest.get("status") != acquisition.get("status")
+                or latest.get("attempted_at") != acquisition.get("attempted_at")
+            ):
+                raise RuntimeError("source receipt is invalid")
+            parse_stamp(str(latest["attempted_at"]))
+            last_good = receipt.get("last_good")
+            if last_good is not None:
+                if not isinstance(last_good, dict):
+                    raise RuntimeError("source receipt is invalid")
+                parse_stamp(str(last_good["captured_at"]))
+            operations = json.loads(
+                (self.state_dir / "operations.json").read_text(encoding="utf-8")
+            )
+            maintenance = operations["maintenance"]
+            if (
+                not isinstance(operations, dict)
+                or operations.get("schema_version") != 1
+                or not isinstance(maintenance, dict)
+                or maintenance.get("state") not in {"succeeded", "failed"}
+            ):
+                raise RuntimeError("maintenance receipt is invalid")
+            parse_stamp(str(maintenance["observed_at"]))
+            return {
+                "state": "available",
+                "date": receipt["date"],
+                "sportsbook": {
+                    "latest_attempted_at": latest["attempted_at"],
+                    "latest_status": latest["status"],
+                    "last_good_captured_at": last_good.get("captured_at") if last_good else None,
+                },
+                "maintenance": {
+                    "observed_at": maintenance["observed_at"],
+                    "state": maintenance["state"],
+                },
+            }
+        except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise RuntimeError("source receipt is unavailable") from exc
+
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         if path == "/healthz":
@@ -72,6 +136,12 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
         if path == "/readiness":
             result = runtime_readiness(self.state_dir, heartbeat_seconds=180, job_lag_seconds=30)
             self._json(200 if result["state"] == "ready" else 503, result)
+            return
+        if path == "/source-health":
+            try:
+                self._json(200, self._source_health())
+            except RuntimeError:
+                self._json(503, {"state": "not_available"})
             return
         allowed = {"/data/data.json", "/data/release.json", "/archive/index.json"}
         archive_name = path.removeprefix("/archive/")
@@ -174,13 +244,20 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
             raise RuntimeError(message) from exc
 
 
-def serve(*, web_dir: Path, publication_dir: Path, state_dir: Path, host: str, port: int) -> None:
+def serve(
+    *, web_dir: Path, publication_dir: Path, state_dir: Path, cache_dir: Path, host: str, port: int
+) -> None:
     if host not in {"127.0.0.1", "0.0.0.0"}:
         raise ValueError("host must be 127.0.0.1 or 0.0.0.0")
     handler = type(
         "ConfiguredRuntimeHandler",
         (RuntimeHandler,),
-        {"web_dir": web_dir, "publication_dir": publication_dir, "state_dir": state_dir},
+        {
+            "web_dir": web_dir,
+            "publication_dir": publication_dir,
+            "state_dir": state_dir,
+            "cache_dir": cache_dir,
+        },
     )
     server = ThreadingHTTPServer((host, port), handler)
     try:

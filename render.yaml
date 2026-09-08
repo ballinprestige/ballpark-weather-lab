@@ -9,7 +9,13 @@ services:
     disk:
       name: ballpark-runtime-data
       mountPath: /var/lib/ballpark
-      sizeGB: 1
+      sizeGB: 10
     envVars:
       - key: BALLPARK_HOST
         value: 0.0.0.0
+      - key: BALLPARK_STATE_DIR
+        value: /var/lib/ballpark/runtime/state
+      - key: BALLPARK_CACHE_DIR
+        value: /var/lib/ballpark/runtime/cache
+      - key: BALLPARK_PUBLICATION_DIR
+        value: /var/lib/ballpark/runtime/publication

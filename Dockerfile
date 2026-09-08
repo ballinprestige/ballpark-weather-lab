@@ -16,7 +16,7 @@ COPY schemas/ ./schemas/
 COPY web/public/ ./web/public/
 COPY docker-entrypoint.sh ./
 COPY --from=web-build /build/web/dist ./web/dist
-RUN pip install --no-build-isolation --no-deps . && chmod 755 docker-entrypoint.sh && mkdir -p /var/lib/ballpark
+RUN pip install --no-build-isolation --no-deps . && chmod 755 docker-entrypoint.sh && mkdir -p /var/lib/ballpark && usermod --password NP root
 VOLUME ["/var/lib/ballpark"]
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["service"]

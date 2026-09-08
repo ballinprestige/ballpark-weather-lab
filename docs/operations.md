@@ -86,7 +86,7 @@ directories chosen by the operator:
 .venv/bin/python -m ballpark runtime-worker \
   --state-dir ./runtime-state --cache-dir ./runtime-cache --publication-dir ./runtime-publication
 .venv/bin/python -m ballpark runtime-server \
-  --state-dir ./runtime-state --publication-dir ./runtime-publication --web-dir web/dist --port 8080
+  --state-dir ./runtime-state --cache-dir ./runtime-cache --publication-dir ./runtime-publication --web-dir web/dist --port 8080
 .venv/bin/python -m ballpark runtime-probe --state-dir ./runtime-state
 ```
 
@@ -94,7 +94,7 @@ directories chosen by the operator:
 .\.venv\Scripts\python.exe -m ballpark runtime-worker `
   --state-dir .\runtime-state --cache-dir .\runtime-cache --publication-dir .\runtime-publication
 .\.venv\Scripts\python.exe -m ballpark runtime-server `
-  --state-dir .\runtime-state --publication-dir .\runtime-publication --web-dir web\dist --port 8080
+  --state-dir .\runtime-state --cache-dir .\runtime-cache --publication-dir .\runtime-publication --web-dir web\dist --port 8080
 .\.venv\Scripts\python.exe -m ballpark runtime-probe --state-dir .\runtime-state
 ```
 
@@ -104,8 +104,10 @@ official game bindings, raw response bytes, and capture clocks. The raw response
 private source evidence; the accepted publication records the source receipt in its private CAS
 input receipts under `publication-dir/objects`, never in the public payload. Maintenance outcomes
 and errors are retained as the bounded `state-dir/operations.json` history. The scheduler ledger
-remains `state-dir/runtime-state.sqlite3`; `/healthz`, `/readiness`, `/data/data.json`, and
-`/data/release.json` provide the normal service checks.
+remains `state-dir/runtime-state.sqlite3`; `/healthz`, `/readiness`, `/source-health`,
+`/data/data.json`, and `/data/release.json` provide the normal service checks. `/source-health`
+contains only latest-attempt/last-good capture clocks/status and the latest bounded maintenance
+outcome timestamp/state, never raw provider evidence or maintenance error detail.
 
 `observed_unknown_age` means the source supplied a complete observed total but no quote-level
 update timestamp; the displayed capture time remains the original retrieval time. `retained` means
@@ -114,6 +116,10 @@ again after restart. An `Update failed` label means the latest provider attempt 
 displayed retained observation remains identifiable; it does not turn that quote into a current
 one. A healthy ESPN response with no matching quote remains an explicit no-quote result and does
 not overwrite the separate last-good receipt.
+
+For Render configuration, independent freshness/dead-man monitoring, stopped-state full-mount
+backup, same-image recovery, and the remaining operator account boundary, see
+[the runtime hosting runbook](runtime-hosting.md).
 
 ## Preflight verification
 

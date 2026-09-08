@@ -85,11 +85,14 @@ class RuntimeLedger:
         return connection
 
     def read(self) -> dict[str, Any]:
-        connection = self._connect()
+        if not self.path.is_file():
+            return {"schema_version": 2, "jobs": {}}
+        connection = sqlite3.connect(f"file:{self.path.as_posix()}?mode=ro", uri=True)
         try:
-            return json.loads(
-                connection.execute("SELECT value FROM state WHERE id=1").fetchone()[0]
-            )
+            row = connection.execute("SELECT value FROM state WHERE id=1").fetchone()
+            if row is None:
+                return {"schema_version": 2, "jobs": {}}
+            return json.loads(row[0])
         finally:
             connection.close()
 
@@ -371,7 +374,15 @@ def probe_runtime(
 ) -> dict[str, Any]:
     """Read-only monitoring contract; an external monitor must invoke this separately."""
     now = (now or datetime.now(UTC)).astimezone(UTC)
-    state, problems = RuntimeLedger(state_dir).read(), []
+    try:
+        state = RuntimeLedger(state_dir).read()
+    except (OSError, sqlite3.Error, TypeError, ValueError, json.JSONDecodeError):
+        return {
+            "state": "not_ready",
+            "checked_at": utc_stamp(now),
+            "problems": ["runtime ledger is unavailable"],
+        }
+    problems = []
     try:
         if (
             not 0
