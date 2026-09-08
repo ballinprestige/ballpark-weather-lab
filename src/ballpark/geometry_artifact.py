@@ -78,8 +78,10 @@ def materialize_geometry(root: Path, document: dict[str, Any]) -> dict[str, Any]
 def export_park_geometry(root: Path, destination: Path | None = None) -> dict[str, Any]:
     destination = destination or root / GEOMETRY_ARTIFACT
     result = materialize_geometry(root, _read_object(destination))
-    destination.write_text(
-        json.dumps(result, separators=(",", ":"), ensure_ascii=True) + "\n", encoding="utf-8"
+    # Publication bytes are part of the manifest.  ``write_text`` translates
+    # newlines on Windows, so serialize the canonical UTF-8/LF bytes directly.
+    destination.write_bytes(
+        (json.dumps(result, separators=(",", ":"), ensure_ascii=True) + "\n").encode("utf-8")
     )
     return result
 

@@ -53,9 +53,9 @@
       "sha256": "3df383f1f1b3b74611c607d87e7e27e7b29e71a7d5dfd99b59a955c37f223cf9"
     },
     "web/public/park_geometry.json": {
-      "bytes": 27732,
+      "bytes": 27731,
       "critical": true,
-      "sha256": "398d21f25cc1a6eb26d3f9d9af6d16060f6e2bb14ffe0fa7077efb17c2021f1c"
+      "sha256": "a875c3c738c5b5b493e0e4219cdc661e949d30b7a317d2d72d4e45ca3380fc7c"
     }
   },
   "evidence_counts": {
