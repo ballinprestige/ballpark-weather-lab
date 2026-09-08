@@ -25,3 +25,8 @@ export function isUpcomingExchangeMarket(
   return market?.state === 'observed_unknown_age'
     && effectiveExchangePhase(market, gameTime, now) === 'pregame';
 }
+
+/** Official schedule labels that describe a capture before play, never a live phase. */
+export function isCapturedPregameStatus(status: string): boolean {
+  return /^(scheduled|pre-?game|preview|warmup)$/i.test(status.trim());
+}

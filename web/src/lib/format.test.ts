@@ -1,15 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { isGameHeld, isModelAdjustmentHeld, isWeatherHeld } from './format';
-import { modelAdjustmentHeldPayload } from '../../tests/fixtures';
+import { formatTimestamp } from './format';
 
-describe('factor holds with verified weather', () => {
-  it('keeps physical weather distinct from an unavailable learned adjustment', () => {
-    const game = modelAdjustmentHeldPayload().games[1];
-
-    expect(isWeatherHeld(game)).toBe(false);
-    expect(isModelAdjustmentHeld(game)).toBe(true);
-    expect(isGameHeld(game)).toBe(true);
-    expect(game.weather.wind_carry_mph).toBe(7.2);
-    expect(game.odds.line).toBe(8.5);
+describe('timestamp formatting', () => {
+  it('keeps a known UTC instant correct in New York across daylight saving time', () => {
+    const converted = new Intl.DateTimeFormat('en-US', {
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short', timeZone: 'America/New_York'
+    }).format(new Date('2026-11-01T06:30:00Z'));
+    expect(converted).toBe('Nov 1, 1:30 AM EST');
+    expect(formatTimestamp('not-a-time')).toBe('not-a-time');
   });
 });

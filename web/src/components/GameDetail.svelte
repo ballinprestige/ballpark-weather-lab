@@ -3,7 +3,7 @@
   import { displayValue, formatContractCents, formatFactor, formatTime, formatTimestamp, gameHoldReason, isGameHeld, isModelAdjustmentHeld, pitcherName, stateTone, teamLabel, windLabel } from '../lib/format';
   import { isReadyState } from '../lib/validate';
   import { assessOddsFreshness } from '../lib/freshness';
-  import { effectiveExchangePhase } from '../lib/exchange';
+  import { effectiveExchangePhase, isCapturedPregameStatus } from '../lib/exchange';
   import StateBadge from './StateBadge.svelte';
   import ParkWindDiagram from './ParkWindDiagram.svelte';
   import DecompositionLadder from './DecompositionLadder.svelte';
@@ -26,7 +26,7 @@
     && game.exchange_market.under_ask_cents !== null;
   $: exchangePhase = effectiveExchangePhase(game.exchange_market, game.game_time, now);
   $: capturedPregameAfterStart = exchangePhase === 'after_scheduled_start'
-    && /pre.?game/i.test(game.game_status);
+    && isCapturedPregameStatus(game.game_status);
   const american = (price: number | null): string => price === null ? '—' : `${price > 0 ? '+' : ''}${price}`;
 </script>
 

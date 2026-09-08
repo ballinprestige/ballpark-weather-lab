@@ -8,6 +8,7 @@ export default defineConfig({
   reporter: process.env.CI ? 'github' : 'list',
   use: {
     baseURL: 'http://127.0.0.1:4175',
+    timezoneId: 'America/Los_Angeles',
     trace: 'on-first-retry'
   },
   webServer: {

@@ -647,7 +647,7 @@ test('retained pregame exchange evidence becomes after-scheduled-start at the co
   const elapsed = page.locator('.ledger tbody tr').filter({ has: page.locator('[data-game-key="1001"]') });
   await expect(elapsed).toContainText('after scheduled start');
   await elapsed.getByRole('link').click();
-  await expect(page.getByTestId('game-detail').locator('.detail-status-line')).toContainText('Status at capture: Pre-game');
+  await expect(page.getByTestId('game-detail').locator('.detail-status-line')).toContainText('Status at capture: Scheduled');
   await expect(page.locator('.exchange-market')).toContainText('Market phaseafter scheduled start');
   await expect(page.locator('.exchange-market')).toContainText('source age unknown');
 });
