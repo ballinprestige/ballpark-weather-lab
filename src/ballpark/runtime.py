@@ -349,8 +349,12 @@ def probe_runtime(
         try:
             job = state["jobs"][name]
             interval = int(job["interval_seconds"])
-            last_success = parse_stamp(job["last_success_at"])
-            if now > last_success + timedelta(seconds=interval + max_job_lag_seconds):
+            last_success_value = job.get("last_success_at")
+            if last_success_value is None:
+                problems.append(f"job has never succeeded: {name}")
+            elif now > parse_stamp(last_success_value) + timedelta(
+                seconds=interval + max_job_lag_seconds
+            ):
                 problems.append(f"job lacks a fresh successful receipt: {name}")
             if job.get("last_error") and job.get("attempt") == 0:
                 problems.append(f"job exhausted its retry budget: {name}")
