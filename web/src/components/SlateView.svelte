@@ -5,6 +5,7 @@
   import GameListItem from './GameListItem.svelte';
   import WindFieldStrip from './WindFieldStrip.svelte';
   import { assessOddsFreshness } from '../lib/freshness';
+  import { effectiveExchangePhase, isUpcomingExchangeMarket } from '../lib/exchange';
 
   type SlateFilter = 'all' | 'open' | 'roof' | 'incomplete';
   type SlateSort = 'upcoming' | 'movement' | 'time' | 'wind' | 'venue';
@@ -32,7 +33,7 @@
   const sorted = (games: BallparkGame[], activeSort: SlateSort): BallparkGame[] => [...games].sort((left, right) => {
     if (activeSort === 'upcoming') {
       const rank = (game: BallparkGame): number => {
-        const phase = game.exchange_market?.game_phase;
+        const phase = effectiveExchangePhase(game.exchange_market, game.game_time, now);
         if (phase === 'pregame' || Date.parse(game.game_time) > now.getTime()) return 0;
         if (phase === 'final' || /final|completed/i.test(game.game_status)) return 2;
         return 1;
@@ -92,7 +93,7 @@
     ? `Sportsbook totals unavailable ${payload.games.length}/${payload.games.length}`
     : `Current sportsbook totals ${currentSportsbook}/${payload.games.length}`;
   $: observedExchange = payload.games.filter((game) => game.exchange_market?.state === 'observed_unknown_age').length;
-  $: upcomingExchange = payload.games.filter((game) => game.exchange_market?.state === 'observed_unknown_age' && game.exchange_market.game_phase === 'pregame').length;
+  $: upcomingExchange = payload.games.filter((game) => isUpcomingExchangeMarket(game.exchange_market, game.game_time, now)).length;
   $: exchangeCapture = payload.games.find((game) => game.exchange_market?.state === 'observed_unknown_age')?.exchange_market?.observed_at ?? null;
 </script>
 
@@ -146,9 +147,10 @@
             {@const movement = movementPercent(game)}
             {@const market = assessOddsFreshness(game.odds, now)}
             {@const exchange = exchangeAsk(game)}
+            {@const exchangePhase = effectiveExchangePhase(exchange, game.game_time, now)}
             <tr data-tone={isGameHeld(game) ? 'hold' : 'ready'}>
               <td><a class="board-matchup" href={`#game/${key}`} data-game-key={game.game_pk} aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} details`} on:click={(event) => openBoardDetails(event, key)}><strong>{game.away_team} <i>at</i> {game.home_team}</strong><small>{formatTime(game.game_time)} · {game.venue}</small></a></td>
-              <td>{#if exchange}<strong>{exchange.line}</strong> <span>Over {formatContractCents(exchange.over_ask_cents)} · Under {formatContractCents(exchange.under_ask_cents)}</span><small class="exchange-ask">Kalshi contract ask · {exchange.game_phase.replaceAll('_', ' ')} · source age unknown · observed {formatTimestamp(exchange.observed_at)}</small>{#if exchange.failure_reason}<small class="market-failure">Update failed: {exchange.failure_reason}</small>{/if}{:else if market.state === 'unavailable'}<strong>Sportsbook unavailable</strong>{:else}<strong>{game.odds.line}</strong> <span>O {american(game.odds.over_price)} · U {american(game.odds.under_price)}</span><br /><small>{game.odds.sportsbook_name} · {market.state === 'observed' ? 'observed, age unverified' : market.state}</small>{/if}</td>
+              <td>{#if exchange}<strong>{exchange.line}</strong> <span>Over {formatContractCents(exchange.over_ask_cents)} · Under {formatContractCents(exchange.under_ask_cents)}</span><small class="exchange-ask">Kalshi contract ask · {exchangePhase?.replaceAll('_', ' ')} · source age unknown · observed {formatTimestamp(exchange.observed_at)}</small>{#if exchange.failure_reason}<small class="market-failure">Update failed: {exchange.failure_reason}</small>{/if}{:else if market.state === 'unavailable'}<strong>Sportsbook unavailable</strong>{:else}<strong>{game.odds.line}</strong> <span>O {american(game.odds.over_price)} · U {american(game.odds.under_price)}</span><br /><small>{game.odds.sportsbook_name} · {market.state === 'observed' ? 'observed, age unverified' : market.state}</small>{/if}</td>
               <td>{windContext(game)}</td>
               <td>{movement == null ? (isWeatherHeld(game) ? 'Weather held' : 'Model adjustment held') : `${formatDelta(movement, 0)}% runs`}<br /><small>{isGameHeld(game) ? gameHoldReason(game) : `${Math.round(game.weather.temperature_f)}°F · ${Math.round(game.weather.humidity_pct)}%`}</small></td>
             </tr>

@@ -125,5 +125,8 @@ describe('validatePayload', () => {
     expect(validatePayload(payload).games[0].exchange_market?.over_ask_cents).toBe('49.55');
     observed.over_ask_size = '0';
     expect(() => validatePayload(payload)).toThrow(/positive decimal string/i);
+    observed.over_ask_size = '12.5';
+    observed.observed_at = '2026-08-27T16:10:01Z';
+    expect(() => validatePayload(payload)).toThrow(/cannot be retrieved after publication generation/i);
   });
 });

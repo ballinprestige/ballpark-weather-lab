@@ -521,13 +521,16 @@ test('optional updates are fenced across archive and Return Live generations', a
   await expect(page.getByText('Historical snapshot')).toBeVisible();
   await page.getByRole('link', { name: 'History' }).click();
   await page.getByRole('button', { name: 'Return to current release' }).click();
-  await expect.poll(() => geometryRequest).toBe(2);
+  await expect.poll(() => geometryRequest).toBeGreaterThanOrEqual(2);
   await page.getByRole('link', { name: 'Slate', exact: true }).click();
   await page.getByRole('link', { name: /Open Seattle Mariners at Boston Red Sox details/i }).click();
   await expect(page.locator('.field-wall')).toHaveCount(0);
   await page.getByRole('link', { name: 'Data Health' }).click();
   const warnings = page.locator('section.warning-ledger').filter({ has: page.getByRole('heading', { name: 'Degraded enhancements' }) });
   await expect(warnings).toContainText('Park geometry unavailable');
+  // The superseded held request never retries. The current generation gets
+  // exactly its bounded two attempts before reporting the optional failure.
+  await expect.poll(() => geometryRequest).toBe(3);
   releaseOldGeometry?.();
   await page.waitForTimeout(25);
   await expect(warnings).toContainText('Park geometry unavailable');
@@ -576,10 +579,13 @@ test('stale archive and geometry callbacks cannot overwrite a visibility refresh
   await expect(page.getByRole('table')).toBeVisible();
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
   await expect.poll(() => archiveRequests).toBe(2);
-  await expect.poll(() => geometryRequests).toBe(2);
+  await expect.poll(() => geometryRequests).toBeGreaterThanOrEqual(2);
   await page.getByRole('link', { name: 'Data Health' }).click();
   const warnings = page.locator('section.warning-ledger').filter({ has: page.getByRole('heading', { name: 'Degraded enhancements' }) });
   await expect(warnings).toContainText('Park geometry unavailable');
+  // The superseded request is cancelled; the current visibility refresh alone
+  // gets the bounded two geometry attempts.
+  await expect.poll(() => geometryRequests).toBe(3);
   await expect(page.getByText('Geometry artifact').locator('..')).toContainText('Unavailable');
   releaseOldArchive?.();
   releaseOldGeometry?.();
@@ -628,6 +634,21 @@ test('retained Kalshi asks show the provider failure without becoming current', 
   await page.getByRole('link', { name: 'Data Health' }).click();
   const failureLedger = page.locator('section.warning-ledger').filter({ has: page.getByRole('heading', { name: 'Kalshi update failed' }) });
   await expect(failureLedger).toContainText('Kalshi public market-data request returned 503.');
+});
+
+test('retained pregame exchange evidence becomes after-scheduled-start at the controlled clock', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('desktop'));
+  const payload = retainedExchangePayload();
+  payload.games[0].game_time = '2026-08-27T15:00:00Z';
+  payload.games[0].exchange_market!.game_time = payload.games[0].game_time;
+  await mockPublication(page, payload);
+  await page.goto('/#slate');
+  await expect(page.locator('.slate-meta')).toContainText('2 observed exchange totals · 1 upcoming');
+  const elapsed = page.locator('.ledger tbody tr').filter({ has: page.locator('[data-game-key="1001"]') });
+  await expect(elapsed).toContainText('after scheduled start');
+  await elapsed.getByRole('link').click();
+  await expect(page.locator('.exchange-market')).toContainText('Market phaseafter scheduled start');
+  await expect(page.locator('.exchange-market')).toContainText('source age unknown');
 });
 
 test('319px retained Kalshi row preserves capture time and update failure', async ({ page }, testInfo) => {

@@ -3,6 +3,7 @@
   import { displayValue, formatContractCents, formatFactor, formatTime, formatTimestamp, gameHoldReason, isGameHeld, isModelAdjustmentHeld, pitcherName, stateTone, teamLabel, windLabel } from '../lib/format';
   import { isReadyState } from '../lib/validate';
   import { assessOddsFreshness } from '../lib/freshness';
+  import { effectiveExchangePhase } from '../lib/exchange';
   import StateBadge from './StateBadge.svelte';
   import ParkWindDiagram from './ParkWindDiagram.svelte';
   import DecompositionLadder from './DecompositionLadder.svelte';
@@ -23,6 +24,7 @@
     && game.exchange_market.line !== null
     && game.exchange_market.over_ask_cents !== null
     && game.exchange_market.under_ask_cents !== null;
+  $: exchangePhase = effectiveExchangePhase(game.exchange_market, game.game_time, now);
   const american = (price: number | null): string => price === null ? '—' : `${price > 0 ? '+' : ''}${price}`;
 </script>
 
@@ -127,7 +129,7 @@
         <div><dt>Total condition</dt><dd>Over {game.exchange_market?.line}</dd></div>
         <div><dt>YES ask</dt><dd>{formatContractCents(game.exchange_market?.over_ask_cents)} <small>({game.exchange_market?.over_ask_dollars})</small></dd></div>
         <div><dt>NO ask</dt><dd>{formatContractCents(game.exchange_market?.under_ask_cents)} <small>({game.exchange_market?.under_ask_dollars})</small></dd></div>
-        <div><dt>Market phase</dt><dd>{game.exchange_market?.game_phase?.replaceAll('_', ' ')}</dd></div>
+        <div><dt>Market phase</dt><dd>{exchangePhase?.replaceAll('_', ' ')}</dd></div>
       </dl>
       <p class="market-warning">Contract asks are quoted in cents, not American sportsbook odds. Source update age is unknown; fees are excluded.</p>
       {#if game.exchange_market?.failure_reason}<p class="market-warning"><strong>Update failed.</strong> Retaining the captured asks above: {game.exchange_market.failure_reason}</p>{/if}

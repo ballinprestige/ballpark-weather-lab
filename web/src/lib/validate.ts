@@ -499,6 +499,16 @@ export function validatePayload(value: unknown): BallparkPayload {
     if (game.odds.state === 'current' && (Date.parse(game.odds.source_updated_at!) > Date.parse(generatedAt) || Date.parse(game.odds.observed_at!) > Date.parse(generatedAt))) {
       fail(`games[${index}].odds`, 'current quote cannot be sourced or observed after publication generation');
     }
+    if (
+      game.exchange_market?.state === 'observed_unknown_age'
+      && game.exchange_market.observed_at !== null
+      && Date.parse(game.exchange_market.observed_at) > Date.parse(generatedAt) + 5 * 60_000
+    ) {
+      fail(
+        `games[${index}].exchange_market`,
+        'observed exchange evidence cannot be retrieved after publication generation'
+      );
+    }
   }
   if (status === 'no_slate' && games.length !== 0) fail('games', 'must be empty when status is no_slate');
   if (status !== 'no_slate' && games.length === 0) fail('games', 'must contain at least one game unless status is no_slate');

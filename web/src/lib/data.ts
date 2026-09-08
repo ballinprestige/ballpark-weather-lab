@@ -14,19 +14,25 @@ export class PublicationLoadError extends Error {
 async function fetchText(path: string, signal?: AbortSignal): Promise<string> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= REQUEST_ATTEMPTS; attempt += 1) {
+    if (signal?.aborted) {
+      throw new DOMException('Publication request was superseded.', 'AbortError');
+    }
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const abort = () => controller.abort();
     try {
-      const abort = () => controller.abort();
       signal?.addEventListener('abort', abort, { once: true });
       const response = await fetch(path, { cache: 'no-store', signal: controller.signal });
-      signal?.removeEventListener('abort', abort);
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       return await response.text();
     } catch (error) {
       lastError = error;
+      // A newer publication generation owns this route.  Do not turn its
+      // cancellation into a retry against the same optional source.
+      if (signal?.aborted) throw error;
       if (attempt < REQUEST_ATTEMPTS) await new Promise((resolve) => window.setTimeout(resolve, 180 * attempt));
     } finally {
+      signal?.removeEventListener('abort', abort);
       window.clearTimeout(timeout);
     }
   }
