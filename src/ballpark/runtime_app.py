@@ -147,6 +147,14 @@ def _accept_stage(context: JobContext) -> None:
             )
         )
         for row in prior_index["dates"]:
+            try:
+                date.fromisoformat(row["date"])
+                digest = row["object_sha256"]
+                raw = gzip.decompress((objects / f"{digest}.json.gz").read_bytes())
+            except (KeyError, OSError, TypeError, ValueError, gzip.BadGzipFile) as exc:
+                raise RuntimeError("accepted archive history is malformed") from exc
+            if hashlib.sha256(raw).hexdigest() != digest:
+                raise RuntimeError("accepted archive history object digest is invalid")
             if row["date"] not in rows:
                 rows[row["date"]] = row
     merged_index = {
