@@ -64,6 +64,19 @@ def _build_parser() -> argparse.ArgumentParser:
     reliability.add_argument("--attempts", type=int, default=3)
     reliability.add_argument("--delay", type=float, default=1.0)
 
+    worker = commands.add_parser("runtime-worker")
+    worker.add_argument("--state-dir", type=Path, required=True)
+    worker.add_argument("--cache-dir", type=Path, required=True)
+    worker.add_argument("--publication-dir", type=Path, required=True)
+    worker.add_argument("--fixture", type=Path, required=True)
+    worker.add_argument("--date", type=_date, default=_default_date())
+    worker.add_argument("--once", action="store_true")
+
+    probe = commands.add_parser("runtime-probe")
+    probe.add_argument("--state-dir", type=Path, required=True)
+    probe.add_argument("--max-heartbeat-age-seconds", type=int, default=180)
+    probe.add_argument("--max-job-lag-seconds", type=int, default=30)
+
     commands.add_parser("verify-artifacts")
     return parser
 
@@ -104,6 +117,33 @@ def main(argv: list[str] | None = None) -> int:
             verify_exported_geometry(paths.root)
             _print(receipt.as_dict())
             return 0
+
+        if args.command == "runtime-worker":
+            from ballpark.runtime_app import run_fixture_worker
+
+            _print(
+                run_fixture_worker(
+                    paths,
+                    fixture=args.fixture.resolve(),
+                    target_date=args.date,
+                    state_dir=args.state_dir.resolve(),
+                    cache_dir=args.cache_dir.resolve(),
+                    publication_dir=args.publication_dir.resolve(),
+                    once=args.once,
+                )
+            )
+            return 0
+
+        if args.command == "runtime-probe":
+            from ballpark.runtime_app import runtime_readiness
+
+            result = runtime_readiness(
+                args.state_dir.resolve(),
+                heartbeat_seconds=args.max_heartbeat_age_seconds,
+                job_lag_seconds=args.max_job_lag_seconds,
+            )
+            _print(result)
+            return 0 if result["state"] == "ready" else 3
 
         if args.command in {"build", "daily"}:
             from ballpark.pipeline import DailyPipeline
