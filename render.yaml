@@ -3,7 +3,7 @@ services:
     name: ballpark-runtime
     runtime: docker
     plan: standard
-    dockerCommand: server
+    dockerCommand: service
     healthCheckPath: /healthz
     disk:
       name: ballpark-runtime-data
@@ -12,12 +12,3 @@ services:
     envVars:
       - key: BALLPARK_HOST
         value: 0.0.0.0
-  - type: worker
-    name: ballpark-runtime-worker
-    runtime: docker
-    plan: standard
-    dockerCommand: worker
-    disk:
-      name: ballpark-runtime-worker-data
-      mountPath: /var/lib/ballpark
-      sizeGB: 1

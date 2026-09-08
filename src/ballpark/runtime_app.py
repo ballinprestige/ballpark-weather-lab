@@ -22,7 +22,7 @@ from ballpark.kalshi import KalshiExchangeProvider
 from ballpark.paths import ProjectPaths
 from ballpark.pipeline import DailyPipeline, load_fixture
 from ballpark.publication import atomic_write, canonical_json_bytes
-from ballpark.runtime import JobContext, JobSpec, RuntimeWorker, probe_runtime
+from ballpark.runtime import JobContext, JobSpec, RuntimeBusyError, RuntimeWorker, probe_runtime
 from ballpark.schedule import fetch_schedule
 from ballpark.venues import VENUES
 from ballpark.weather import fetch_game_weather
@@ -257,7 +257,13 @@ def run_live_worker(
                 publication_dir=publication_dir,
                 acceptors={"publish": _accept_stage},
             )
-            last = worker.run_once()
+            try:
+                last = worker.run_once()
+            except RuntimeBusyError:
+                # A prior process can retain a bounded, durable lease through
+                # a restart. Wait for it instead of turning a valid recovery
+                # interval into a platform crash loop.
+                last = {"state": "waiting_for_prior_lease"}
             if once:
                 return last
             time.sleep(1)

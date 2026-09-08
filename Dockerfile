@@ -18,4 +18,4 @@ COPY --from=web-build /build/web/dist ./web/dist
 RUN pip install --no-deps . && chmod 755 docker-entrypoint.sh && mkdir -p /var/lib/ballpark
 VOLUME ["/var/lib/ballpark"]
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
-CMD ["server"]
+CMD ["service"]

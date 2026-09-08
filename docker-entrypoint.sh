@@ -1,18 +1,48 @@
 #!/bin/sh
 set -eu
 mode="${1:-server}"
+worker_command() {
+  if [ -n "${BALLPARK_FIXTURE:-}" ]; then
+    ballpark runtime-worker --state-dir "$BALLPARK_STATE_DIR" --cache-dir "$BALLPARK_CACHE_DIR" --publication-dir "$BALLPARK_PUBLICATION_DIR" --fixture "$BALLPARK_FIXTURE" --date "${BALLPARK_DATE:?BALLPARK_DATE is required with BALLPARK_FIXTURE}"
+  else
+    ballpark runtime-worker --state-dir "$BALLPARK_STATE_DIR" --cache-dir "$BALLPARK_CACHE_DIR" --publication-dir "$BALLPARK_PUBLICATION_DIR"
+  fi
+}
+server_command() {
+  ballpark runtime-server --state-dir "$BALLPARK_STATE_DIR" --publication-dir "$BALLPARK_PUBLICATION_DIR" --web-dir /app/web/dist --host "${BALLPARK_HOST:-127.0.0.1}" --port "${PORT:-8080}"
+}
+supervise() {
+  worker_command & worker_pid=$!
+  server_command & server_pid=$!
+  terminate() {
+    kill -TERM "$worker_pid" "$server_pid" 2>/dev/null || true
+    wait "$worker_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+  }
+  trap 'terminate; exit 0' INT TERM
+  while :; do
+    if ! kill -0 "$worker_pid" 2>/dev/null || ! kill -0 "$server_pid" 2>/dev/null; then
+      terminate
+      exit 1
+    fi
+    sleep 1
+  done
+}
 case "$mode" in
+  service)
+    supervise
+    ;;
   server)
-    exec ballpark runtime-server --state-dir "$BALLPARK_STATE_DIR" --publication-dir "$BALLPARK_PUBLICATION_DIR" --web-dir /app/web/dist --host "${BALLPARK_HOST:-0.0.0.0}" --port "${PORT:-8080}"
+    server_command
     ;;
   worker)
-    exec ballpark runtime-worker --state-dir "$BALLPARK_STATE_DIR" --cache-dir "$BALLPARK_CACHE_DIR" --publication-dir "$BALLPARK_PUBLICATION_DIR"
+    worker_command
     ;;
   probe)
     exec ballpark runtime-probe --state-dir "$BALLPARK_STATE_DIR"
     ;;
   *)
-    echo "usage: docker-entrypoint.sh [server|worker|probe]" >&2
+    echo "usage: docker-entrypoint.sh [service|server|worker|probe]" >&2
     exit 2
     ;;
 esac
