@@ -3,6 +3,7 @@ services:
     name: ballpark-runtime
     runtime: docker
     plan: standard
+    autoDeploy: false
     dockerCommand: service
     healthCheckPath: /healthz
     disk:
