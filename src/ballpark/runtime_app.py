@@ -266,6 +266,7 @@ def run_live_worker(
                 context: JobContext,
                 target_date: date = target_date,
                 client: HttpClient = client,
+                receipt: dict[str, Any] = receipt,
             ) -> None:
                 receipt["lineups_due"] = True
                 schedule_value = _load_snapshot(cache_dir, "schedule", target_date).get("games")
