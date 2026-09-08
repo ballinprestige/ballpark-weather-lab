@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,6 +16,8 @@ INDOOR_HUMIDITY_PCT = 50.0
 R_D = 287.058
 R_V = 461.495
 RHO_ISA = 1.225
+MODEL_SOURCE_RECEIPT_SCHEMA_VERSION = 1
+MODEL_SOURCE_RECEIPT_TRANSFORM = "model_frame_0deg-v1"
 
 
 @dataclass(frozen=True)
@@ -105,6 +109,185 @@ def model_frame_0deg_for_weather(weather: dict[str, Any]) -> dict[str, float | s
     if not isinstance(source, ModelFrame0Weather):
         return None
     return model_frame_0deg_components(source)
+
+
+def _canonical_json_bytes(value: Any) -> bytes:
+    """Canonical bytes for internal integrity bindings (not source authentication)."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+
+def _sha256(value: Any) -> str:
+    return hashlib.sha256(_canonical_json_bytes(value)).hexdigest()
+
+
+def _model_contract() -> dict[str, Any]:
+    """Return the exact saved-model contract without making weather import model eagerly."""
+    # model imports this module.  Keeping this import local prevents an import cycle while
+    # still binding a durable receipt to the reviewed artifact and ordered feature identity.
+    from ballpark.model import FEATURE_COLUMNS, REVIEWED_ARTIFACT_SHA256
+
+    return {
+        "feature_columns": list(FEATURE_COLUMNS),
+        "artifact_sha256": dict(REVIEWED_ARTIFACT_SHA256),
+    }
+
+
+def _public_weather_identity(weather: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract the observation identity required to bind a private model receipt."""
+    game_pk = weather.get("game_pk")
+    source = weather.get("source")
+    basis = weather.get("basis")
+    valid_at = weather.get("valid_at")
+    fetched_at = weather.get("fetched_at")
+    if (
+        isinstance(game_pk, bool)
+        or not isinstance(game_pk, int)
+        or not isinstance(source, str)
+        or not isinstance(basis, str)
+        or valid_at is not None
+        and not isinstance(valid_at, str)
+        or not isinstance(fetched_at, str)
+    ):
+        return None
+    return {
+        "game_pk": game_pk,
+        "source": source,
+        "basis": basis,
+        "valid_at": valid_at,
+        "fetched_at": fetched_at,
+    }
+
+
+def build_model_source_receipt(weather: dict[str, Any]) -> dict[str, Any] | None:
+    """Create a durable *internal* receipt from an in-process selected source tuple.
+
+    The receipt deliberately cannot be made from a plain public weather mapping: its raw
+    tuple comes only from ``WeatherPayload.model_frame_0deg`` captured at acquisition.
+    Its digest protects cache integrity and observation binding; it does not authenticate a
+    provider or make a generic external fixture a trusted source.
+    """
+    identity = _public_weather_identity(weather)
+    source = getattr(weather, "model_frame_0deg", None)
+    if identity is None or not isinstance(source, ModelFrame0Weather):
+        return None
+    try:
+        # Revalidate before persisting so a manually mutated private object cannot become a
+        # durable receipt.
+        normalized = model_frame_0deg_from_source(
+            temperature_f=source.temperature_f,
+            wind_speed_mph=source.wind_speed_mph,
+            wind_direction_deg=source.wind_direction_deg,
+        )
+    except (TypeError, ValueError):
+        return None
+    receipt: dict[str, Any] = {
+        "schema_version": MODEL_SOURCE_RECEIPT_SCHEMA_VERSION,
+        "transform": MODEL_SOURCE_RECEIPT_TRANSFORM,
+        "observation": identity,
+        "public_weather_sha256": _sha256(dict(weather)),
+        "model_input": {
+            # This is the exact one-decimal temperature feature.  Wind remains raw until
+            # components are constructed by model_frame_0deg_components.
+            "temperature_f": normalized.temperature_f,
+            "wind_speed_mph": normalized.wind_speed_mph,
+            "wind_direction_deg": normalized.wind_direction_deg,
+        },
+        "model_contract": _model_contract(),
+    }
+    receipt["receipt_sha256"] = _sha256(receipt)
+    return receipt
+
+
+def rehydrate_model_source_weather(
+    public_weather: dict[str, Any], internal_receipt: Any
+) -> WeatherPayload | None:
+    """Rehydrate a private model tuple only from a matching durable internal receipt.
+
+    Invalid, missing, public-only, or stale receipts fail closed.  Callers must keep the
+    receipt in a private source snapshot and must never place it in the public slate payload.
+    """
+    if not isinstance(public_weather, dict) or not isinstance(internal_receipt, dict):
+        return None
+    expected_keys = {
+        "schema_version",
+        "transform",
+        "observation",
+        "public_weather_sha256",
+        "model_input",
+        "model_contract",
+        "receipt_sha256",
+    }
+    if set(internal_receipt) != expected_keys:
+        return None
+    receipt_sha256 = internal_receipt.get("receipt_sha256")
+    unsigned_receipt = {
+        key: value for key, value in internal_receipt.items() if key != "receipt_sha256"
+    }
+    if (
+        not isinstance(receipt_sha256, str)
+        or len(receipt_sha256) != 64
+        or receipt_sha256 != _sha256(unsigned_receipt)
+        or internal_receipt.get("schema_version") != MODEL_SOURCE_RECEIPT_SCHEMA_VERSION
+        or internal_receipt.get("transform") != MODEL_SOURCE_RECEIPT_TRANSFORM
+    ):
+        return None
+    identity = _public_weather_identity(public_weather)
+    if (
+        identity is None
+        or internal_receipt.get("observation") != identity
+        or internal_receipt.get("public_weather_sha256") != _sha256(dict(public_weather))
+        or internal_receipt.get("model_contract") != _model_contract()
+    ):
+        return None
+    model_input = internal_receipt.get("model_input")
+    if not isinstance(model_input, dict) or set(model_input) != {
+        "temperature_f",
+        "wind_speed_mph",
+        "wind_direction_deg",
+    }:
+        return None
+    try:
+        source = model_frame_0deg_from_source(
+            temperature_f=model_input["temperature_f"],
+            wind_speed_mph=model_input["wind_speed_mph"],
+            wind_direction_deg=model_input["wind_direction_deg"],
+        )
+    except (TypeError, ValueError):
+        return None
+    # model_frame_0deg_from_source rounds temperature.  A durable receipt must carry the
+    # precise model feature, rather than silently accepting a different value.
+    if source.temperature_f != model_input["temperature_f"]:
+        return None
+    return WeatherPayload(dict(public_weather), model_frame_0deg=source)
+
+
+def build_model_source_receipts(weather_by_game: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Create a private cache map keyed by game id; public maps receive no new fields."""
+    receipts: dict[str, dict[str, Any]] = {}
+    for game_id, weather in weather_by_game.items():
+        receipt = build_model_source_receipt(weather) if isinstance(weather, dict) else None
+        if receipt is not None and str(receipt["observation"]["game_pk"]) == str(game_id):
+            receipts[str(game_id)] = receipt
+    return receipts
+
+
+def rehydrate_model_source_weather_by_game(
+    weather_by_game: dict[str, Any], internal_receipts: Any
+) -> dict[str, dict[str, Any]]:
+    """Return public mappings, with private tuples restored only from the separate map."""
+    if not isinstance(weather_by_game, dict) or not isinstance(internal_receipts, dict):
+        return {
+            str(game_id): dict(weather)
+            for game_id, weather in weather_by_game.items()
+            if isinstance(weather, dict)
+        }
+    hydrated: dict[str, dict[str, Any]] = {}
+    for game_id, weather in weather_by_game.items():
+        if not isinstance(weather, dict):
+            continue
+        restored = rehydrate_model_source_weather(weather, internal_receipts.get(str(game_id)))
+        hydrated[str(game_id)] = restored if restored is not None else dict(weather)
+    return hydrated
 
 
 def _iso_now() -> str:

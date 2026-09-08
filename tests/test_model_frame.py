@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import date
 from typing import Any
@@ -8,7 +9,15 @@ import numpy as np
 
 from ballpark.model import FEATURE_COLUMNS, REVIEWED_ARTIFACT_SHA256, ParkFactorModel
 from ballpark.venues import VENUES
-from ballpark.weather import decompose_wind, model_frame_0deg_for_weather, parse_forecast
+from ballpark.weather import (
+    build_model_source_receipt,
+    build_model_source_receipts,
+    decompose_wind,
+    model_frame_0deg_for_weather,
+    parse_forecast,
+    rehydrate_model_source_weather,
+    rehydrate_model_source_weather_by_game,
+)
 
 
 def _forecast(*, temperature: float, speed: float, direction: float) -> dict[str, Any]:
@@ -125,6 +134,85 @@ def test_public_or_deserialized_weather_cannot_be_reused_for_model_scoring() -> 
     assert "selected unrounded source tuple" in factors["reason"]
     assert model.models["runs"].calls == 0
     assert model.models["hr"].calls == 0
+
+
+def test_durable_internal_receipt_rehydrates_exact_raw_tuple_after_json_round_trip() -> None:
+    weather = _weather(temperature=70.04, speed=10.05, direction=200.05)
+    receipt = build_model_source_receipt(weather)
+
+    assert receipt is not None
+    public_weather = json.loads(json.dumps(dict(weather)))
+    durable_receipt = json.loads(json.dumps(receipt))
+    restored = rehydrate_model_source_weather(public_weather, durable_receipt)
+
+    assert restored is not None
+    model = model_frame_0deg_for_weather(restored)
+    assert model is not None
+    assert (model["temperature_f"], model["wind_carry_mph"], model["wind_cross_mph"]) == (
+        70.0,
+        9.44,
+        3.45,
+    )
+    assert durable_receipt["observation"] == {
+        "game_pk": 810001,
+        "source": "open-meteo",
+        "basis": "forecast",
+        "valid_at": "2026-08-26T23:00:00Z",
+        "fetched_at": weather["fetched_at"],
+    }
+    assert durable_receipt["model_input"] == {
+        "temperature_f": 70.0,
+        "wind_speed_mph": 10.05,
+        "wind_direction_deg": 200.05,
+    }
+    assert "model_input" not in public_weather
+    assert "receipt_sha256" not in public_weather
+
+
+def test_receipt_fails_closed_if_public_observation_or_private_digest_changes() -> None:
+    weather = _weather(temperature=70.0, speed=10.05, direction=200.05)
+    receipt = build_model_source_receipt(weather)
+    assert receipt is not None
+
+    changed_public = json.loads(json.dumps(dict(weather)))
+    changed_public["fetched_at"] = "2026-08-26T23:11:00Z"
+    assert rehydrate_model_source_weather(changed_public, receipt) is None
+
+    changed_receipt = json.loads(json.dumps(receipt))
+    changed_receipt["model_input"]["wind_speed_mph"] = 10.1
+    assert rehydrate_model_source_weather(dict(weather), changed_receipt) is None
+
+    changed_contract = json.loads(json.dumps(receipt))
+    changed_contract["model_contract"]["feature_columns"].reverse()
+    unsigned = {key: value for key, value in changed_contract.items() if key != "receipt_sha256"}
+    changed_contract["receipt_sha256"] = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    assert rehydrate_model_source_weather(dict(weather), changed_contract) is None
+
+
+def test_public_only_or_generic_fixture_weather_cannot_create_a_durable_receipt() -> None:
+    weather = _weather(temperature=70.0, speed=10.05, direction=200.05)
+    public_weather = json.loads(json.dumps(dict(weather)))
+
+    assert build_model_source_receipt(public_weather) is None
+    assert rehydrate_model_source_weather(public_weather, None) is None
+    assert model_frame_0deg_for_weather(public_weather) is None
+
+
+def test_private_receipt_map_rehydrates_matching_weather_and_keeps_public_mapping_clean() -> None:
+    weather = _weather(temperature=70.0, speed=10.05, direction=200.05)
+    public_map = {"810001": json.loads(json.dumps(dict(weather)))}
+    internal_map = json.loads(json.dumps(build_model_source_receipts({"810001": weather})))
+
+    restored = rehydrate_model_source_weather_by_game(public_map, internal_map)
+    model = model_frame_0deg_for_weather(restored["810001"])
+
+    assert model is not None
+    assert (model["wind_carry_mph"], model["wind_cross_mph"]) == (9.44, 3.45)
+    assert set(public_map["810001"]) == set(restored["810001"])
+    untrusted = rehydrate_model_source_weather_by_game(public_map, {"810001": {}})
+    assert untrusted["810001"] == public_map["810001"]
 
 
 def test_reviewed_saved_artifacts_pin_manifest_and_booster_feature_identity(project_paths) -> None:
