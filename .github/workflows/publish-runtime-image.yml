@@ -1,0 +1,272 @@
+name: Publish reviewed runtime image
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Full 40-character commit SHA already reviewed for publication
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: reviewed-runtime-image-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish reviewed linux-amd64 runtime image
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/ballinprestige/ballpark-weather-lab
+      REVISION: ${{ inputs.revision }}
+      GH_TOKEN: ${{ github.token }}
+      GHCR_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the reviewed revision without persisted credentials
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.revision }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate revision, ancestry, required latest checks, and Docker exclusions
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$REVISION" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "revision must be a full 40-character hexadecimal SHA" >&2
+            exit 1
+          fi
+          revision="$(printf '%s' "$REVISION" | tr '[:upper:]' '[:lower:]')"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git cat-file -e "${revision}^{commit}"
+          if ! git merge-base --is-ancestor "$revision" origin/main; then
+            echo "reviewed revision is not an ancestor of fetched origin/main" >&2
+            exit 1
+          fi
+          if [[ "$(git rev-parse HEAD)" != "$revision" ]]; then
+            echo "checkout did not resolve to the reviewed revision" >&2
+            exit 1
+          fi
+          printf 'REVISION=%s\n' "$revision" >> "$GITHUB_ENV"
+
+          gh api --paginate \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "/repos/${GITHUB_REPOSITORY}/commits/${revision}/check-runs?filter=all&per_page=100" \
+            > check-run-pages.json
+          jq -s '[.[].check_runs[]]' check-run-pages.json > all-check-runs.json
+          : > selected-checks.ndjson
+          for required_name in "PR verification" "container-smoke"; do
+            case "$required_name" in
+              "PR verification") expected_workflow=".github/workflows/verify.yml"; expected_job="PR verification" ;;
+              "container-smoke") expected_workflow=".github/workflows/container-smoke.yml"; expected_job="container-smoke" ;;
+            esac
+            jq --arg name "$required_name" --arg revision "$revision" \
+              '[.[] | select(.name == $name and .head_sha == $revision and .app.slug == "github-actions")]
+               | sort_by([(.started_at // .created_at // ""), (.id // 0)]) | last' \
+              all-check-runs.json > selected-check.json
+            jq -e --arg revision "$revision" \
+              'type == "object" and .head_sha == $revision and .app.slug == "github-actions" and .status == "completed" and .conclusion == "success"' \
+              selected-check.json > /dev/null
+            details_url="$(jq -r '.details_url // empty' selected-check.json)"
+            if [[ ! "$details_url" =~ ^https://github\.com/${GITHUB_REPOSITORY}/actions/runs/([0-9]+)/job/([0-9]+) ]]; then
+              echo "required check is not bound to a GitHub Actions run/job URL" >&2
+              exit 1
+            fi
+            run_id="${BASH_REMATCH[1]}"; job_id="${BASH_REMATCH[2]}"
+            gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" > selected-workflow-run.json
+            gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs?filter=latest&per_page=100" > selected-workflow-jobs.json
+            jq -e --arg revision "$revision" --arg path "$expected_workflow" --argjson run_id "$run_id" \
+              '.id == $run_id and .path == $path and .head_sha == $revision and .event == "pull_request" and .status == "completed" and .conclusion == "success"' \
+              selected-workflow-run.json > /dev/null
+            jq -e --arg name "$expected_job" --argjson job_id "$job_id" \
+              '[.jobs[] | select(.id == $job_id and .name == $name and .status == "completed" and .conclusion == "success")] | length == 1' \
+              selected-workflow-jobs.json > /dev/null
+            jq --arg workflow_path "$expected_workflow" --arg expected_job "$expected_job" \
+              --argjson run_id "$run_id" --argjson job_id "$job_id" \
+              --slurpfile workflow_run selected-workflow-run.json --slurpfile jobs selected-workflow-jobs.json \
+              '. + {workflow_path: $workflow_path, workflow_run_id: $run_id, workflow_run_attempt: $workflow_run[0].run_attempt, workflow_job_id: $job_id, workflow_job_name: $expected_job, check_suite_id: .check_suite.id}' \
+              selected-check.json >> selected-checks.ndjson
+            printf '\n' >> selected-checks.ndjson
+          done
+          jq -s '.' selected-checks.ndjson > selected-checks.json
+          mkdir -p publication-diagnostics
+          cp selected-checks.json publication-diagnostics/
+
+          for required_pattern in '.runtime*' '.ballpark-cache' '.tmp*' '.env' '.env.*' '*.log'; do
+            grep -Fqx -- "$required_pattern" .dockerignore
+          done
+
+      - name: Log in to GitHub Container Registry through standard input
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Refuse any known revision tag before a first publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner_type="$(gh api "/users/${GITHUB_REPOSITORY_OWNER}" --jq '.type')"
+          case "$owner_type" in
+            Organization) packages_endpoint="/orgs/${GITHUB_REPOSITORY_OWNER}/packages?package_type=container"; versions_endpoint="/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/ballpark-weather-lab/versions" ;;
+            User) packages_endpoint="/users/${GITHUB_REPOSITORY_OWNER}/packages?package_type=container"; versions_endpoint="/users/${GITHUB_REPOSITORY_OWNER}/packages/container/ballpark-weather-lab/versions" ;;
+            *) echo "unrecognized repository owner type" >&2; exit 1 ;;
+          esac
+          gh api --paginate "${packages_endpoint}&per_page=100" > owner-package-pages.json
+          jq -s 'add' owner-package-pages.json > owner-packages.json
+          package_exists="$(jq '[.[] | select(.name == "ballpark-weather-lab")] | length' owner-packages.json)"
+          printf 'OWNER_PACKAGES_ENDPOINT=%s\n' "$packages_endpoint" >> "$GITHUB_ENV"
+          printf 'PACKAGE_VERSIONS_ENDPOINT=%s\n' "$versions_endpoint" >> "$GITHUB_ENV"
+          printf 'PACKAGE_EXISTED=%s\n' "$package_exists" >> "$GITHUB_ENV"
+          if [[ "$package_exists" -gt 1 ]]; then
+            echo "owner package listing has duplicate container package names" >&2
+            exit 1
+          fi
+          if [[ "$package_exists" -eq 1 ]]; then
+            gh api --paginate "${versions_endpoint}?per_page=100" > package-version-pages.json
+            jq -s 'add' package-version-pages.json > package-versions.json
+            tag_count="$(jq --arg tag "$REVISION" '[.[] | select((.metadata.container.tags // []) | index($tag))] | length' package-versions.json)"
+            if [[ "$tag_count" -ne 0 ]]; then
+              echo "reviewed revision tag already exists; refusing to reuse or replace it" >&2
+              exit 1
+            fi
+          fi
+          echo 'PUBLICATION_MODE=new' >> "$GITHUB_ENV"
+
+      - name: Build the reviewed public source image locally
+        if: env.PUBLICATION_MODE == 'new'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build \
+            --platform linux/amd64 \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${REVISION}" \
+            --tag "${IMAGE}:${REVISION}" \
+            .
+          [[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "${IMAGE}:${REVISION}")" == "linux/amd64" ]]
+          docker image inspect --format '{{.Id}}' "${IMAGE}:${REVISION}" > local-image-inspect-id.txt
+          docker image save "${IMAGE}:${REVISION}" --output local-image.tar
+          local_config_path="$(tar -xOf local-image.tar manifest.json | jq -r '.[0].Config')"
+          local_platform_config_digest="sha256:$(tar -xOf local-image.tar "$local_config_path" | sha256sum | awk '{print $1}')"
+          local_image_tar_sha256="$(sha256sum local-image.tar | awk '{print $1}')"
+          printf 'LOCAL_PLATFORM_CONFIG_DIGEST=%s\n' "$local_platform_config_digest" >> "$GITHUB_ENV"
+          printf 'LOCAL_IMAGE_TAR_SHA256=%s\n' "$local_image_tar_sha256" >> "$GITHUB_ENV"
+
+      - name: Verify artifacts in the locally built image before push
+        if: env.PUBLICATION_MODE == 'new'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint ballpark "${IMAGE}:${REVISION}" verify-artifacts
+
+      - name: Recheck revision tag immediately before its first push
+        if: env.PUBLICATION_MODE == 'new'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$PACKAGE_EXISTED" -eq 1 ]]; then
+            gh api --paginate "${PACKAGE_VERSIONS_ENDPOINT}?per_page=100" > package-version-pages-before-push.json
+            jq -s 'add' package-version-pages-before-push.json > package-versions-before-push.json
+            if jq -e --arg tag "$REVISION" '.[] | select((.metadata.container.tags // []) | index($tag))' package-versions-before-push.json > /dev/null; then
+              echo "reviewed revision tag appeared before push; refusing to replace it" >&2
+              exit 1
+            fi
+          else
+            gh api --paginate "${OWNER_PACKAGES_ENDPOINT}&per_page=100" > owner-package-pages-before-push.json
+            jq -s 'add' owner-package-pages-before-push.json > owner-packages-before-push.json
+            if jq -e '.[] | select(.name == "ballpark-weather-lab")' owner-packages-before-push.json > /dev/null; then
+              echo "container package appeared before push; refusing unknown tag state" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Push only a previously absent revision tag and record registry digest
+        if: env.PUBLICATION_MODE == 'new'
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '{"push_attempted":true,"image":"%s","tag":"%s"}\n' "$IMAGE" "$REVISION" > publication-diagnostics/push-attempt.json
+          docker push "${IMAGE}:${REVISION}"
+          docker pull "${IMAGE}:${REVISION}" > docker-pull.txt
+          registry_manifest_digest="$(docker image inspect --format '{{json .RepoDigests}}' "${IMAGE}:${REVISION}" | jq -er --arg image "$IMAGE" '[.[] | select(startswith($image + "@"))] | if length == 1 then .[0] | split("@")[1] else error("expected one registry digest") end')"
+          if [[ ! "$registry_manifest_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Docker pull did not verify one registry digest for the reviewed revision tag" >&2
+            exit 1
+          fi
+          docker buildx imagetools inspect --raw "${IMAGE}@${registry_manifest_digest}" > remote-reference.json
+          reference_media_type="$(jq -er '.mediaType' remote-reference.json)"
+          if [[ "$reference_media_type" == "application/vnd.oci.image.index.v1+json" || "$reference_media_type" == "application/vnd.docker.distribution.manifest.list.v2+json" ]]; then
+            remote_platform_manifest_digest="$(jq -er '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64" and ((.platform.variant // "") == ""))] | if length == 1 then .[0].digest else error("expected one linux/amd64 descriptor") end' remote-reference.json)"
+          else
+            remote_platform_manifest_digest="$registry_manifest_digest"
+          fi
+          docker buildx imagetools inspect --raw "${IMAGE}@${remote_platform_manifest_digest}" > remote-linux-amd64-manifest.json
+          remote_platform_config_digest="$(jq -r '.config.digest // empty' remote-linux-amd64-manifest.json)"
+          if [[ ! "$remote_platform_config_digest" =~ ^sha256:[0-9a-f]{64}$ || "$remote_platform_config_digest" != "$LOCAL_PLATFORM_CONFIG_DIGEST" ]]; then
+            echo "remote linux/amd64 config does not match the built-and-verified image" >&2
+            exit 1
+          fi
+          printf 'REGISTRY_MANIFEST_DIGEST=%s\n' "$registry_manifest_digest" >> "$GITHUB_ENV"
+          printf 'REMOTE_PLATFORM_MANIFEST_DIGEST=%s\n' "$remote_platform_manifest_digest" >> "$GITHUB_ENV"
+          printf 'REMOTE_PLATFORM_CONFIG_DIGEST=%s\n' "$remote_platform_config_digest" >> "$GITHUB_ENV"
+
+      - name: Preserve publication diagnostics after any push outcome
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p publication-diagnostics
+          for file in docker-pull.txt remote-reference.json remote-linux-amd64-manifest.json local-image-inspect-id.txt selected-checks.json; do
+            [[ -f "$file" ]] && cp "$file" publication-diagnostics/ || true
+          done
+
+      - name: Write digest receipt without conflating local and registry identifiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          local_image_inspect_id=null
+          if [[ "$PUBLICATION_MODE" == 'new' ]]; then
+            local_image_inspect_id="$(jq -Rsc 'rtrimstr("\n")' < local-image-inspect-id.txt)"
+          fi
+          jq -n \
+            --arg image "$IMAGE" \
+            --arg revision "$REVISION" \
+            --arg platform "linux/amd64" \
+            --arg publication_action "$PUBLICATION_MODE" \
+            --arg registry_manifest_digest "$REGISTRY_MANIFEST_DIGEST" \
+            --arg local_image_tar_sha256 "$LOCAL_IMAGE_TAR_SHA256" \
+            --arg local_platform_config_digest "${LOCAL_PLATFORM_CONFIG_DIGEST:-}" \
+            --arg remote_platform_manifest_digest "${REMOTE_PLATFORM_MANIFEST_DIGEST:-}" \
+            --arg remote_platform_config_digest "${REMOTE_PLATFORM_CONFIG_DIGEST:-}" \
+            --arg existing_package_version_id "${EXISTING_PACKAGE_VERSION_ID:-}" \
+            --argjson local_image_inspect_id "$local_image_inspect_id" \
+            --slurpfile checks selected-checks.json \
+            '{image: $image, tag: $revision, immutable_image: ($image + "@" + $registry_manifest_digest), platform: $platform, publication_action: $publication_action, registry_manifest_digest: $registry_manifest_digest, local_image_tar_sha256: $local_image_tar_sha256, local_image_inspect_id: $local_image_inspect_id, local_platform_config_digest: (if $local_platform_config_digest == "" then null else $local_platform_config_digest end), registry_platform_manifest_digest: (if $remote_platform_manifest_digest == "" then null else $remote_platform_manifest_digest end), registry_platform_config_digest: (if $remote_platform_config_digest == "" then null else $remote_platform_config_digest end), existing_package_version_id: (if $existing_package_version_id == "" then null else $existing_package_version_id end), required_checks: $checks[0]}' \
+            > image-receipt.json
+
+      - name: Upload publication receipt only
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+        with:
+          name: reviewed-runtime-image-receipt-${{ inputs.revision }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            publication-diagnostics
+            image-receipt.json
+            remote-reference.json
+            selected-checks.json
+            package-versions.json
+            local-image-inspect-id.txt
+            local-image.tar
