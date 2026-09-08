@@ -72,21 +72,38 @@ def test_retry_is_bounded_and_failure_never_rewrites_last_good(tmp_path: Path) -
 
 
 def test_single_writer_refuses_a_second_worker(tmp_path: Path) -> None:
-    ledger = RuntimeLedger(tmp_path / "state")
-    ledger.acquire()
-    try:
-        with pytest.raises(RuntimeBusyError):
-            RuntimeLedger(tmp_path / "state").acquire()
-    finally:
-        ledger.release()
+    calls: list[object] = []
+    first = worker(tmp_path, calls, lambda context: calls.append(context))
+    second = worker(tmp_path, calls, lambda context: calls.append(context))
+    first._writer(NOW)
+    with pytest.raises(RuntimeBusyError):
+        second._writer(NOW)
+
+
+def test_expired_owner_cannot_complete_after_a_takeover(tmp_path: Path) -> None:
+    calls: list[object] = []
+    first = worker(tmp_path, calls, lambda context: calls.append(context))
+    first_token = first._writer(NOW)
+    context = first._claim(first.specs["markets"], first_token, NOW)
+    assert context is not None
+
+    def expire(state: dict[str, object]) -> None:
+        state["writer"] = {"token": "new-owner", "until_at": "2026-09-08T03:00:00Z"}
+
+    first.ledger.update(expire)
+    assert (
+        first._complete(context, first.specs["markets"], first_token, NOW, None)
+        == "lease_lost"
+    )
+    state = first.ledger.read()["jobs"]["markets"]
+    assert state["in_flight"]["token"] == context.token
 
 
 def test_probe_is_read_only_and_fails_closed_for_silent_or_late_worker(tmp_path: Path) -> None:
     calls: list[object] = []
     instance = worker(tmp_path, calls, lambda context: calls.append(context))
     instance.run_once(now=NOW)
-    state_path = tmp_path / "state" / "runtime-state.json"
-    before = state_path.read_bytes()
+    before = RuntimeLedger(tmp_path / "state").read()
     ready = probe_runtime(
         tmp_path / "state", max_heartbeat_age_seconds=30, max_job_lag_seconds=5, now=NOW
     )
@@ -99,4 +116,4 @@ def test_probe_is_read_only_and_fails_closed_for_silent_or_late_worker(tmp_path:
     assert ready["state"] == "ready"
     assert stale["state"] == "not_ready"
     assert "worker heartbeat is stale" in stale["problems"]
-    assert state_path.read_bytes() == before
+    assert RuntimeLedger(tmp_path / "state").read() == before

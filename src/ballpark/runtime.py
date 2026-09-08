@@ -1,15 +1,10 @@
-"""Durable, single-writer scheduling primitives for the Ballpark service.
-
-The scheduler deliberately stores operational state separately from a published
-slate.  A failed or late acquisition can therefore never make an older domain
-look newly acquired merely because another domain was refreshed.
-"""
+"""Crash-recoverable source-job scheduler backed by SQLite."""
 
 from __future__ import annotations
 
 import json
-import os
-import tempfile
+import sqlite3
+import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -32,13 +27,6 @@ def parse_stamp(value: str) -> datetime:
 
 @dataclass(frozen=True)
 class JobSpec:
-    """A source-specific refresh contract.
-
-    ``timeout_seconds`` is passed to the handler as an absolute deadline.  The
-    adapter owns enforcement below that boundary; retries are never stacked in
-    the scheduler.
-    """
-
     name: str
     interval_seconds: int
     timeout_seconds: int
@@ -46,108 +34,90 @@ class JobSpec:
     retry_backoff_seconds: int = 15
 
     def __post_init__(self) -> None:
-        if not self.name or any(
-            char not in "abcdefghijklmnopqrstuvwxyz0123456789_-" for char in self.name
+        if (
+            not self.name
+            or not self.name.replace("_", "").replace("-", "").isalnum()
+            or self.name != self.name.lower()
         ):
             raise ValueError("job name must use lowercase letters, digits, _ or -")
-        if self.interval_seconds <= 0 or self.timeout_seconds <= 0:
-            raise ValueError("job intervals and deadlines must be positive")
-        if self.max_attempts <= 0 or self.retry_backoff_seconds < 0:
-            raise ValueError("job retry settings are invalid")
+        if self.interval_seconds <= 0 or self.timeout_seconds <= 0 or self.max_attempts <= 0:
+            raise ValueError("job timing and attempts must be positive")
 
 
 @dataclass(frozen=True)
 class JobContext:
     name: str
+    scheduled_slot_at: datetime
     started_at: datetime
     deadline_at: datetime
     attempt: int
+    token: str
     state_dir: Path
     cache_dir: Path
     publication_dir: Path
 
 
 class RuntimeBusyError(RuntimeError):
-    """Another process owns the durable worker ledger."""
+    """A live worker lease owns this durable schedule."""
 
 
 class RuntimeLedger:
-    """Atomically persisted operational state, written only by its lock owner."""
+    """SQLite transactions release on process death; no stale file lock is guessed."""
 
     def __init__(self, state_dir: Path) -> None:
         self.state_dir = state_dir
-        self.path = state_dir / "runtime-state.json"
-        self.lock_path = state_dir / "runtime-state.lock"
-        self._lock_fd: int | None = None
+        self.path = state_dir / "runtime-state.sqlite3"
 
-    def acquire(self) -> None:
+    def _connect(self) -> sqlite3.Connection:
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            self._lock_fd = os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError as exc:
-            raise RuntimeBusyError(f"runtime writer is already active: {self.lock_path}") from exc
-        os.write(self._lock_fd, str(os.getpid()).encode("ascii"))
-        os.fsync(self._lock_fd)
-
-    def release(self) -> None:
-        if self._lock_fd is None:
-            return
-        os.close(self._lock_fd)
-        self._lock_fd = None
-        try:
-            self.lock_path.unlink()
-        except FileNotFoundError:
-            pass
-
-    def __enter__(self) -> RuntimeLedger:
-        self.acquire()
-        return self
-
-    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
-        self.release()
+        connection = sqlite3.connect(self.path, timeout=5, isolation_level=None)
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=FULL")
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS state "
+            "(id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO state VALUES (1, ?)",
+            (json.dumps({"schema_version": 2, "jobs": {}}),),
+        )
+        return connection
 
     def read(self) -> dict[str, Any]:
+        connection = self._connect()
         try:
-            state = json.loads(self.path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return {"schema_version": 1, "jobs": {}}
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"runtime state is malformed: {self.path}") from exc
-        if (
-            not isinstance(state, dict)
-            or state.get("schema_version") != 1
-            or not isinstance(state.get("jobs"), dict)
-        ):
-            raise ValueError(f"runtime state is invalid: {self.path}")
-        return state
-
-    def write(self, state: dict[str, Any]) -> None:
-        if self._lock_fd is None:
-            raise RuntimeError("runtime state write requires the writer lock")
-        descriptor, temporary = tempfile.mkstemp(
-            prefix=".runtime-", suffix=".json", dir=self.state_dir
-        )
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                json.dump(state, handle, sort_keys=True, separators=(",", ":"))
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, self.path)
+            return json.loads(
+                connection.execute("SELECT value FROM state WHERE id=1").fetchone()[0]
+            )
         finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+            connection.close()
+
+    def update(self, change: Callable[[dict[str, Any]], Any]) -> Any:
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            state = json.loads(
+                connection.execute("SELECT value FROM state WHERE id=1").fetchone()[0]
+            )
+            if state.get("schema_version") != 2 or not isinstance(state.get("jobs"), dict):
+                raise ValueError("runtime state is invalid")
+            result = change(state)
+            connection.execute(
+                "UPDATE state SET value=? WHERE id=1", (json.dumps(state, sort_keys=True),)
+            )
+            connection.commit()
+            return result
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
 
 JobHandler = Callable[[JobContext], None]
 
 
 class RuntimeWorker:
-    """Runs at most one due attempt per named source on each pass.
-
-    That makes recovery coalescing explicit: a process restart after an outage
-    performs one current refresh rather than replaying every missed interval.
-    """
-
     def __init__(
         self,
         specs: Iterable[JobSpec],
@@ -156,93 +126,175 @@ class RuntimeWorker:
         state_dir: Path,
         cache_dir: Path,
         publication_dir: Path,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.specs = {spec.name: spec for spec in specs}
         if set(handlers) != set(self.specs):
             raise ValueError("every expected job needs exactly one handler")
-        self.handlers = handlers
-        self.ledger = RuntimeLedger(state_dir)
-        self.cache_dir = cache_dir
-        self.publication_dir = publication_dir
+        self.handlers, self.ledger = handlers, RuntimeLedger(state_dir)
+        self.cache_dir, self.publication_dir = cache_dir, publication_dir
+        self.clock = clock or (lambda: datetime.now(UTC))
 
-    def run_once(self, *, now: datetime | None = None) -> dict[str, Any]:
-        now = (now or datetime.now(UTC)).astimezone(UTC)
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.publication_dir.mkdir(parents=True, exist_ok=True)
-        outcomes: list[dict[str, str]] = []
-        with self.ledger:
-            state = self.ledger.read()
-            jobs = state.setdefault("jobs", {})
-            state["expected_jobs"] = sorted(self.specs)
-            state["heartbeat_at"] = utc_stamp(now)
-            for name, spec in self.specs.items():
-                job = jobs.setdefault(name, {"attempt": 0, "next_due_at": utc_stamp(now)})
-                due_at = parse_stamp(str(job["next_due_at"]))
-                if due_at > now:
-                    outcomes.append({"job": name, "state": "not_due"})
-                    continue
-                attempt = int(job.get("attempt", 0)) + 1
-                started_at = now
-                deadline_at = now + timedelta(seconds=spec.timeout_seconds)
+    def _now(self, fixed: datetime | None) -> datetime:
+        return (fixed or self.clock()).astimezone(UTC)
+
+    def _writer(self, now: datetime) -> str:
+        token = uuid.uuid4().hex
+        span = sum(spec.timeout_seconds for spec in self.specs.values()) + 5
+
+        def claim(state: dict[str, Any]) -> str:
+            prior = state.get("writer")
+            if isinstance(prior, dict) and parse_stamp(prior["until_at"]) > now:
+                raise RuntimeBusyError("runtime writer lease is active")
+            state.update(
+                {
+                    "expected_jobs": sorted(self.specs),
+                    "heartbeat_at": utc_stamp(now),
+                    "writer": {
+                        "token": token,
+                        "until_at": utc_stamp(now + timedelta(seconds=span)),
+                    },
+                }
+            )
+            return token
+
+        return self.ledger.update(claim)
+
+    def _claim(self, spec: JobSpec, writer: str, now: datetime) -> JobContext | None:
+        def claim(state: dict[str, Any]) -> JobContext | None:
+            if state.get("writer", {}).get("token") != writer:
+                raise RuntimeBusyError("writer lease lost")
+            job = state["jobs"].setdefault(
+                spec.name, {"attempt": 0, "missed_slots": 0, "next_slot_at": utc_stamp(now)}
+            )
+            flight = job.get("in_flight")
+            if isinstance(flight, dict) and parse_stamp(flight["deadline_at"]) > now:
+                return None
+            if isinstance(flight, dict):
                 job.update(
                     {
-                        "attempt": attempt,
-                        "last_started_at": utc_stamp(started_at),
-                        "last_deadline_at": utc_stamp(deadline_at),
+                        "last_error": "TimeoutError: prior attempt exceeded deadline",
+                        "last_finished_at": utc_stamp(now),
                     }
                 )
+                job.pop("in_flight", None)
+            slot = parse_stamp(job["next_slot_at"])
+            retry = job.get("retry_at")
+            if slot > now and (retry is None or parse_stamp(retry) > now):
+                return None
+            if slot <= now:
+                missed = int((now - slot).total_seconds() // spec.interval_seconds)
+                scheduled = slot + timedelta(seconds=missed * spec.interval_seconds)
+                job["missed_slots"] += missed
+                job["next_slot_at"] = utc_stamp(
+                    scheduled + timedelta(seconds=spec.interval_seconds)
+                )
+                job["attempt"] = 0
+            else:
+                scheduled = parse_stamp(job["last_scheduled_slot_at"])
+            attempt, token = int(job["attempt"]) + 1, uuid.uuid4().hex
+            deadline = now + timedelta(seconds=spec.timeout_seconds)
+            job.update(
+                {
+                    "attempt": attempt,
+                    "last_scheduled_slot_at": utc_stamp(scheduled),
+                    "last_started_at": utc_stamp(now),
+                    "last_deadline_at": utc_stamp(deadline),
+                    "in_flight": {"token": token, "deadline_at": utc_stamp(deadline)},
+                }
+            )
+            job.pop("retry_at", None)
+            state["heartbeat_at"] = utc_stamp(now)
+            return JobContext(
+                spec.name,
+                scheduled,
+                now,
+                deadline,
+                attempt,
+                token,
+                self.ledger.state_dir,
+                self.cache_dir,
+                self.publication_dir,
+            )
+
+        return self.ledger.update(claim)
+
+    def _complete(
+        self,
+        context: JobContext,
+        spec: JobSpec,
+        writer: str,
+        finished: datetime,
+        error: Exception | None,
+    ) -> str:
+        def complete(state: dict[str, Any]) -> str:
+            job = state["jobs"][context.name]
+            if (
+                state.get("writer", {}).get("token") != writer
+                or job.get("in_flight", {}).get("token") != context.token
+            ):
+                return "lease_lost"
+            job.pop("in_flight", None)
+            if error is None and finished > context.deadline_at:
+                error_value: Exception | None = TimeoutError(
+                    "attempt completed after absolute deadline"
+                )
+            else:
+                error_value = error
+            job["last_finished_at"], state["heartbeat_at"] = (
+                utc_stamp(finished),
+                utc_stamp(finished),
+            )
+            if error_value is None:
+                job.update(
+                    {"attempt": 0, "last_error": None, "last_success_at": utc_stamp(finished)}
+                )
+                return "succeeded"
+            job["last_error"] = f"{type(error_value).__name__}: {error_value}"
+            if context.attempt >= spec.max_attempts:
+                job["attempt"] = 0
+                return "failed_exhausted"
+            job.update(
+                {
+                    "attempt": context.attempt,
+                    "retry_at": utc_stamp(finished + timedelta(seconds=spec.retry_backoff_seconds)),
+                }
+            )
+            return "retry_scheduled"
+
+        return self.ledger.update(complete)
+
+    def run_once(self, *, now: datetime | None = None) -> dict[str, Any]:
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.publication_dir.mkdir(parents=True, exist_ok=True)
+        writer = self._writer(self._now(now))
+        outcomes: list[dict[str, str]] = []
+        try:
+            for name, spec in self.specs.items():
+                context = self._claim(spec, writer, self._now(now))
+                if context is None:
+                    outcomes.append({"job": name, "state": "not_due"})
+                    continue
+                failure: Exception | None = None
                 try:
-                    self.handlers[name](
-                        JobContext(
-                            name,
-                            started_at,
-                            deadline_at,
-                            attempt,
-                            self.ledger.state_dir,
-                            self.cache_dir,
-                            self.publication_dir,
-                        )
-                    )
-                except (
-                    Exception
-                ) as exc:  # handlers record no freshness; ledger retains last good success
-                    exhausted = attempt >= spec.max_attempts
-                    job.update(
-                        {
-                            "last_finished_at": utc_stamp(now),
-                            "last_error": f"{type(exc).__name__}: {exc}",
-                            "next_due_at": utc_stamp(
-                                now
-                                + timedelta(
-                                    seconds=spec.interval_seconds
-                                    if exhausted
-                                    else spec.retry_backoff_seconds
-                                )
-                            ),
-                            "attempt": 0 if exhausted else attempt,
-                        }
-                    )
-                    outcomes.append(
-                        {
-                            "job": name,
-                            "state": "failed_exhausted" if exhausted else "retry_scheduled",
-                        }
-                    )
-                else:
-                    job.update(
-                        {
-                            "attempt": 0,
-                            "last_error": None,
-                            "last_finished_at": utc_stamp(now),
-                            "last_success_at": utc_stamp(now),
-                            "next_due_at": utc_stamp(
-                                now + timedelta(seconds=spec.interval_seconds)
-                            ),
-                        }
-                    )
-                    outcomes.append({"job": name, "state": "succeeded"})
-            self.ledger.write(state)
-        return {"state": "ran", "heartbeat_at": utc_stamp(now), "jobs": outcomes}
+                    self.handlers[name](context)
+                except Exception as exc:
+                    failure = exc
+                outcomes.append(
+                    {
+                        "job": name,
+                        "state": self._complete(context, spec, writer, self._now(now), failure),
+                    }
+                )
+        finally:
+            self.ledger.update(
+                lambda state: (
+                    state.pop("writer", None)
+                    if state.get("writer", {}).get("token") == writer
+                    else None
+                )
+            )
+        return {"state": "ran", "heartbeat_at": utc_stamp(self._now(now)), "jobs": outcomes}
 
 
 def probe_runtime(
@@ -252,25 +304,23 @@ def probe_runtime(
     max_job_lag_seconds: int,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Read-only health contract for a monitor outside the worker process."""
-
-    if max_heartbeat_age_seconds <= 0 or max_job_lag_seconds < 0:
-        raise ValueError("probe ages must be non-negative and heartbeat age positive")
+    """Read-only monitoring contract; an external monitor must invoke this separately."""
     now = (now or datetime.now(UTC)).astimezone(UTC)
-    state = RuntimeLedger(state_dir).read()
-    heartbeat = state.get("heartbeat_at")
-    problems: list[str] = []
+    state, problems = RuntimeLedger(state_dir).read(), []
     try:
-        age = (now - parse_stamp(str(heartbeat))).total_seconds()
-        if age < 0 or age > max_heartbeat_age_seconds:
+        if (
+            not 0
+            <= (now - parse_stamp(state["heartbeat_at"])).total_seconds()
+            <= max_heartbeat_age_seconds
+        ):
             problems.append("worker heartbeat is stale")
-    except (TypeError, ValueError):
+    except (KeyError, TypeError, ValueError):
         problems.append("worker heartbeat is missing or invalid")
     for name in state.get("expected_jobs", []):
-        job = state["jobs"].get(name, {})
         try:
-            due = parse_stamp(str(job["next_due_at"]))
-            if now > due + timedelta(seconds=max_job_lag_seconds):
+            if now > parse_stamp(state["jobs"][name]["next_slot_at"]) + timedelta(
+                seconds=max_job_lag_seconds
+            ):
                 problems.append(f"job is overdue: {name}")
         except (KeyError, TypeError, ValueError):
             problems.append(f"job state is missing: {name}")
