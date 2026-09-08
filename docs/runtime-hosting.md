@@ -66,11 +66,14 @@ The secret URL is read only from `BALLPARK_MONITOR_PING_URL`; the command has no
 and never prints it. A run makes at most five bounded service GETs (`/healthz`, `/readiness`,
 `/data/release.json`, `/data/data.json`, `/source-health`) and, only after all checks pass, one
 bounded no-redirect HTTPS ping. Each request has a 1–30 second timeout and response bodies are
-limited to 2 MiB. A monotonic deadline covers each complete request, including a slow response body,
-and a separate 60-second monotonic deadline stops the whole monitor run before any later check or
-heartbeat. Set `--max-run-seconds` only from 5 through 300. It requires current payload generation,
-latest ESPN attempt, and latest publication-maintenance outcome to be no more than ten minutes old by
-default, and rejects timestamps more than five minutes in the future. Set
+limited to 2 MiB. A monotonic deadline covers each complete request, including a slow response body.
+The packaged `runtime-monitor` CLI runs those requests in an isolated child process; a parent
+60-second monotonic watchdog kills that child at the whole-run deadline even when DNS or response
+headers block below Python's socket timeout mechanism. Its bounded reaping step is at most 0.2 seconds,
+so a stalled child cannot overlap the next scheduled run. Set `--max-run-seconds` only from 5 through
+300. It requires current payload generation, latest ESPN attempt, and latest publication-maintenance
+outcome to be no more than ten minutes old by default, and rejects timestamps more than five minutes
+in the future. Set
 `--max-publication-age-seconds`, `--max-source-attempt-age-seconds`, or
 `--max-maintenance-age-seconds` only to another bounded value from 60 through 86,400.
 
@@ -136,10 +139,20 @@ When using the packaged image rather than an installed `ballpark` command, its e
 CLI. Mount the stopped source/backup/recovery directories deliberately; none of these modes contacts
 providers, publishes a release, or starts the worker.
 
-### Render maintenance route
+### Potential Render maintenance route — SSH access not yet qualified
 
 Render Cron Jobs cannot mount the web disk and an ordinary stopped web service has no shell for the
-copy. The reviewable route is two bounded deployments of the **same immutable image**: first change
+copy. The current image runs as `root`; the exact `7930b6c` image inspection found `/bin/bash` but a
+locked root account, without reading or emitting a password/hash. Render documents that a root-run
+Dockerfile needs an unlocked account for SSH, and this image has no separately qualified key-only
+non-root account with durable-mount ownership. Therefore the remote-shell copy is **not** an operating
+procedure yet: do not rely on it or attempt an unreviewed unlock/password change. A future reviewed
+image must provide either Render's documented key-only-compatible root setup without a blank/password
+login, or a dedicated non-root key-only account that can read/write `/var/lib/ballpark`; then prove the
+final image account state and one server-only backup/restore rehearsal before using this route.
+
+After that prerequisite is met, the proposed route is two bounded deployments of the **same immutable
+image**: first change
 the web service `dockerCommand` from `service` to `server`, then deploy it. `server` runs HTTP only;
 it does not launch the worker. Keep the platform health check on `/healthz` and pause the external
 freshness monitor for the declared maintenance interval, so no readiness probe opens the SQLite
@@ -150,10 +163,10 @@ mount; a live lease or writer lock is a failed maintenance stop, not a reason to
 Transfer the verified private backup to the operator-selected private destination, then restore the
 web service `dockerCommand: service` and redeploy the same digest. Wait for `/healthz`, `/readiness`,
 release/payload hash agreement, source-health clocks, and retained archive readback before ending the
-maintenance window. This is worker downtime but preserves the read-only server path during the
-transfer. It is not an authorization to run the deployments, create a destination, or upload private
-receipts. A recovery restore follows the separate empty-volume procedure below; it never overwrites
-the original mount.
+maintenance window. This is worker downtime but preserves the read-only server path during the transfer. It remains a
+proposed procedure until the SSH prerequisite above is independently proven. It is not an authorization
+to run deployments, create a destination, or upload private receipts. A recovery restore follows the
+separate empty-volume procedure below; it never overwrites the original mount.
 
 ## Restore and same-image rollback
 

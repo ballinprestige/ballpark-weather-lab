@@ -190,9 +190,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result["state"] == "ready" else 3
 
         if args.command == "runtime-monitor":
-            from ballpark.runtime_monitor import monitor_from_environment
+            from ballpark.runtime_monitor import monitor_with_watchdog
 
-            result = monitor_from_environment(
+            result = monitor_with_watchdog(
                 args.url,
                 expected_date=args.expected_date,
                 timeout_seconds=args.timeout_seconds,

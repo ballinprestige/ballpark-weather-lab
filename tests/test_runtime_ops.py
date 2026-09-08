@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import socket
 import sqlite3
 import threading
 import time
@@ -14,7 +15,7 @@ from urllib.parse import urlparse
 import pytest
 
 import ballpark.runtime_monitor as runtime_monitor_module
-from ballpark.cli import _build_parser
+from ballpark.cli import _build_parser, main
 from ballpark.espn_odds import unavailable_market
 from ballpark.runtime import RuntimeLedger
 from ballpark.runtime_backup import (
@@ -28,12 +29,27 @@ from ballpark.runtime_monitor import (
     expected_new_york_date,
     monitor_from_environment,
     monitor_runtime,
+    monitor_with_watchdog,
 )
 from ballpark.runtime_store import PublicationCatalog
 from tests.support import valid_payload_document
 
 _IMAGE = "ballpark@sha256:" + "f" * 64
 _NOW = datetime(2026, 8, 26, 16, 5, tzinfo=UTC)
+
+
+def _blocked_dns_monitor_runner(**parameters: object) -> dict[str, object]:
+    original = socket.getaddrinfo
+
+    def blocked(*args: object, **kwargs: object) -> object:
+        time.sleep(30)
+        return original(*args, **kwargs)
+
+    socket.getaddrinfo = blocked  # type: ignore[assignment]
+    try:
+        return monitor_from_environment(**parameters)  # type: ignore[arg-type]
+    finally:
+        socket.getaddrinfo = original  # type: ignore[assignment]
 
 
 def test_runtime_monitor_cli_accepts_no_ping_url_argument() -> None:
@@ -54,6 +70,55 @@ def test_runtime_monitor_cli_accepts_no_ping_url_argument() -> None:
                 "https://monitor.example/secret",
             ]
         )
+
+
+def test_runtime_monitor_cli_dispatches_to_the_process_watchdog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def ready(*_args: object, **kwargs: object) -> dict[str, object]:
+        observed.update(kwargs)
+        return {"state": "ready"}
+
+    monkeypatch.setattr(runtime_monitor_module, "monitor_with_watchdog", ready)
+    assert (
+        main(
+            [
+                "runtime-monitor",
+                "--url",
+                "https://runtime.example/",
+                "--expected-date",
+                "2026-08-26",
+                "--timeout-seconds",
+                "5",
+                "--max-run-seconds",
+                "5",
+            ]
+        )
+        == 0
+    )
+    assert observed["timeout_seconds"] == 5
+    assert observed["max_run_seconds"] == 5
+
+
+def test_process_watchdog_terminates_a_monitor_stuck_in_dns() -> None:
+    started = time.monotonic()
+    result = monitor_with_watchdog(
+        "https://runtime.example/",
+        expected_date=date(2026, 8, 26),
+        timeout_seconds=1,
+        max_run_seconds=5,
+        _runner=_blocked_dns_monitor_runner,
+    )
+    elapsed = time.monotonic() - started
+
+    assert result == {
+        "state": "unhealthy",
+        "problems": ["monitor run exceeded its total deadline"],
+        "monitor": {"state": "not_configured"},
+    }
+    assert elapsed < 6.5
 
 
 def _routes(

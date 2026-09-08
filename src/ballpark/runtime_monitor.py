@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import multiprocessing
 import os
 import time
 from collections.abc import Callable
@@ -102,6 +103,121 @@ def _ping_url(value: str) -> str:
 
 def expected_new_york_date(now: datetime | None = None) -> date:
     return (now or datetime.now(UTC)).astimezone(ZoneInfo("America/New_York")).date()
+
+
+def _validate_monitor_limits(
+    *,
+    timeout_seconds: float,
+    max_source_attempt_age_seconds: int,
+    max_publication_age_seconds: int,
+    max_maintenance_age_seconds: int,
+    max_run_seconds: float,
+) -> None:
+    if not 1 <= timeout_seconds <= 30:
+        raise ValueError("monitor timeout must be between 1 and 30 seconds")
+    if not 60 <= max_source_attempt_age_seconds <= 86_400:
+        raise ValueError("source attempt age must be between 60 and 86400 seconds")
+    if not 60 <= max_publication_age_seconds <= 86_400:
+        raise ValueError("publication age must be between 60 and 86400 seconds")
+    if not 60 <= max_maintenance_age_seconds <= 86_400:
+        raise ValueError("maintenance age must be between 60 and 86400 seconds")
+    if not 5 <= max_run_seconds <= 300:
+        raise ValueError("monitor run budget must be between 5 and 300 seconds")
+
+
+def _watchdog_failure(problem: str) -> dict[str, Any]:
+    return {
+        "state": "unhealthy",
+        "problems": [problem],
+        "monitor": {"state": "not_configured"},
+    }
+
+
+def _run_monitor_child(
+    result_pipe: Any,
+    runner: Callable[..., dict[str, Any]],
+    parameters: dict[str, Any],
+) -> None:
+    """Run unbounded resolver/header phases in a process a scheduler parent can kill."""
+    try:
+        result = runner(**parameters)
+        if not isinstance(result, dict):
+            raise TypeError("monitor runner did not return an object")
+        result_pipe.send(result)
+    except BaseException:  # The parent returns a sanitized operational result.
+        try:
+            result_pipe.send(_watchdog_failure("monitor worker ended without a result"))
+        except (BrokenPipeError, EOFError, OSError):
+            pass
+    finally:
+        result_pipe.close()
+
+
+def monitor_with_watchdog(
+    base_url: str,
+    *,
+    expected_date: date,
+    timeout_seconds: float,
+    max_source_attempt_age_seconds: int = 600,
+    max_publication_age_seconds: int = 600,
+    max_maintenance_age_seconds: int = 600,
+    max_run_seconds: float = 60,
+    _runner: Callable[..., dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Run the monitor in an isolated child bounded by one parent monotonic deadline.
+
+    Resolver and response-header calls can block below Python's socket timeout mechanism. The
+    packaged CLI uses this parent watchdog so it can hard-stop those phases before a scheduled job
+    overlaps the next run. The optional runner is an injectable deterministic test seam.
+    """
+    _validate_monitor_limits(
+        timeout_seconds=timeout_seconds,
+        max_source_attempt_age_seconds=max_source_attempt_age_seconds,
+        max_publication_age_seconds=max_publication_age_seconds,
+        max_maintenance_age_seconds=max_maintenance_age_seconds,
+        max_run_seconds=max_run_seconds,
+    )
+    parameters: dict[str, Any] = {
+        "base_url": base_url,
+        "expected_date": expected_date,
+        "timeout_seconds": timeout_seconds,
+        "max_source_attempt_age_seconds": max_source_attempt_age_seconds,
+        "max_publication_age_seconds": max_publication_age_seconds,
+        "max_maintenance_age_seconds": max_maintenance_age_seconds,
+        "max_run_seconds": max_run_seconds,
+    }
+    runner = _runner or monitor_from_environment
+    context = multiprocessing.get_context("spawn")
+    receive_pipe, send_pipe = context.Pipe(duplex=False)
+    process = context.Process(target=_run_monitor_child, args=(send_pipe, runner, parameters))
+    process.daemon = True
+    deadline = time.monotonic() + max_run_seconds
+    try:
+        process.start()
+    except (OSError, RuntimeError):
+        receive_pipe.close()
+        send_pipe.close()
+        return _watchdog_failure("monitor watchdog could not start")
+    send_pipe.close()
+    try:
+        process.join(max(0.0, deadline - time.monotonic()))
+        if process.is_alive():
+            process.kill()
+            process.join(0.2)
+            return _watchdog_failure("monitor run exceeded its total deadline")
+        if not receive_pipe.poll():
+            return _watchdog_failure("monitor worker ended without a result")
+        try:
+            result = receive_pipe.recv()
+        except (EOFError, OSError):
+            return _watchdog_failure("monitor worker ended without a result")
+        if not isinstance(result, dict):
+            return _watchdog_failure("monitor worker ended without a result")
+        return result
+    finally:
+        receive_pipe.close()
+        if not process.is_alive():
+            process.close()
 
 
 def _source_issues(payload: dict[str, Any]) -> list[str]:
