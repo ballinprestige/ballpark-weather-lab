@@ -63,13 +63,14 @@ class HttpClient:
         else:
             timeout = (self.connect_timeout, self.read_timeout)
             session = self.session
-        response = session.get(
-            url,
-            params=params,
-            timeout=timeout,
-            stream=True,
-        )
+        response = None
         try:
+            response = session.get(
+                url,
+                params=params,
+                timeout=timeout,
+                stream=True,
+            )
             response.raise_for_status()
             declared = response.headers.get("Content-Length")
             if declared is not None and int(declared) > self.maximum_bytes:
@@ -87,7 +88,8 @@ class HttpClient:
                 chunks.append(chunk)
             return b"".join(chunks)
         finally:
-            response.close()
+            if response is not None:
+                response.close()
             if deadline_at is not None:
                 session.close()
 

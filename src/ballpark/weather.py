@@ -159,7 +159,9 @@ def parse_forecast(
     }
 
 
-def fetch_game_weather(game: dict[str, Any], venue: Venue, client: HttpClient) -> dict[str, Any]:
+def fetch_game_weather(
+    game: dict[str, Any], venue: Venue, client: HttpClient, *, deadline_at: float | None = None
+) -> dict[str, Any]:
     game_pk = int(game["game_pk"])
     if venue.dome_type == 2:
         return indoor_weather(game_pk, venue)
@@ -181,6 +183,7 @@ def fetch_game_weather(game: dict[str, Any], venue: Venue, client: HttpClient) -
                 "forecast_days": 2,
                 "past_days": 1,
             },
+            deadline_at=deadline_at,
         )
         return parse_forecast(document, game_pk=game_pk, game_time=game["game_time"], venue=venue)
     except Exception as exc:

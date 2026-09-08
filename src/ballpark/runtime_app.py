@@ -33,6 +33,10 @@ def _stamp() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
+def _deadline(context: JobContext) -> float:
+    return time.monotonic() + max(0, (context.deadline_at - datetime.now(UTC)).total_seconds())
+
+
 def _snapshot(context: JobContext, name: str, value: Any) -> None:
     raw = canonical_json_bytes(value)
     target = context.cache_dir / "sources" / f"{name}.json"
@@ -222,7 +226,7 @@ def run_live_worker(
                 receipt: dict[str, Any] = receipt,
             ) -> None:
                 try:
-                    value = fetch_schedule(target_date, client)
+                    value = fetch_schedule(target_date, client, deadline_at=_deadline(context))
                 except Exception:
                     receipt["schedule_failed"] = True
                     raise
@@ -240,7 +244,7 @@ def run_live_worker(
                     raise RuntimeError("schedule acquisition is unavailable for this pass")
                 value = {
                     str(game["game_pk"]): fetch_game_weather(
-                        game, VENUES[game["home_team"]], client
+                        game, VENUES[game["home_team"]], client, deadline_at=_deadline(context)
                     )
                     for game in schedule_value
                 }
@@ -256,7 +260,9 @@ def run_live_worker(
                 if not isinstance(schedule_value, list):
                     raise RuntimeError("schedule acquisition is unavailable for lineups")
                 value = {
-                    str(game["game_pk"]): fetch_lineup(int(game["game_pk"]), client)
+                    str(game["game_pk"]): fetch_lineup(
+                        int(game["game_pk"]), client, deadline_at=_deadline(context)
+                    )
                     for game in schedule_value
                 }
                 _snapshot(context, "lineups", {"date": target_date.isoformat(), "games": value})
@@ -276,13 +282,18 @@ def run_live_worker(
                 ).fetch(
                     schedule_value,
                     observed_at=datetime.now(UTC),
-                    deadline_at=time.monotonic()
-                    + max(0, (context.deadline_at - datetime.now(UTC)).total_seconds()),
+                    deadline_at=_deadline(context),
                 )
                 if schedule_value and all(
                     quote.get("state") == "unavailable" for quote in quotes.values()
                 ):
-                    raise RuntimeError("Kalshi returned no usable market evidence")
+                    reasons = [str(quote.get("reason") or "") for quote in quotes.values()]
+                    expected_empty = all(
+                        "no exact Kalshi event" in reason or "no active two-sided Kalshi" in reason
+                        for reason in reasons
+                    )
+                    if not expected_empty:
+                        raise RuntimeError("Kalshi provider failed without usable market evidence")
                 _snapshot(context, "markets", {"date": target_date.isoformat(), "exchange": quotes})
                 receipt["markets"] = quotes
 

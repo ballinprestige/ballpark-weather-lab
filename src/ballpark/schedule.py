@@ -94,7 +94,9 @@ def parse_schedule_document(document: Any, target_date: date) -> list[dict[str, 
     return games
 
 
-def fetch_schedule(target_date: date, client: HttpClient) -> list[dict[str, Any]]:
+def fetch_schedule(
+    target_date: date, client: HttpClient, *, deadline_at: float | None = None
+) -> list[dict[str, Any]]:
     try:
         document = client.get_json(
             SCHEDULE_URL,
@@ -103,6 +105,7 @@ def fetch_schedule(target_date: date, client: HttpClient) -> list[dict[str, Any]
                 "date": target_date.isoformat(),
                 "hydrate": "probablePitcher,team",
             },
+            deadline_at=deadline_at,
         )
     except Exception as exc:
         raise SourceUnavailable(f"MLB schedule could not be fetched: {exc}") from exc
