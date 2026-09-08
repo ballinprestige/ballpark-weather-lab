@@ -4,6 +4,7 @@ import gzip
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -31,12 +32,17 @@ def context(root: Path, token: str) -> JobContext:
     )
 
 
-def document(day: str) -> dict[str, object]:
-    payload = DailyPipeline(ProjectPaths.discover()).build(
+@lru_cache
+def _template() -> dict[str, object]:
+    return DailyPipeline(ProjectPaths.discover()).build(
         datetime(2026, 8, 26, tzinfo=UTC).date(),
         fixture_path=Path("tests/fixtures/no_slate.json"),
         generated_at="2026-08-26T04:00:00Z",
     )
+
+
+def document(day: str) -> dict[str, object]:
+    payload = _template().copy()
     payload["date"] = day
     payload["generated_at"] = f"{day}T04:00:00Z"
     return payload
@@ -200,3 +206,19 @@ def test_postcommit_interruption_reconciles_on_same_token_retry(
     monkeypatch.setattr(PublicationCatalog, "commit", original)
     _accept_stage(context(tmp_path, token))
     assert PublicationCatalog(tmp_path / "publication").current_manifest()["token"] == token
+
+
+def test_real_acceptor_replays_1500_minute_publications(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BALLPARK_MIN_FREE_BYTES", "0")
+    sources = tmp_path / "cache" / "sources"
+    sources.mkdir(parents=True)
+    for number in range(1500):
+        token = f"{number:032x}"
+        stage(tmp_path, token, "2026-09-08")
+        (sources / "schedule.json").write_bytes(canonical_json_bytes({"minute": number}))
+        _accept_stage(context(tmp_path, token))
+    catalog = PublicationCatalog(tmp_path / "publication")
+    assert catalog.current_manifest()["token"] == f"{1499:032x}"
+    assert sum(catalog.accepted(f"{number:032x}") is not None for number in range(1500)) == 1500
