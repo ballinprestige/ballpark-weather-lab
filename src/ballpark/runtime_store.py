@@ -5,6 +5,7 @@ from __future__ import annotations
 # ruff: noqa: E501
 import json
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,7 @@ class PublicationCatalog:
         self.publication = publication
         publication.mkdir(parents=True, exist_ok=True)
         self.path = publication / "catalog.sqlite3"
-        with self._connect() as db:
+        with self._connection() as db:
             db.executescript("""
             CREATE TABLE IF NOT EXISTS accepted_releases (token TEXT PRIMARY KEY, manifest TEXT NOT NULL, accepted_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS publication_state (id INTEGER PRIMARY KEY CHECK(id=1), current_token TEXT, rollback_token TEXT);
@@ -32,6 +33,14 @@ class PublicationCatalog:
         db.execute("PRAGMA synchronous=FULL")
         return db
 
+    @contextmanager
+    def _connection(self):
+        db = self._connect()
+        try:
+            yield db
+        finally:
+            db.close()
+
     @classmethod
     def read_current(cls, publication: Path) -> dict[str, Any] | None:
         path = publication / "catalog.sqlite3"
@@ -47,28 +56,28 @@ class PublicationCatalog:
             db.close()
 
     def current_manifest(self) -> dict[str, Any] | None:
-        with self._connect() as db:
+        with self._connection() as db:
             row = db.execute(
                 "SELECT manifest FROM accepted_releases JOIN publication_state ON token=current_token WHERE id=1"
             ).fetchone()
         return json.loads(row[0]) if row else None
 
     def accepted(self, token: str) -> dict[str, Any] | None:
-        with self._connect() as db:
+        with self._connection() as db:
             row = db.execute(
                 "SELECT manifest FROM accepted_releases WHERE token=?", (token,)
             ).fetchone()
         return json.loads(row[0]) if row else None
 
     def register_candidate(self, token: str, stage_path: Path, created_at: str) -> None:
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute(
                 "INSERT OR IGNORE INTO pending_candidates(token,stage_path,created_at) VALUES(?,?,?)",
                 (token, str(stage_path), created_at),
             )
 
     def register_object(self, digest: str, token: str, relative_path: str, created_at: str) -> None:
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute(
                 "INSERT OR IGNORE INTO pending_objects VALUES(?,?,?,?)",
                 (digest, token, relative_path, created_at),
@@ -78,7 +87,7 @@ class PublicationCatalog:
         self, token: str, manifest: dict[str, Any], digests: set[str], accepted_at: str
     ) -> bool:
         encoded = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             old = db.execute(
                 "SELECT manifest FROM accepted_releases WHERE token=?", (token,)
@@ -103,29 +112,29 @@ class PublicationCatalog:
             return True
 
     def maintenance(self, cutoff: str, limit: int) -> list[tuple[str, str, str]]:
-        with self._connect() as db:
+        with self._connection() as db:
             return db.execute(
                 "SELECT digest,token,relative_path FROM pending_objects WHERE created_at <= ? AND digest NOT IN (SELECT digest FROM protected_objects) ORDER BY created_at,digest LIMIT ?",
                 (cutoff, limit),
             ).fetchall()
 
     def remove_pending_object(self, digest: str) -> None:
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute("DELETE FROM pending_objects WHERE digest=?", (digest,))
 
-    def pending_candidates(self, limit: int) -> list[tuple[str, str]]:
-        with self._connect() as db:
+    def pending_candidates(self, cutoff: str, limit: int) -> list[tuple[str, str]]:
+        with self._connection() as db:
             return db.execute(
                 "SELECT token,stage_path FROM pending_candidates ORDER BY created_at LIMIT ?",
                 (limit,),
             ).fetchall()
 
     def remove_pending_candidate(self, token: str) -> None:
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute("DELETE FROM pending_candidates WHERE token=?", (token,))
 
     def record_error(self, token: str, message: str, created_at: str) -> None:
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute(
                 "INSERT INTO catalog_errors(token,message,created_at) VALUES(?,?,?)",
                 (token, message, created_at),
