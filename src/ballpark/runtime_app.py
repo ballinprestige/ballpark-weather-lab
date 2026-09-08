@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import signal
+import shutil
 import time
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 from ballpark.http import HttpClient
 from ballpark.kalshi import KalshiExchangeProvider
+from ballpark.lineups import fetch_lineup
 from ballpark.paths import ProjectPaths
 from ballpark.pipeline import DailyPipeline, load_fixture
 from ballpark.publication import atomic_write, canonical_json_bytes
@@ -75,6 +77,17 @@ def _accept_stage(context: JobContext) -> None:
     accepted = releases / context.token
     if accepted.exists():
         raise RuntimeError("publication token was already accepted")
+    try:
+        prior = json.loads((context.publication_dir / "current.json").read_text(encoding="utf-8"))
+        prior_archive = releases / str(prior["token"]) / "archive"
+        if prior_archive.is_dir():
+            for source in prior_archive.iterdir():
+                destination = staged / "archive" / source.name
+                if not destination.exists():
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, destination)
+    except (OSError, KeyError, TypeError, json.JSONDecodeError):
+        pass
     os.replace(staged, accepted)
     atomic_write(
         context.publication_dir / "current.json",
@@ -224,6 +237,20 @@ def run_live_worker(
                 _snapshot(context, "weather", {"date": target_date.isoformat(), "games": value})
                 receipt["weather"] = value
 
+            def lineups(
+                context: JobContext,
+                target_date: date = target_date,
+                client: HttpClient = client,
+            ) -> None:
+                schedule_value = _load_snapshot(cache_dir, "schedule", target_date).get("games")
+                if not isinstance(schedule_value, list):
+                    raise RuntimeError("schedule acquisition is unavailable for lineups")
+                value = {
+                    str(game["game_pk"]): fetch_lineup(int(game["game_pk"]), client)
+                    for game in schedule_value
+                }
+                _snapshot(context, "lineups", {"date": target_date.isoformat(), "games": value})
+
             def markets(
                 context: JobContext,
                 target_date: date = target_date,
@@ -239,8 +266,13 @@ def run_live_worker(
                 ).fetch(
                     schedule_value,
                     observed_at=datetime.now(UTC),
-                    deadline_at=time.monotonic() + 120,
+                    deadline_at=time.monotonic()
+                    + max(0, (context.deadline_at - datetime.now(UTC)).total_seconds()),
                 )
+                if schedule_value and all(
+                    quote.get("state") == "unavailable" for quote in quotes.values()
+                ):
+                    raise RuntimeError("Kalshi returned no usable market evidence")
                 _snapshot(context, "markets", {"date": target_date.isoformat(), "exchange": quotes})
                 receipt["markets"] = quotes
 
@@ -253,10 +285,12 @@ def run_live_worker(
                     raise RuntimeError("required schedule refresh failed in this pass")
                 schedule_value = _load_snapshot(cache_dir, "schedule", target_date).get("games")
                 weather_value = _load_snapshot(cache_dir, "weather", target_date).get("games")
+                lineup_value = _load_snapshot(cache_dir, "lineups", target_date).get("games")
                 market_value = _load_snapshot(cache_dir, "markets", target_date).get("exchange")
                 if (
                     not isinstance(schedule_value, list)
                     or not isinstance(weather_value, dict)
+                    or not isinstance(lineup_value, dict)
                     or not isinstance(market_value, dict)
                 ):
                     raise RuntimeError("dated source receipts are incomplete")
@@ -264,7 +298,7 @@ def run_live_worker(
                     "date": target_date.isoformat(),
                     "schedule": schedule_value,
                     "weather_by_game": weather_value,
-                    "lineups_by_game": {},
+                    "lineups_by_game": lineup_value,
                     "odds_by_game": {},
                     "exchange_by_game": market_value,
                 }
@@ -282,10 +316,17 @@ def run_live_worker(
                 [
                     JobSpec("schedule", 300, 30),
                     JobSpec("weather", 900, 60),
+                    JobSpec("lineups", 300, 60),
                     JobSpec("markets", 60, 120),
                     JobSpec("publish", 60, 30),
                 ],
-                {"schedule": schedule, "weather": weather, "markets": markets, "publish": publish},
+                {
+                    "schedule": schedule,
+                    "weather": weather,
+                    "lineups": lineups,
+                    "markets": markets,
+                    "publish": publish,
+                },
                 state_dir=state_dir,
                 cache_dir=cache_dir,
                 publication_dir=publication_dir,

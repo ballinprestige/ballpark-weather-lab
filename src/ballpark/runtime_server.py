@@ -36,7 +36,14 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
             result = runtime_readiness(self.state_dir, heartbeat_seconds=180, job_lag_seconds=30)
             self._json(200 if result["state"] == "ready" else 503, result)
             return
-        if path in {"/data/data.json", "/data/release.json"}:
+        allowed = {"/data/data.json", "/data/release.json", "/archive/index.json"}
+        archive_name = path.removeprefix("/archive/")
+        if path in allowed or (
+            path.startswith("/archive/")
+            and archive_name.endswith(".json")
+            and len(archive_name) == 15
+            and archive_name[:10].count("-") == 2
+        ):
             try:
                 pointer = json.loads(
                     (self.publication_dir / "current.json").read_text(encoding="utf-8")
@@ -56,7 +63,7 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        if path.startswith("/data/"):
+        if path.startswith("/data/") or path.startswith("/archive/"):
             self._json(404, {"state": "not_found"})
             return
         self.directory = str(self.web_dir)
