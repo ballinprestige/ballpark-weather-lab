@@ -455,7 +455,22 @@ def maintain_publication_store(publication: Path) -> None:
             and candidate.parent.resolve() == staging_root
             and candidate.is_dir()
         ):
-            shutil.rmtree(candidate)
+            # Stages have a fixed owned layout; remove only registered contents.
+            for relative in (
+                "data/data.json",
+                "data/release.json",
+                "archive/index.json",
+            ):
+                path = candidate / relative
+                if path.is_file() and not path.is_symlink():
+                    path.unlink()
+            for archive in (candidate / "archive").glob("????-??-??.json"):
+                if archive.is_file() and not archive.is_symlink():
+                    archive.unlink()
+            for directory in (candidate / "data", candidate / "archive"):
+                if directory.is_dir() and not directory.is_symlink():
+                    directory.rmdir()
+            candidate.rmdir()
             catalog.remove_pending_candidate(pending_token)
 
 

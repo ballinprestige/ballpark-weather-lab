@@ -125,8 +125,8 @@ class PublicationCatalog:
     def pending_candidates(self, cutoff: str, limit: int) -> list[tuple[str, str]]:
         with self._connection() as db:
             return db.execute(
-                "SELECT token,stage_path FROM pending_candidates ORDER BY created_at LIMIT ?",
-                (limit,),
+                "SELECT token,stage_path FROM pending_candidates WHERE created_at <= ? ORDER BY created_at,token LIMIT ?",
+                (cutoff, limit),
             ).fetchall()
 
     def remove_pending_candidate(self, token: str) -> None:
