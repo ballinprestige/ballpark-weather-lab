@@ -25,9 +25,10 @@ jobs:
           set -euo pipefail
           docker build --tag ballpark-runtime-smoke:ci .
           docker run --rm --entrypoint ballpark ballpark-runtime-smoke:ci verify-artifacts
-      - name: Run fixture service through worker, acceptor, server, and shutdown
+      - name: Prove fixture worker iteration, child failure, and graceful shutdown
         run: |
           set -euo pipefail
+          mkdir -p .ci-runtime
           name=ballpark-runtime-smoke
           cleanup() { docker rm --force "$name" >/dev/null 2>&1 || true; }
           trap cleanup EXIT
@@ -43,7 +44,34 @@ jobs:
             sleep 1
           done
           curl --fail --silent http://127.0.0.1:18080/data/data.json | grep -F '"status":"no_slate"'
+          heartbeat() {
+            docker exec "$name" python -c 'import json,sqlite3; print(json.loads(sqlite3.connect("/var/lib/ballpark/state/runtime-state.sqlite3").execute("select value from state").fetchone()[0])["heartbeat_at"])'
+          }
+          first_heartbeat="$(heartbeat)"
           sleep 2
-          docker exec "$name" ballpark runtime-probe --state-dir /var/lib/ballpark/state | grep -F '"state": "ready"'
+          second_heartbeat="$(heartbeat)"
+          test "$first_heartbeat" != "$second_heartbeat"
+          docker stats --no-stream --format '{{json .}}' "$name" | tee .ci-runtime/no-slate-container-stats.json
+          for request in $(seq 1 40); do curl --fail --silent http://127.0.0.1:18080/data/data.json >/dev/null; done
+          docker logs "$name" > .ci-runtime/no-slate-service.log 2>&1
+          docker exec "$name" python -c 'import os,signal; [(os.kill(int(pid), signal.SIGTERM)) for pid in os.listdir("/proc") if pid.isdigit() and b"runtime-worker" in open(f"/proc/{pid}/cmdline", "rb").read()]'
+          for attempt in $(seq 1 15); do docker inspect --format '{{.State.Running}}' "$name" | grep -qx false && break; sleep 1; done
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$name")" != 0
+          docker rm "$name"
+          trap - EXIT
+          name=ballpark-runtime-term
+          trap cleanup EXIT
+          docker run --detach --name "$name" --publish 127.0.0.1:18081:8080 \
+            --env BALLPARK_HOST=0.0.0.0 --env PORT=8080 \
+            --env BALLPARK_FIXTURE=/fixture.json --env BALLPARK_DATE=2026-08-26 \
+            --volume "$PWD/tests/fixtures/no_slate.json:/fixture.json:ro" \
+            ballpark-runtime-smoke:ci service
           docker stop --time 12 "$name"
           test "$(docker inspect --format '{{.State.ExitCode}}' "$name")" = 0
+      - name: Upload runtime smoke receipts
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+        with:
+          name: linux-container-runtime-smoke
+          path: .ci-runtime
+          if-no-files-found: warn
