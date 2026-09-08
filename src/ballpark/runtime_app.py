@@ -86,6 +86,16 @@ def _accept_stage(context: JobContext) -> None:
                 if not destination.exists():
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source, destination)
+            prior_index = json.loads((prior_archive / "index.json").read_text(encoding="utf-8"))
+            next_index_path = staged / "archive" / "index.json"
+            next_index = json.loads(next_index_path.read_text(encoding="utf-8"))
+            rows = {
+                row["date"]: row
+                for row in [*prior_index.get("dates", []), *next_index.get("dates", [])]
+                if isinstance(row, dict) and isinstance(row.get("date"), str)
+            }
+            next_index["dates"] = sorted(rows.values(), key=lambda row: row["date"], reverse=True)
+            atomic_write(next_index_path, canonical_json_bytes(next_index))
     except (OSError, KeyError, TypeError, json.JSONDecodeError):
         pass
     os.replace(staged, accepted)
