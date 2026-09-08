@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { BallparkGame } from '../lib/types';
-  import { formatDelta, formatTime, isGameHeld } from '../lib/format';
+  import { formatDelta, formatTime, isGameHeld, isWeatherHeld } from '../lib/format';
 
   export let games: BallparkGame[];
   export let onOpen: (key: string) => void;
@@ -84,7 +84,7 @@
             {:else}
               <rect x="-8" y={baselineY - 8} width="16" height="16" class="missing-block"></rect>
             {/if}
-            {#if !game.weather.dome_active && !isGameHeld(game)}
+            {#if !game.weather.dome_active && !isWeatherHeld(game)}
               <line x1="-18" y1={y - 15} x2="18" y2={y - 15} class="wind-arrow"></line>
               <path d={`M 18 ${y - 15} l -7 -5 m 7 5 l -7 5`} class="wind-arrow"></path>
               <text x="0" y="24" class="station-value">{formatDelta(game.weather.wind_carry_mph, 1)} mph</text>

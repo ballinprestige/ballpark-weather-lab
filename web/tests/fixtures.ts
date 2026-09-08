@@ -227,6 +227,27 @@ export function missingWeatherPayload(): BallparkPayload {
   return payload;
 }
 
+export function modelAdjustmentHeldPayload(): BallparkPayload {
+  const payload = readyPayload();
+  const game = payload.games[1];
+  game.home_team = 'LAD';
+  game.venue = 'Dodger Stadium';
+  game.factors = {
+    state: 'held',
+    reason: 'learned weather adjustment held: sampled LAD training rows use a 0° wind axis; compatibility validation is pending',
+    seasonal_pf_runs: 0.97,
+    seasonal_pf_hr: 1.07,
+    weather_multiplier_runs: 1,
+    weather_multiplier_hr: 1,
+    game_pf_runs: 0.97,
+    game_pf_hr: 1.07,
+    weather_delta_runs: 0,
+    weather_delta_hr: 0,
+    hr_baseline_as_of: '2026-08-27'
+  };
+  return payload;
+}
+
 export function noSlatePayload(): BallparkPayload {
   const payload = readyPayload();
   payload.status = 'no_slate';

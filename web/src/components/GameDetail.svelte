@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { BallparkGame, GeometryArtifact } from '../lib/types';
-  import { displayValue, formatFactor, formatTime, formatTimestamp, gameHoldReason, isGameHeld, pitcherName, stateTone, teamLabel, windLabel } from '../lib/format';
+  import { displayValue, formatContractCents, formatFactor, formatTime, formatTimestamp, gameHoldReason, isGameHeld, isModelAdjustmentHeld, pitcherName, stateTone, teamLabel, windLabel } from '../lib/format';
   import { isReadyState } from '../lib/validate';
+  import { assessOddsFreshness } from '../lib/freshness';
   import StateBadge from './StateBadge.svelte';
   import ParkWindDiagram from './ParkWindDiagram.svelte';
   import DecompositionLadder from './DecompositionLadder.svelte';
@@ -10,11 +11,18 @@
   export let game: BallparkGame;
   export let geometry: GeometryArtifact | null;
   export let headingLevel: 1 | 2 | 3 = 2;
+  export let now = new Date();
 
   $: held = isGameHeld(game);
   $: weatherHeld = !isReadyState(game.weather.state);
+  $: modelHeld = !weatherHeld && isModelAdjustmentHeld(game);
   $: titleId = `game-detail-title-${game.game_pk}`;
   $: lineupReady = isReadyState(game.lineup.state);
+  $: marketFreshness = assessOddsFreshness(game.odds, now);
+  $: exchangeAvailable = game.exchange_market?.state === 'observed_unknown_age'
+    && game.exchange_market.line !== null
+    && game.exchange_market.over_ask_cents !== null
+    && game.exchange_market.under_ask_cents !== null;
   const american = (price: number | null): string => price === null ? '—' : `${price > 0 ? '+' : ''}${price}`;
 </script>
 
@@ -36,13 +44,18 @@
       <StateBadge state={game.game_status} />
       <span>{pitcherName(game, 'away')} vs {pitcherName(game, 'home')}</span>
     </div>
+    {#if exchangeAvailable}
+      <p class="detail-exchange-line"><strong>{game.exchange_market?.line}</strong> · Over {formatContractCents(game.exchange_market?.over_ask_cents)} · Under {formatContractCents(game.exchange_market?.under_ask_cents)} <span>Kalshi · captured {formatTimestamp(game.exchange_market?.observed_at ?? null)}</span></p>
+    {/if}
   </header>
+
+  <ParkWindDiagram {game} {geometry} />
 
   {#if held}
     <div class="game-hold" role="status" data-testid="weather-hold">
       <span class="hold-hatch" aria-hidden="true"></span>
       <div>
-        <p class="eyebrow">Data unavailable</p>
+        <p class="eyebrow">{modelHeld ? 'Model validation pending' : 'Data unavailable'}</p>
         <h3>Weather-adjusted headline withheld</h3>
         <p>{gameHoldReason(game)} The rest of the slate remains available.</p>
       </div>
@@ -82,13 +95,14 @@
     </p>
   </section>
 
-  <section class="market-section" aria-labelledby={`market-${game.game_pk}`} data-state={game.odds.state}>
+  {#if !exchangeAvailable || marketFreshness.state !== 'unavailable'}
+  <section class="market-section" aria-labelledby={`market-${game.game_pk}`} data-state={marketFreshness.state}>
     <div class="section-heading">
-      <div><p class="eyebrow">Quoted sportsbook market</p><h3 id={`market-${game.game_pk}`}>Full-game total</h3></div>
-      <StateBadge state={game.odds.state} />
+      <div><p class="eyebrow">Full-game market evidence</p><h3 id={`market-${game.game_pk}`}>Total, Over &amp; Under</h3></div>
+      <StateBadge state={marketFreshness.state} />
     </div>
-    {#if game.odds.state === 'unavailable'}
-      <p class="market-unavailable">{game.odds.reason ?? 'No verified full-game total is available. No line or price is substituted.'}</p>
+    {#if marketFreshness.state === 'unavailable'}
+      <p class="market-unavailable">{marketFreshness.reason ?? 'No verified full-game total is available. No line or price is substituted.'}</p>
     {:else}
       <dl class="market-grid">
         <div><dt>Total</dt><dd>{game.odds.line}</dd></div>
@@ -96,12 +110,31 @@
         <div><dt>Under</dt><dd>{american(game.odds.under_price)}</dd></div>
         <div><dt>Sportsbook</dt><dd>{game.odds.sportsbook_name}</dd></div>
       </dl>
-      {#if game.odds.state === 'stale'}<p class="market-warning">Stale quote: {game.odds.reason}. It is not current.</p>{/if}
+      {#if marketFreshness.state === 'stale'}<p class="market-warning">Stale quote: {marketFreshness.reason}. It is not current.</p>{/if}
+      {#if marketFreshness.state === 'observed'}<p class="market-warning">Observed quote: {marketFreshness.reason} It does not satisfy the current sportsbook freshness requirement.</p>{/if}
       <p class="source-line"><span>{game.odds.provider}</span><span>Source updated {formatTimestamp(game.odds.source_updated_at)}</span><span>Retrieved {formatTimestamp(game.odds.observed_at)}</span></p>
     {/if}
   </section>
+  {/if}
 
-  <ParkWindDiagram {game} {geometry} />
+  {#if exchangeAvailable}
+    <section class="exchange-market" aria-labelledby={`exchange-${game.game_pk}`}>
+      <div class="section-heading compact">
+        <div><p class="eyebrow">Supplemental exchange evidence</p><h3 id={`exchange-${game.game_pk}`}>Kalshi contract asks</h3></div>
+        <StateBadge state="observed_unknown_age" label="Observed · source age unknown" />
+      </div>
+      <dl class="market-grid exchange-grid">
+        <div><dt>Total condition</dt><dd>Over {game.exchange_market?.line}</dd></div>
+        <div><dt>YES ask</dt><dd>{formatContractCents(game.exchange_market?.over_ask_cents)} <small>({game.exchange_market?.over_ask_dollars})</small></dd></div>
+        <div><dt>NO ask</dt><dd>{formatContractCents(game.exchange_market?.under_ask_cents)} <small>({game.exchange_market?.under_ask_dollars})</small></dd></div>
+        <div><dt>Market phase</dt><dd>{game.exchange_market?.game_phase?.replaceAll('_', ' ')}</dd></div>
+      </dl>
+      <p class="market-warning">Contract asks are quoted in cents, not American sportsbook odds. Source update age is unknown; fees are excluded.</p>
+      {#if game.exchange_market?.failure_reason}<p class="market-warning"><strong>Update failed.</strong> Retaining the captured asks above: {game.exchange_market.failure_reason}</p>{/if}
+      <p class="source-line"><span>Kalshi</span><span>Captured/as of {formatTimestamp(game.exchange_market?.observed_at ?? null)}</span><span>{game.exchange_market?.market_ticker}</span></p>
+    </section>
+  {/if}
+
   <DecompositionLadder {game} />
 
   <section class="evidence-section evidence-receipt" aria-labelledby={`receipt-${game.game_pk}`}>
@@ -115,10 +148,10 @@
     <dl class="receipt-grid">
       <div><dt>Weather source</dt><dd>{game.weather.source ?? 'Not reported'}</dd></div>
       <div><dt>Weather valid</dt><dd>{formatTimestamp(game.weather.valid_at)}</dd></div>
-      <div><dt>Evidence state</dt><dd>{held ? 'Weather-adjusted factor held' : 'Verified weather inputs'}</dd></div>
+      <div><dt>Evidence state</dt><dd>{weatherHeld ? 'Weather evidence held' : modelHeld ? 'Verified weather · learned adjustment held' : 'Verified weather inputs'}</dd></div>
       <div><dt>Lineups</dt><dd>{game.lineup.state === 'confirmed' ? 'confirmed / confirmed' : game.lineup.state.replaceAll('_', ' ')}</dd></div>
-      <div><dt>Approach B</dt><dd>{game.factors.state}</dd></div>
-      <div><dt>Approach C</dt><dd>{game.approach_c.state.replaceAll('_', ' ')}</dd></div>
+      <div><dt>Park-factor method</dt><dd>{game.factors.state}</dd></div>
+      <div><dt>Flight context</dt><dd>{game.approach_c.state.replaceAll('_', ' ')}</dd></div>
     </dl>
   </section>
 
@@ -126,7 +159,7 @@
     <div class="section-heading">
       <div>
         <p class="eyebrow">Lineup state</p>
-        <h3 id={`lineup-${game.game_pk}`}>Approach C context</h3>
+        <h3 id={`lineup-${game.game_pk}`}>Lineup and flight context</h3>
       </div>
       <StateBadge state={game.approach_c.state} />
     </div>
@@ -145,7 +178,7 @@
       </div>
     </div>
     <p>{lineupReady ? `Lineups observed ${formatTimestamp(game.lineup.observed_at)}.` : (game.lineup.reason ?? 'Confirmed lineups are not yet available.')}</p>
-    <p class="plain-note">{game.approach_c.reason ?? game.approach_c.method ?? 'Approach C is optional and never blocks the weather-adjusted park-factor slate.'}</p>
+    <p class="plain-note">{game.approach_c.reason ?? game.approach_c.method ?? 'Flight context is optional and never blocks the weather-adjusted park-factor slate.'}</p>
   </section>
 
   <TrajectoryTheater {game} />

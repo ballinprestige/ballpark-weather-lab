@@ -7,13 +7,14 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? 'github' : 'list',
   use: {
-    baseURL: 'http://127.0.0.1:4173',
+    baseURL: 'http://127.0.0.1:4175',
     trace: 'on-first-retry'
   },
   webServer: {
-    command: 'npm run build && npm run preview -- --host 127.0.0.1',
-    port: 4173,
-    reuseExistingServer: !process.env.CI,
+    command: 'npm run build && npm run preview -- --host 127.0.0.1 --port 4175 --strictPort',
+    port: 4175,
+    // Browser proof must belong to this worktree's own preview, never another task's listener.
+    reuseExistingServer: false,
     timeout: 120_000
   },
   projects: [
