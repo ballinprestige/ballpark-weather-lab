@@ -55,15 +55,24 @@ def _default_get(url: str, timeout_seconds: float) -> HttpResponse:
             raise RuntimeError("monitor transport cannot enforce a total deadline") from exc
 
     def content_length(response: Any) -> int | None:
-        declared = response.headers.get("Content-Length")
-        if declared is None:
+        headers = response.headers
+        lengths = headers.get_all("Content-Length") or []
+        transfer_encodings = headers.get_all("Transfer-Encoding") or []
+        if transfer_encodings and lengths:
+            raise RuntimeError("monitor response has ambiguous transfer framing")
+        if not lengths:
             return None
-        try:
-            length = int(declared)
-        except (TypeError, ValueError) as exc:
-            raise RuntimeError("monitor response has an invalid Content-Length") from exc
-        if length < 0:
+        if len(lengths) != 1:
+            raise RuntimeError("monitor response has ambiguous Content-Length")
+        declared = lengths[0]
+        if (
+            not isinstance(declared, str)
+            or not declared
+            or not declared.isascii()
+            or not declared.isdecimal()
+        ):
             raise RuntimeError("monitor response has an invalid Content-Length")
+        length = int(declared)
         if length > _MAX_BODY_BYTES:
             raise RuntimeError("monitor response exceeds its byte limit")
         return length

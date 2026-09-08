@@ -543,6 +543,52 @@ def test_default_monitor_get_rejects_truncated_advertised_content_length() -> No
         server.server_close()
 
 
+@pytest.mark.parametrize(
+    ("headers", "body", "message"),
+    [
+        (
+            b"Transfer-Encoding: chunked\r\nContent-Length: 2\r\n",
+            b"6\r\n{}evil\r\n0\r\n\r\n",
+            "ambiguous transfer framing",
+        ),
+        (
+            b"Content-Length: 2\r\nContent-Length: 6\r\n",
+            b"{}evil",
+            "ambiguous Content-Length",
+        ),
+        (
+            b"Content-Length: +2\r\n",
+            b"{}evil",
+            "invalid Content-Length",
+        ),
+    ],
+    ids=("chunked-plus-content-length", "duplicate-content-length", "signed-content-length"),
+)
+def test_default_monitor_get_rejects_ambiguous_or_malformed_framing(
+    headers: bytes, body: bytes, message: str
+) -> None:
+    class AmbiguousFramingHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self) -> None:  # noqa: N802
+            self.wfile.write(b"HTTP/1.1 200 OK\r\n" + headers + b"Connection: close\r\n\r\n" + body)
+            self.wfile.flush()
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), AmbiguousFramingHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with pytest.raises(RuntimeError, match=message):
+            _default_get(f"http://127.0.0.1:{server.server_port}/", 2.0)
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
 def test_default_monitor_get_enforces_total_deadline_during_a_slow_drip() -> None:
     class SlowHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
