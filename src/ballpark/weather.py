@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -13,6 +14,32 @@ INDOOR_HUMIDITY_PCT = 50.0
 R_D = 287.058
 R_V = 461.495
 RHO_ISA = 1.225
+
+
+@dataclass(frozen=True)
+class ModelFrame0Weather:
+    """Private model-input receipt for the legacy 0-degree saved-model frame.
+
+    This is intentionally not a mapping key. Public payload weather remains in the
+    reviewed physical venue frame and contains presentation-rounded values only.
+    """
+
+    temperature_f: float
+    wind_speed_mph: float
+    wind_direction_deg: float
+    provenance: str = "selected_provider_tuple_unrounded_model_frame_0deg"
+
+
+class WeatherPayload(dict[str, Any]):
+    """Public weather mapping with an in-process-only model source receipt."""
+
+    model_frame_0deg: ModelFrame0Weather | None
+
+    def __init__(
+        self, values: dict[str, Any], *, model_frame_0deg: ModelFrame0Weather | None = None
+    ) -> None:
+        super().__init__(values)
+        self.model_frame_0deg = model_frame_0deg
 
 
 def air_density_index(temp_f: float, humidity_pct: float, altitude_ft: float) -> float:
@@ -31,6 +58,53 @@ def decompose_wind(
 ) -> tuple[float, float]:
     angle = math.radians(wind_direction_deg - (center_field_azimuth + 180.0))
     return round(wind_speed_mph * math.cos(angle), 2), round(wind_speed_mph * math.sin(angle), 2)
+
+
+def model_frame_0deg_from_source(
+    *, temperature_f: float, wind_speed_mph: float, wind_direction_deg: float
+) -> ModelFrame0Weather:
+    """Capture the selected provider tuple before public weather rounding.
+
+    The saved artifacts were trained with ``cf_azimuth_deg=0``.  This receipt is
+    the sole accepted source for their carry/cross inputs; physical venue fields
+    are intentionally not used to reconstruct it.
+    """
+    values = (temperature_f, wind_speed_mph, wind_direction_deg)
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError("model-frame weather source contains a non-finite value")
+    if not -80 <= temperature_f <= 150 or not 0 <= wind_speed_mph <= 250:
+        raise ValueError("model-frame weather source is out of range")
+    if not 0 <= wind_direction_deg <= 360:
+        raise ValueError("model-frame wind direction is out of range")
+    return ModelFrame0Weather(
+        # Historical temperature is a one-decimal feature.  This is distinct from
+        # speed/direction, which must stay unrounded until their components exist.
+        temperature_f=round(temperature_f, 1),
+        wind_speed_mph=wind_speed_mph,
+        wind_direction_deg=wind_direction_deg,
+    )
+
+
+def model_frame_0deg_components(source: ModelFrame0Weather) -> dict[str, float | str]:
+    """Build legacy model features directly from the retained raw wind tuple."""
+    carry, cross = decompose_wind(source.wind_speed_mph, source.wind_direction_deg, 0.0)
+    speed = round(source.wind_speed_mph, 2)
+    return {
+        "temperature_f": source.temperature_f,
+        "wind_speed_mph": speed,
+        "wind_carry_mph": carry,
+        "wind_cross_mph": cross,
+        "temp_x_wind_carry": source.temperature_f * carry,
+        "provenance": source.provenance,
+    }
+
+
+def model_frame_0deg_for_weather(weather: dict[str, Any]) -> dict[str, float | str] | None:
+    """Return private model features, never reconstructed from public fields."""
+    source = getattr(weather, "model_frame_0deg", None)
+    if not isinstance(source, ModelFrame0Weather):
+        return None
+    return model_frame_0deg_components(source)
 
 
 def _iso_now() -> str:
@@ -60,7 +134,7 @@ def neutral_weather(game_pk: int, venue: Venue, reason: str) -> dict[str, Any]:
 
 
 def indoor_weather(game_pk: int, venue: Venue) -> dict[str, Any]:
-    return {
+    values = {
         "game_pk": game_pk,
         "state": "verified",
         "source": "venue_registry",
@@ -81,6 +155,12 @@ def indoor_weather(game_pk: int, venue: Venue) -> dict[str, Any]:
         "dome_active": True,
         "roof_state": "fixed-roof",
     }
+    return WeatherPayload(
+        values,
+        model_frame_0deg=model_frame_0deg_from_source(
+            temperature_f=INDOOR_TEMP_F, wind_speed_mph=0.0, wind_direction_deg=0.0
+        ),
+    )
 
 
 def _parse_utc(raw: str) -> datetime:
@@ -138,7 +218,7 @@ def parse_forecast(
     if not 500 <= pressure <= 1200:
         raise ValueError("Open-Meteo game-hour pressure is out of range")
     carry, cross = decompose_wind(wind_speed, wind_direction, venue.center_field_azimuth)
-    return {
+    public_weather = {
         "game_pk": game_pk,
         "state": "verified",
         "source": "open-meteo",
@@ -157,6 +237,12 @@ def parse_forecast(
         "dome_active": False,
         "roof_state": "unconfirmed" if venue.dome_type == 1 else "open-air",
     }
+    return WeatherPayload(
+        public_weather,
+        model_frame_0deg=model_frame_0deg_from_source(
+            temperature_f=temp_f, wind_speed_mph=wind_speed, wind_direction_deg=wind_direction
+        ),
+    )
 
 
 def fetch_game_weather(

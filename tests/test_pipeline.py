@@ -266,7 +266,7 @@ def test_malformed_critical_model_rejects_without_overwriting_prior_output(
     (output / "data" / "data.json").write_bytes(prior_payload)
     (output / "data" / "release.json").write_bytes(prior_release)
 
-    with pytest.raises(ArtifactError, match="runs weather model is malformed"):
+    with pytest.raises(ArtifactError, match="reviewed model identity mismatch"):
         DailyPipeline(paths).build_and_publish(
             TARGET_DATE,
             output,
