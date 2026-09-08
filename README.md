@@ -220,6 +220,7 @@ Windows x86_64 PowerShell:
 
 - [Architecture](docs/architecture.md)
 - [Operations](docs/operations.md)
+- [Runtime hosting and recovery](docs/runtime-hosting.md)
 - [Verification matrix](docs/verification.md)
 - [Data sources and artifact policy](DATA_SOURCES.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)

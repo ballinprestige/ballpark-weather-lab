@@ -79,8 +79,34 @@ def _build_parser() -> argparse.ArgumentParser:
     probe.add_argument("--max-heartbeat-age-seconds", type=int, default=180)
     probe.add_argument("--max-job-lag-seconds", type=int, default=30)
 
+    monitor = commands.add_parser("runtime-monitor")
+    monitor.add_argument("--url", required=True)
+    monitor.add_argument("--expected-date", type=_date, default=_default_date())
+    monitor.add_argument("--timeout-seconds", type=float, default=10)
+    monitor.add_argument("--max-source-attempt-age-seconds", type=int, default=600)
+    monitor.add_argument("--max-publication-age-seconds", type=int, default=600)
+    monitor.add_argument("--max-maintenance-age-seconds", type=int, default=600)
+    monitor.add_argument("--max-run-seconds", type=float, default=60)
+
+    backup = commands.add_parser("runtime-backup")
+    backup.add_argument("--mount", type=Path, required=True)
+    backup.add_argument("--destination", type=Path, required=True)
+    backup.add_argument("--image-ref", required=True)
+    backup.add_argument("--stopped", action="store_true", required=True)
+
+    verify_backup = commands.add_parser("runtime-verify-backup")
+    verify_backup.add_argument("--backup", type=Path, required=True)
+    verify_backup.add_argument("--image-ref")
+
+    restore = commands.add_parser("runtime-restore")
+    restore.add_argument("--backup", type=Path, required=True)
+    restore.add_argument("--destination", type=Path, required=True)
+    restore.add_argument("--image-ref", required=True)
+    restore.add_argument("--stopped", action="store_true", required=True)
+
     server = commands.add_parser("runtime-server")
     server.add_argument("--state-dir", type=Path, required=True)
+    server.add_argument("--cache-dir", type=Path, required=True)
     server.add_argument("--publication-dir", type=Path, required=True)
     server.add_argument("--web-dir", type=Path, required=True)
     server.add_argument("--port", type=int, default=8080)
@@ -163,6 +189,56 @@ def main(argv: list[str] | None = None) -> int:
             _print(result)
             return 0 if result["state"] == "ready" else 3
 
+        if args.command == "runtime-monitor":
+            from ballpark.runtime_monitor import monitor_from_environment
+
+            result = monitor_from_environment(
+                args.url,
+                expected_date=args.expected_date,
+                timeout_seconds=args.timeout_seconds,
+                max_source_attempt_age_seconds=args.max_source_attempt_age_seconds,
+                max_publication_age_seconds=args.max_publication_age_seconds,
+                max_maintenance_age_seconds=args.max_maintenance_age_seconds,
+                max_run_seconds=args.max_run_seconds,
+            )
+            _print(result)
+            return 0 if result["state"] == "ready" else 3
+
+        if args.command == "runtime-backup":
+            from ballpark.runtime_backup import backup_runtime_mount
+
+            _print(
+                backup_runtime_mount(
+                    mount=args.mount.resolve(),
+                    destination=args.destination.resolve(strict=False),
+                    image_ref=args.image_ref,
+                )
+            )
+            return 0
+
+        if args.command == "runtime-verify-backup":
+            from ballpark.runtime_backup import verify_runtime_backup
+
+            _print(
+                verify_runtime_backup(
+                    args.backup.resolve(),
+                    image_ref=args.image_ref,
+                )
+            )
+            return 0
+
+        if args.command == "runtime-restore":
+            from ballpark.runtime_backup import restore_runtime_mount
+
+            _print(
+                restore_runtime_mount(
+                    backup=args.backup.resolve(),
+                    destination=args.destination.resolve(strict=False),
+                    image_ref=args.image_ref,
+                )
+            )
+            return 0
+
         if args.command == "runtime-server":
             from ballpark.runtime_server import serve
 
@@ -170,6 +246,7 @@ def main(argv: list[str] | None = None) -> int:
                 web_dir=args.web_dir.resolve(),
                 publication_dir=args.publication_dir.resolve(),
                 state_dir=args.state_dir.resolve(),
+                cache_dir=args.cache_dir.resolve(),
                 host=args.host,
                 port=args.port,
             )

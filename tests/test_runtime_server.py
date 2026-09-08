@@ -4,7 +4,7 @@ import gzip
 import hashlib
 import json
 import threading
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -13,6 +13,7 @@ from urllib.request import urlopen
 from ballpark.paths import ProjectPaths
 from ballpark.pipeline import DailyPipeline
 from ballpark.publication import canonical_json_bytes
+from ballpark.runtime import RuntimeLedger
 from ballpark.runtime_server import RuntimeHandler
 from ballpark.runtime_store import PublicationCatalog
 
@@ -107,6 +108,7 @@ class _Server:
                     "web_dir": root / "web",
                     "publication_dir": root / "publication",
                     "state_dir": root / "state",
+                    "cache_dir": root / "cache",
                 },
             ),
         )
@@ -124,6 +126,123 @@ class _Server:
     def get(self, path: str) -> tuple[int, bytes]:
         with urlopen(f"http://127.0.0.1:{self.server.server_port}{path}") as response:
             return response.status, response.read()
+
+
+def test_runtime_source_health_exposes_clocks_without_private_raw_receipt(tmp_path: Path) -> None:
+    source = tmp_path / "cache" / "sources"
+    source.mkdir(parents=True)
+    receipt = {
+        "schema_version": 1,
+        "date": "2026-09-08",
+        "latest": {
+            "attempted_at": "2026-09-08T18:01:00Z",
+            "status": "transport_error",
+            "raw_response_b64": "private raw bytes",
+            "raw_sha256": "a" * 64,
+        },
+        "acquisition": {
+            "attempted_at": "2026-09-08T18:01:00Z",
+            "status": "transport_error",
+        },
+        "last_good": {
+            "captured_at": "2026-09-08T17:56:00Z",
+            "raw_response_b64": "older private raw bytes",
+            "raw_sha256": "b" * 64,
+        },
+    }
+    receipt_bytes = canonical_json_bytes(receipt)
+    source.joinpath("sportsbook.json").write_text(
+        json.dumps(
+            {
+                "observed_at": "2026-09-08T18:01:00Z",
+                "sha256": hashlib.sha256(receipt_bytes).hexdigest(),
+                "value": receipt,
+            }
+        ),
+        encoding="utf-8",
+    )
+    state = tmp_path / "state"
+    state.mkdir()
+    state.joinpath("operations.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "maintenance": {
+                    "observed_at": "2026-09-08T18:01:00Z",
+                    "state": "failed",
+                    "error": "private catalog detail",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with _Server(tmp_path) as server:
+        status, body = server.get("/source-health")
+
+    assert status == 200
+    value = json.loads(body)
+    assert value == {
+        "state": "available",
+        "date": "2026-09-08",
+        "sportsbook": {
+            "latest_attempted_at": "2026-09-08T18:01:00Z",
+            "latest_status": "transport_error",
+            "last_good_captured_at": "2026-09-08T17:56:00Z",
+        },
+        "maintenance": {
+            "observed_at": "2026-09-08T18:01:00Z",
+            "state": "failed",
+        },
+    }
+    assert "raw" not in body.decode("utf-8")
+    assert "private catalog detail" not in body.decode("utf-8")
+
+
+def test_runtime_source_health_fails_closed_for_a_corrupt_durable_snapshot(tmp_path: Path) -> None:
+    source = tmp_path / "cache" / "sources"
+    source.mkdir(parents=True)
+    source.joinpath("sportsbook.json").write_text(
+        json.dumps(
+            {
+                "value": {"date": "2026-09-08"},
+                "sha256": "0" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with _Server(tmp_path) as server:
+        try:
+            server.get("/source-health")
+        except Exception as exc:
+            assert getattr(exc, "code", None) == 503
+            assert json.loads(exc.read()) == {"state": "not_available"}
+        else:
+            raise AssertionError("corrupt source snapshot was reported as healthy")
+
+
+def test_server_only_http_reads_do_not_mutate_runtime_state_or_publication(tmp_path: Path) -> None:
+    payload = _payload(date(2026, 9, 8))
+    _install(tmp_path / "publication", [payload])
+    RuntimeLedger(tmp_path / "state").update(
+        lambda state: state.update({"heartbeat_at": datetime.now(UTC).isoformat()})
+    )
+    before = {
+        path.relative_to(tmp_path).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+
+    with _Server(tmp_path) as server:
+        assert server.get("/healthz")[0] == 200
+        assert server.get("/data/data.json")[0] == 200
+
+    after = {
+        path.relative_to(tmp_path).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+    assert after == before
 
 
 def test_runtime_http_fails_closed_for_hash_valid_schema_invalid_current_and_history(
