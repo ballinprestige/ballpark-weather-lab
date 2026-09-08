@@ -13,14 +13,12 @@ from ballpark.runtime_app import (
     _DEFAULT_MAX_OBJECT_BYTES,
     _environment_limit,
     _is_digest,
-    _is_token,
-    _load_json,
     _load_object_json,
     _read_object,
-    _safe_child,
     _validated_index,
     runtime_readiness,
 )
+from ballpark.runtime_store import PublicationCatalog
 
 
 class RuntimeHandler(SimpleHTTPRequestHandler):
@@ -62,21 +60,9 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
         ):
             try:
                 maximum = _environment_limit("BALLPARK_MAX_OBJECT_BYTES", _DEFAULT_MAX_OBJECT_BYTES)
-                pointer = _load_json(
-                    self.publication_dir / "pointer.json", maximum, "accepted pointer is malformed"
-                )
-                if not isinstance(pointer, dict) or not isinstance(pointer.get("current"), dict):
-                    raise RuntimeError("accepted pointer is malformed")
-                token = pointer["current"].get("token")
-                if not _is_token(token):
-                    raise RuntimeError("invalid release token")
-                manifest = _load_json(
-                    _safe_child(self.publication_dir / "releases", token) / "manifest.json",
-                    maximum,
-                    "accepted manifest is malformed",
-                )
-                if not isinstance(manifest, dict) or manifest.get("token") != token:
-                    raise RuntimeError("accepted manifest is malformed")
+                manifest = PublicationCatalog(self.publication_dir).current_manifest()
+                if not isinstance(manifest, dict):
+                    raise RuntimeError("no accepted publication")
                 field = {
                     "/data/data.json": "data_sha256",
                     "/data/release.json": "release_sha256",

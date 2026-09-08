@@ -27,6 +27,7 @@ from ballpark.paths import ProjectPaths
 from ballpark.pipeline import DailyPipeline, load_fixture
 from ballpark.publication import atomic_write, canonical_json_bytes
 from ballpark.runtime import JobContext, JobSpec, RuntimeBusyError, RuntimeWorker, probe_runtime
+from ballpark.runtime_store import PublicationCatalog
 from ballpark.schedule import fetch_schedule
 from ballpark.venues import VENUES
 from ballpark.weather import build_model_source_receipts, fetch_game_weather
@@ -235,157 +236,6 @@ def _validated_accepted_manifest(
     return rows
 
 
-def _has_acceptance_marker(release: Path, token: str, maximum: int) -> bool:
-    try:
-        marker = _load_json(release / "accepted.json", maximum, "acceptance marker is malformed")
-    except RuntimeError:
-        return False
-    return (
-        isinstance(marker, dict)
-        and marker.get("schema_version") == 1
-        and marker.get("token") == token
-        and isinstance(marker.get("accepted_at"), str)
-    )
-
-
-def _pointer_ancestry_tokens(publication: Path, maximum: int) -> set[str] | None:
-    pointer_path = publication / "pointer.json"
-    if not pointer_path.is_file():
-        return set()
-    try:
-        pointer = _load_json(pointer_path, maximum, "accepted pointer is malformed")
-    except RuntimeError:
-        return None
-    if not isinstance(pointer, dict):
-        return None
-    node = pointer.get("current")
-    tokens: set[str] = set()
-    # Pointer ancestry is a bounded recovery hint for roots that became visible
-    # before their acceptance marker could be written.
-    for _ in range(256):
-        if node is None:
-            return tokens
-        if not isinstance(node, dict) or not _is_token(node.get("token")):
-            return None
-        token = node["token"]
-        if token in tokens:
-            return None
-        tokens.add(token)
-        node = node.get("previous")
-    return None
-
-
-def _is_explicit_unaccepted_candidate(release: Path, token: str, maximum: int) -> bool:
-    try:
-        manifest = _load_json(release / "manifest.json", maximum, "candidate manifest is malformed")
-    except RuntimeError:
-        return False
-    return (
-        isinstance(manifest, dict)
-        and manifest.get("token") == token
-        and manifest.get("acceptance_state") == "candidate"
-        and not (release / "accepted.json").exists()
-    )
-
-
-def _cleanup_unaccepted_candidates(publication: Path, *, current: str) -> None:
-    """Delete a bounded number of expired, explicitly unaccepted release roots."""
-    try:
-        grace = _environment_limit("BALLPARK_STORE_GRACE_SECONDS", 3600)
-        limit = _environment_limit("BALLPARK_CLEANUP_CANDIDATES_PER_PASS", 8)
-        cutoff = time.time() - grace
-        releases = publication / "releases"
-        active_tokens = _pointer_ancestry_tokens(publication, _DEFAULT_MAX_OBJECT_BYTES)
-        if not releases.is_dir() or active_tokens is None:
-            return
-        active_tokens.add(current)
-        candidates = sorted(
-            (
-                path
-                for path in releases.iterdir()
-                if path.is_dir()
-                and _is_token(path.name)
-                and path.name not in active_tokens
-                and _is_explicit_unaccepted_candidate(path, path.name, _DEFAULT_MAX_OBJECT_BYTES)
-            ),
-            key=lambda path: path.stat().st_mtime,
-        )
-        for release in candidates[:limit]:
-            if release.stat().st_mtime <= cutoff:
-                shutil.rmtree(_safe_child(releases, release.name))
-    except OSError:
-        # A maintenance failure cannot prevent an otherwise valid publication.
-        return
-
-
-def _cleanup_store(
-    publication: Path, *, current: str, previous: dict[str, Any] | None, maximum: int
-) -> None:
-    """Reclaim only owned unaccepted/orphan storage after a grace period."""
-    del previous
-    try:
-        active_tokens = _pointer_ancestry_tokens(publication, maximum)
-        if active_tokens is None:
-            return
-        active_tokens.add(current)
-        grace = _environment_limit("BALLPARK_STORE_GRACE_SECONDS", 3600)
-        cutoff = time.time() - grace
-        releases = publication / "releases"
-        objects = publication / "objects"
-        referenced: set[str] = set()
-        # Every accepted manifest is immutable history. Validate every one before
-        # deleting any object so corruption cannot cause reachability data loss.
-        for release in releases.iterdir() if releases.is_dir() else ():
-            if not (release.is_dir() and _is_token(release.name)):
-                continue
-            release_root = _safe_child(releases, release.name)
-            manifest = _load_json(
-                release_root / "manifest.json",
-                maximum,
-                "accepted manifest is malformed",
-            )
-            if not isinstance(manifest, dict):
-                raise RuntimeError("accepted manifest is malformed")
-            if manifest.get("acceptance_state") == "candidate":
-                marker_path = release_root / "accepted.json"
-                if not marker_path.exists() and release.name not in active_tokens:
-                    continue
-                if marker_path.exists() and not _has_acceptance_marker(
-                    release_root, release.name, maximum
-                ):
-                    raise RuntimeError("acceptance marker is malformed")
-            rows = _validated_accepted_manifest(objects, manifest, maximum)
-            assert isinstance(manifest, dict)
-            referenced.update(
-                manifest[field]
-                for field in ("data_sha256", "release_sha256", "archive_index_sha256")
-            )
-            referenced.update(manifest["input_receipts"].values())
-            referenced.update(row["object_sha256"] for row in rows)
-        staged_root = publication / ".staged"
-        for staged in staged_root.iterdir() if staged_root.is_dir() else ():
-            if (
-                staged.is_dir()
-                and _is_token(staged.name)
-                and staged.name != current
-                and staged.stat().st_mtime <= cutoff
-            ):
-                shutil.rmtree(staged)
-        for object_path in objects.iterdir() if objects.is_dir() else ():
-            digest = object_path.name.removesuffix(".json.gz")
-            if (
-                object_path.is_file()
-                and object_path.name == f"{digest}.json.gz"
-                and _is_digest(digest)
-                and digest not in referenced
-                and object_path.stat().st_mtime <= cutoff
-            ):
-                object_path.unlink()
-    except (OSError, RuntimeError):
-        # Cleanup is never allowed to invalidate an already-promoted pointer.
-        return
-
-
 def _stamp() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -447,159 +297,163 @@ def _load_snapshot(cache_dir: Path, name: str, target_date: date) -> Any:
     return value
 
 
-def _accept_stage(context: JobContext) -> None:
+def _validate_payload(payload: object) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise RuntimeError("staged data is malformed")
+    if payload.get("schema_version") != 1 or payload.get("status") not in {
+        "ready",
+        "degraded",
+        "no_slate",
+    }:
+        raise RuntimeError("staged payload schema is invalid")
+    if not isinstance(payload.get("games"), list):
+        raise RuntimeError("staged payload schema is invalid")
+    _canonical_date(payload.get("date"))
+    generated = payload.get("generated_at")
+    try:
+        parsed = datetime.fromisoformat(str(generated).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise RuntimeError("staged payload generated_at is invalid") from exc
+    if parsed.tzinfo is None:
+        raise RuntimeError("staged payload generated_at is invalid")
+    return payload
+
+
+def _accept_stage_impl(context: JobContext) -> None:
     if not _is_token(context.token):
         raise RuntimeError("publication token is invalid")
     maximum = _environment_limit("BALLPARK_MAX_OBJECT_BYTES", _DEFAULT_MAX_OBJECT_BYTES)
     minimum_free = _environment_limit("BALLPARK_MIN_FREE_BYTES", _DEFAULT_MIN_FREE_BYTES)
     publication = context.publication_dir
-    staging_root, releases, objects = (
-        publication / ".staged",
-        publication / "releases",
-        publication / "objects",
-    )
-    _cleanup_unaccepted_candidates(publication, current=context.token)
-    staged = _safe_child(staging_root, context.token)
+    catalog = PublicationCatalog(publication)
+    staged = _safe_child(publication / ".staged", context.token)
     if not staged.is_dir():
         raise RuntimeError("staged publication is incomplete")
-    data_path = staged / "data" / "data.json"
-    release_path = staged / "data" / "release.json"
-    index_path = staged / "archive" / "index.json"
-    if not data_path.is_file() or not release_path.is_file() or not index_path.is_file():
+    catalog.register_candidate(context.token, staged, _stamp())
+    data_path, release_path, index_path = (
+        staged / "data" / "data.json",
+        staged / "data" / "release.json",
+        staged / "archive" / "index.json",
+    )
+    if not all(path.is_file() for path in (data_path, release_path, index_path)):
         raise RuntimeError("staged publication is incomplete")
-    free_before = shutil.disk_usage(publication).free
-    if free_before < minimum_free:
-        raise RuntimeError(
-            f"publication disk reserve is below minimum: {free_before} < {minimum_free} bytes"
-        )
+    if shutil.disk_usage(publication).free < minimum_free:
+        raise RuntimeError("publication disk reserve is below minimum")
     data_raw = _read_bounded(data_path, maximum)
+    data = _validate_payload(_load_json(data_path, maximum, "staged data is malformed"))
+    digest = hashlib.sha256(data_raw).hexdigest()
     release_raw = _read_bounded(release_path, maximum)
-    data = _load_json(data_path, maximum, "staged data is malformed")
-    release = _load_json(release_path, maximum, "staged release receipt is malformed")
-    if not isinstance(data, dict):
-        raise RuntimeError("staged data is malformed")
-    payload_date = _canonical_date(data.get("date"))
-    data_digest = hashlib.sha256(data_raw).hexdigest()
-    _validated_release(release, payload=data, payload_digest=data_digest)
+    _validated_release(
+        _load_json(release_path, maximum, "staged release receipt is malformed"),
+        payload=data,
+        payload_digest=digest,
+    )
     candidate_index = _load_json(index_path, maximum, "staged archive index is malformed")
     if (
         not isinstance(candidate_index, dict)
         or candidate_index.get("schema_version") != 1
-        or candidate_index.get("updated_at") != data.get("generated_at")
+        or candidate_index.get("updated_at") != data["generated_at"]
     ):
         raise RuntimeError("staged archive index does not bind data")
-    candidate_rows = _validated_index(candidate_index, require_object=False)
-    candidate_by_date = {row["date"]: row for row in candidate_rows}
-    if payload_date not in candidate_by_date:
-        raise RuntimeError("staged archive index omits its data date")
-    if candidate_by_date[payload_date].get("payload_sha256") != data_digest:
+    rows = _validated_index(candidate_index, require_object=False)
+    if not any(row["date"] == data["date"] and row["payload_sha256"] == digest for row in rows):
         raise RuntimeError("staged archive index does not bind data")
-
-    releases.mkdir(parents=True, exist_ok=True)
-    accepted = _safe_child(releases, context.token)
-    if accepted.exists():
-        raise RuntimeError("publication token was already accepted")
+    created: set[str] = set()
+    objects = publication / "objects"
 
     def store(raw: bytes) -> str:
         if len(raw) > maximum:
             raise RuntimeError("runtime storage object exceeds its size limit")
-        digest = hashlib.sha256(raw).hexdigest()
-        target = _safe_child(objects, f"{digest}.json.gz")
+        object_digest = hashlib.sha256(raw).hexdigest()
+        target = _safe_child(objects, f"{object_digest}.json.gz")
         if target.exists():
-            if _read_object(objects, digest, maximum) != raw:
-                raise RuntimeError("immutable object hash collision or corruption")
-            return digest
+            if _read_object(objects, object_digest, maximum) != raw:
+                raise RuntimeError("immutable object corruption")
+            return object_digest
         objects.mkdir(parents=True, exist_ok=True)
         atomic_write(target, gzip.compress(raw, mtime=0))
-        # A write that cannot be read and rehashed is never admitted to a manifest.
-        if _read_object(objects, digest, maximum) != raw:
+        if _read_object(objects, object_digest, maximum) != raw:
             raise RuntimeError("immutable object write verification failed")
-        return digest
+        catalog.register_object(object_digest, context.token, target.name, _stamp())
+        created.add(object_digest)
+        return object_digest
 
-    rows: dict[str, dict[str, Any]] = {}
-    for row in candidate_rows:
-        archive_raw = _read_bounded(_safe_child(staged / "archive", f"{row['date']}.json"), maximum)
-        if hashlib.sha256(archive_raw).hexdigest() != row["payload_sha256"]:
+    indexed: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        raw = _read_bounded(_safe_child(staged / "archive", f"{row['date']}.json"), maximum)
+        if hashlib.sha256(raw).hexdigest() != row["payload_sha256"]:
             raise RuntimeError("staged archive payload digest is invalid")
-        _validate_archive_metadata(row, archive_raw)
-        rows[row["date"]] = {**row, "object_sha256": store(archive_raw)}
-
-    previous: dict[str, Any] | None = None
-    pointer_path = publication / "pointer.json"
-    if pointer_path.exists():
-        pointer = _load_json(pointer_path, maximum, "accepted pointer is malformed")
-        if not isinstance(pointer, dict) or not isinstance(pointer.get("current"), dict):
-            raise RuntimeError("accepted pointer is malformed")
-        prior_token = pointer["current"].get("token")
-        if not _is_token(prior_token):
-            raise RuntimeError("accepted pointer is malformed")
-        prior_history = pointer.get("previous")
-        if prior_history is not None and not isinstance(prior_history, dict):
-            raise RuntimeError("accepted pointer is malformed")
-        previous = {"token": prior_token, "previous": prior_history}
-        prior_manifest = _load_json(
-            _safe_child(releases, prior_token) / "manifest.json",
-            maximum,
-            "accepted manifest is malformed",
-        )
-        if not isinstance(prior_manifest, dict) or prior_manifest.get("token") != prior_token:
-            raise RuntimeError("accepted manifest is malformed")
-        for row in _validated_accepted_manifest(objects, prior_manifest, maximum):
-            rows.setdefault(row["date"], row)
-
-    merged_index = {
+        _validate_archive_metadata(row, raw)
+        _validate_payload(json.loads(raw))
+        indexed[row["date"]] = {**row, "object_sha256": store(raw)}
+    prior = catalog.current_manifest()
+    if prior is not None:
+        for row in _validated_accepted_manifest(objects, prior, maximum):
+            indexed.setdefault(row["date"], row)
+    merged = {
         "schema_version": 2,
-        "dates": sorted(rows.values(), key=lambda row: row["date"], reverse=True),
+        "dates": sorted(indexed.values(), key=lambda row: row["date"], reverse=True),
     }
-    input_receipts = {
+    inputs = {
         path.stem: store(_read_bounded(path, maximum))
         for path in sorted((context.cache_dir / "sources").glob("*.json"))
         if path.is_file() and Path(path.name).stem == path.stem
     }
     manifest = {
-        "schema_version": 2,
+        "schema_version": 3,
         "token": context.token,
         "data_sha256": store(data_raw),
         "release_sha256": store(release_raw),
-        "archive_index_sha256": store(canonical_json_bytes(merged_index)),
-        "input_receipts": input_receipts,
+        "archive_index_sha256": store(canonical_json_bytes(merged)),
+        "input_receipts": inputs,
         "accepted_at": _stamp(),
-        "acceptance_state": "candidate",
     }
-    atomic_write(staged / "manifest.json", canonical_json_bytes(manifest))
-    free_after_bytes = shutil.disk_usage(publication).free
-    for path in (staged / "data", staged / "archive"):
-        shutil.rmtree(path)
-    os.replace(staged, accepted)
-    # The root has moved, but remains explicitly a candidate until this second
-    # reserve check passes and its acceptance marker is written.
+    existing = catalog.accepted(context.token)
+    if existing is not None:
+        if canonical_json_bytes(existing) != canonical_json_bytes(manifest):
+            raise RuntimeError("publication token conflicts with accepted content")
+        return
+    _require_time(context)
     if shutil.disk_usage(publication).free < minimum_free:
-        raise RuntimeError("publication disk reserve fell below minimum before pointer promotion")
-    receipt = {
-        "token": context.token,
-        "free_before_bytes": free_before,
-        "free_after_bytes": free_after_bytes,
-        "input_receipt_count": len(input_receipts),
+        raise RuntimeError("publication disk reserve fell below minimum")
+    digests = {
+        manifest["data_sha256"],
+        manifest["release_sha256"],
+        manifest["archive_index_sha256"],
+        *inputs.values(),
+        *(row["object_sha256"] for row in indexed.values()),
     }
-    # The receipt is durable before pointer promotion. Any failure leaves the old
-    # pointer valid and an unreachable release that later bounded cleanup can reclaim.
-    atomic_write(publication / "receipts" / f"{context.token}.json", canonical_json_bytes(receipt))
-    atomic_write(
-        pointer_path,
-        canonical_json_bytes(
-            {"schema_version": 2, "current": {"token": context.token}, "previous": previous}
-        ),
-    )
-    # The pointer is the acceptance authority. If marker creation is interrupted,
-    # the next run retains this root through pointer ancestry and can continue.
-    atomic_write(
-        accepted / "accepted.json",
-        canonical_json_bytes(
-            {"schema_version": 1, "token": context.token, "accepted_at": _stamp()}
-        ),
-    )
-    # Incremental orphan cleanup is a maintenance concern. It is deliberately not
-    # run in the SQLite-backed acceptor transaction or on the publication critical path.
+    catalog.commit(context.token, manifest, digests, _stamp())
+    # Bounded post-commit maintenance touches only catalog-confirmed pending objects.
+    for object_digest, _token, relative in catalog.maintenance(
+        _environment_limit("BALLPARK_CLEANUP_BATCH", 8)
+    ):
+        target = _safe_child(objects, relative)
+        if target.is_file():
+            target.unlink()
+        catalog.remove_pending_object(object_digest)
+    for pending_token, stage_path in catalog.pending_candidates(
+        _environment_limit("BALLPARK_CLEANUP_BATCH", 8)
+    ):
+        candidate = Path(stage_path)
+        staging_root = (publication / ".staged").resolve()
+        if (
+            not candidate.is_symlink()
+            and candidate.parent.resolve() == staging_root
+            and candidate.is_dir()
+        ):
+            shutil.rmtree(candidate)
+            catalog.remove_pending_candidate(pending_token)
+
+
+def _accept_stage(context: JobContext) -> None:
+    try:
+        _accept_stage_impl(context)
+    except Exception as exc:
+        PublicationCatalog(context.publication_dir).record_error(
+            context.token, f"{type(exc).__name__}: {exc}", _stamp()
+        )
+        raise
 
 
 def run_fixture_worker(
