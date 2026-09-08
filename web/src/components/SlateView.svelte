@@ -89,9 +89,12 @@
   $: verified = payload.games.filter((game) => !isGameHeld(game)).length;
   $: currentSportsbook = payload.games.filter((game) => assessOddsFreshness(game.odds, now).state === 'current').length;
   $: knownSportsbook = payload.games.filter((game) => assessOddsFreshness(game.odds, now).state !== 'unavailable').length;
+  $: observedSportsbook = payload.games.filter((game) => assessOddsFreshness(game.odds, now).state === 'observed').length;
   $: marketSummary = knownSportsbook === 0
     ? `Sportsbook totals unavailable ${payload.games.length}/${payload.games.length}`
-    : `Current sportsbook totals ${currentSportsbook}/${payload.games.length}`;
+    : observedSportsbook > 0
+      ? `${observedSportsbook} DraftKings total${observedSportsbook === 1 ? '' : 's'} via ESPN · source age unknown`
+      : `Current sportsbook totals ${currentSportsbook}/${payload.games.length}`;
   $: observedExchange = payload.games.filter((game) => game.exchange_market?.state === 'observed_unknown_age').length;
   $: upcomingExchange = payload.games.filter((game) => isUpcomingExchangeMarket(game.exchange_market, game.game_time, now)).length;
   $: exchangeCapture = payload.games.find((game) => game.exchange_market?.state === 'observed_unknown_age')?.exchange_market?.observed_at ?? null;
@@ -150,7 +153,7 @@
             {@const exchangePhase = effectiveExchangePhase(exchange, game.game_time, now)}
             <tr data-tone={isGameHeld(game) ? 'hold' : 'ready'}>
               <td><a class="board-matchup" href={`#game/${key}`} data-game-key={game.game_pk} aria-label={`Open ${teamLabel(game.away_team)} at ${teamLabel(game.home_team)} details`} on:click={(event) => openBoardDetails(event, key)}><strong>{game.away_team} <i>at</i> {game.home_team}</strong><small>{formatTime(game.game_time)} · {game.venue}</small></a></td>
-              <td>{#if exchange}<strong>{exchange.line}</strong> <span>Over {formatContractCents(exchange.over_ask_cents)} · Under {formatContractCents(exchange.under_ask_cents)}</span><small class="exchange-ask">Kalshi contract ask · {exchangePhase?.replaceAll('_', ' ')} · source age unknown · observed {formatTimestamp(exchange.observed_at)}</small>{#if exchange.failure_reason}<small class="market-failure">Update failed: {exchange.failure_reason}</small>{/if}{:else if market.state === 'unavailable'}<strong>Sportsbook unavailable</strong>{:else}<strong>{game.odds.line}</strong> <span>O {american(game.odds.over_price)} · U {american(game.odds.under_price)}</span><br /><small>{game.odds.sportsbook_name} · {market.state === 'observed' ? 'observed, age unverified' : market.state}</small>{/if}</td>
+              <td>{#if exchange}<strong>{exchange.line}</strong> <span>Over {formatContractCents(exchange.over_ask_cents)} · Under {formatContractCents(exchange.under_ask_cents)}</span><small class="exchange-ask">Kalshi contract ask · {exchangePhase?.replaceAll('_', ' ')} · source age unknown · observed {formatTimestamp(exchange.observed_at)}</small>{#if exchange.failure_reason}<small class="market-failure">Update failed: {exchange.failure_reason}</small>{/if}{:else if market.state === 'unavailable'}<strong>Sportsbook unavailable</strong>{:else}<strong>{game.odds.line}</strong> <span>O {american(game.odds.over_price)} · U {american(game.odds.under_price)}</span><br /><small>{game.odds.sportsbook_name}{market.state === 'observed' ? ` via ${game.odds.provider} · captured ${formatTimestamp(game.odds.observed_at)} · source age unknown` : ` · ${market.state}`}</small>{/if}</td>
               <td>{windContext(game)}</td>
               <td>{movement == null ? (isWeatherHeld(game) ? 'Weather held' : 'Model adjustment held') : `${formatDelta(movement, 0)}% runs`}<br /><small>{isGameHeld(game) ? gameHoldReason(game) : `${Math.round(game.weather.temperature_f)}°F · ${Math.round(game.weather.humidity_pct)}%`}</small></td>
             </tr>

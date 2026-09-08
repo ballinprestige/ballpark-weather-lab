@@ -122,6 +122,7 @@
         "state": { "enum": ["available", "partial", "unavailable", "not_applicable"] },
         "source": { "type": "string", "minLength": 1 },
         "current_games": { "type": "integer", "minimum": 0, "maximum": 30 },
+        "observed_unknown_age_games": { "type": "integer", "minimum": 0, "maximum": 30 },
         "stale_games": { "type": "integer", "minimum": 0, "maximum": 30 },
         "unavailable_games": { "type": "integer", "minimum": 0, "maximum": 30 },
         "optional": { "const": false }
@@ -292,7 +293,7 @@
       "properties": {
         "game_pk": { "type": "integer", "minimum": 1 },
         "slate_date": { "type": "string", "format": "date" },
-        "state": { "enum": ["current", "stale", "unavailable"] },
+        "state": { "enum": ["current", "stale", "observed_unknown_age", "unavailable"] },
         "reason": { "type": ["string", "null"] },
         "provider_event_id": { "type": ["string", "null"] },
         "sport": { "const": "MLB" }, "market_type": { "const": "total" }, "period": { "const": "full_game" },
@@ -309,6 +310,9 @@
       "allOf": [{
         "if": { "properties": { "state": { "enum": ["current", "stale"] } } },
         "then": { "properties": { "line": { "type": "number" }, "over_price": { "type": "integer" }, "under_price": { "type": "integer" }, "source_updated_at": { "type": "string" }, "observed_at": { "type": "string" }, "raw_sha256": { "type": "string" }, "snapshot_id": { "type": "string" }, "sportsbook_id": { "type": "string" }, "sportsbook_name": { "type": "string" }, "provider_event_id": { "type": "string" } } }
+      }, {
+        "if": { "properties": { "state": { "const": "observed_unknown_age" } } },
+        "then": { "properties": { "line": { "type": "number" }, "over_price": { "type": "integer" }, "under_price": { "type": "integer" }, "source_updated_at": { "const": null }, "observed_at": { "type": "string" }, "raw_sha256": { "type": "string" }, "snapshot_id": { "type": "string" }, "sportsbook_id": { "type": "string" }, "sportsbook_name": { "type": "string" }, "provider_event_id": { "type": "string" } } }
       }]
     },
     "exchangeMarket": {

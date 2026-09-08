@@ -239,7 +239,7 @@ function validateOdds(value: unknown, path: string, gamePk: number, gameDate: st
     source_updated_at: null, observed_at: null, raw_sha256: null, snapshot_id: null, source_schema_version: 'legacy-without-markets'
   };
   const row = objectAt(value, path);
-  const state = enumAt(row.state, `${path}.state`, ['current', 'stale', 'unavailable']);
+  const state = enumAt(row.state, `${path}.state`, ['current', 'stale', 'observed_unknown_age', 'unavailable']);
   const market: GameOdds = {
     game_pk: integerAt(row.game_pk, `${path}.game_pk`, 1), slate_date: isoDateAt(row.slate_date, `${path}.slate_date`), state,
     reason: nullableStringAt(row.reason, `${path}.reason`), provider_event_id: nullableStringAt(row.provider_event_id, `${path}.provider_event_id`),
@@ -265,8 +265,11 @@ function validateOdds(value: unknown, path: string, gamePk: number, gameDate: st
       fail(path, 'quoted market provenance must use lowercase SHA-256 digests');
     }
     const observedMs = Date.parse(market.observed_at!);
+    if (state === 'observed_unknown_age' && market.source_updated_at !== null) {
+      fail(`${path}.source_updated_at`, 'must be null when the sportsbook quote update time is unknown');
+    }
     if (market.source_updated_at === null) {
-      if (state !== 'unavailable') fail(path, 'current or stale quote must include a trustworthy source update time');
+      if (state !== 'unavailable' && state !== 'observed_unknown_age') fail(path, 'current or stale quote must include a trustworthy source update time');
       return market;
     }
     const sourceMs = Date.parse(market.source_updated_at);
@@ -410,15 +413,16 @@ function validateOddsHealth(value: unknown, games: BallparkGame[], requiresOddsL
   if (!source || odds.optional !== false) fail('health.odds', 'must identify a non-optional canonical odds lane');
   const counts = {
     current: integerAt(odds.current_games, 'health.odds.current_games', 0),
+    observedUnknownAge: integerAt(odds.observed_unknown_age_games ?? 0, 'health.odds.observed_unknown_age_games', 0),
     stale: integerAt(odds.stale_games, 'health.odds.stale_games', 0),
     unavailable: integerAt(odds.unavailable_games, 'health.odds.unavailable_games', 0)
   };
-  const actual = { current: 0, stale: 0, unavailable: 0 };
+  const actual = { current: 0, observed_unknown_age: 0, stale: 0, unavailable: 0 };
   for (const game of games) actual[game.odds.state] += 1;
-  if (counts.current !== actual.current || counts.stale !== actual.stale || counts.unavailable !== actual.unavailable || counts.current + counts.stale + counts.unavailable !== games.length) {
+  if (counts.current !== actual.current || counts.observedUnknownAge !== actual.observed_unknown_age || counts.stale !== actual.stale || counts.unavailable !== actual.unavailable || counts.current + counts.observedUnknownAge + counts.stale + counts.unavailable !== games.length) {
     fail('health.odds', 'counts must match every game market state exactly');
   }
-  const expectedState = actual.current === games.length ? 'available' : actual.current > 0 ? 'partial' : 'unavailable';
+  const expectedState = actual.current === games.length ? 'available' : actual.current > 0 || actual.observed_unknown_age > 0 ? 'partial' : 'unavailable';
   if (state !== expectedState) fail('health.odds.state', 'must match the summarized game market states');
   health.odds = odds;
   return health;
@@ -498,6 +502,13 @@ export function validatePayload(value: unknown): BallparkPayload {
     if (game.weather.game_pk !== game.game_pk) fail(`games[${index}].weather.game_pk`, 'must match the game ID');
     if (game.odds.state === 'current' && (Date.parse(game.odds.source_updated_at!) > Date.parse(generatedAt) || Date.parse(game.odds.observed_at!) > Date.parse(generatedAt))) {
       fail(`games[${index}].odds`, 'current quote cannot be sourced or observed after publication generation');
+    }
+    if (
+      game.odds.state === 'observed_unknown_age'
+      && game.odds.observed_at !== null
+      && Date.parse(game.odds.observed_at) > Date.parse(generatedAt) + 5 * 60_000
+    ) {
+      fail(`games[${index}].odds`, 'observed market evidence cannot be retrieved after publication generation');
     }
     if (
       game.exchange_market?.state === 'observed_unknown_age'

@@ -115,8 +115,7 @@
         <div><dt>Sportsbook</dt><dd>{game.odds.sportsbook_name}</dd></div>
       </dl>
       {#if marketFreshness.state === 'stale'}<p class="market-warning">Stale quote: {marketFreshness.reason}. It is not current.</p>{/if}
-      {#if marketFreshness.state === 'observed'}<p class="market-warning">Observed quote: {marketFreshness.reason} It does not satisfy the current sportsbook freshness requirement.</p>{/if}
-      <p class="source-line"><span>{game.odds.provider}</span><span>Source updated {formatTimestamp(game.odds.source_updated_at)}</span><span>Retrieved {formatTimestamp(game.odds.observed_at)}</span></p>
+      <p class="source-line">{#if marketFreshness.state === 'observed'}<span>{game.odds.sportsbook_name} via {game.odds.provider}</span><span>Captured {formatTimestamp(game.odds.observed_at)}</span><span>Quote update age unknown</span>{:else}<span>{game.odds.provider}</span><span>Source updated {formatTimestamp(game.odds.source_updated_at)}</span><span>Retrieved {formatTimestamp(game.odds.observed_at)}</span>{/if}</p>
     {/if}
   </section>
   {/if}

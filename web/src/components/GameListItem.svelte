@@ -44,7 +44,7 @@
     <span class="compact-market">
       {#if exchange}<strong>{exchange.line}</strong><small>Over {formatContractCents(exchange.over_ask_cents)} · Under {formatContractCents(exchange.under_ask_cents)}</small><small class="market-secondary">Kalshi contract ask · {exchangePhase?.replaceAll('_', ' ')} · source age unknown · captured {formatTime(exchange.observed_at)}</small>{#if exchange.failure_reason}<small class="market-failure">Update failed: {exchange.failure_reason}</small>{/if}
       {:else if market.state === 'unavailable'}<strong>Sportsbook unavailable</strong>
-      {:else}<strong>{game.odds.line}</strong><small>O {american(game.odds.over_price)} · U {american(game.odds.under_price)} · {game.odds.sportsbook_name}{market.state === 'observed' ? ' · observed, age unverified' : ''}</small>{/if}
+      {:else}<strong>{game.odds.line}</strong><small>O {american(game.odds.over_price)} · U {american(game.odds.under_price)} · {game.odds.sportsbook_name}{market.state === 'observed' ? ` via ${game.odds.provider} · captured ${formatTime(game.odds.observed_at)} · source age unknown` : ''}</small>{/if}
     </span>
     <span class="compact-weather"><strong>{wind}</strong><small>{weather}</small></span>
   </a>

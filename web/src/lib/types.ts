@@ -22,7 +22,7 @@ export interface PublicationHealth {
 export interface GameOdds {
   game_pk: number;
   slate_date: string;
-  state: 'current' | 'stale' | 'unavailable';
+  state: 'current' | 'stale' | 'observed_unknown_age' | 'unavailable';
   reason: string | null;
   provider_event_id: string | null;
   sport: 'MLB';
