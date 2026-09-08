@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import gzip
+import hashlib
 import json
+from datetime import date
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -38,21 +41,46 @@ class RuntimeHandler(SimpleHTTPRequestHandler):
             return
         allowed = {"/data/data.json", "/data/release.json", "/archive/index.json"}
         archive_name = path.removeprefix("/archive/")
+        archive_date: str | None = None
+        if path.startswith("/archive/") and path not in allowed:
+            try:
+                archive_date = date.fromisoformat(archive_name.removesuffix(".json")).isoformat()
+            except ValueError:
+                archive_date = None
         if path in allowed or (
-            path.startswith("/archive/")
-            and archive_name.endswith(".json")
-            and len(archive_name) == 15
-            and archive_name[:10].count("-") == 2
+            path.startswith("/archive/") and archive_name == f"{archive_date}.json"
         ):
             try:
-                pointer = json.loads(
-                    (self.publication_dir / "current.json").read_text(encoding="utf-8")
+                pointer = json.loads((self.publication_dir / "pointer.json").read_text())
+                token = pointer["current"]["token"]
+                if not isinstance(token, str) or len(token) != 32 or not token.isalnum():
+                    raise ValueError("invalid release token")
+                manifest = json.loads(
+                    (self.publication_dir / "releases" / token / "manifest.json").read_text()
                 )
-                token = pointer["token"]
-                target = self.publication_dir / "releases" / token / path.lstrip("/")
-                if not target.is_file():
-                    raise FileNotFoundError
-                body = target.read_bytes()
+                field = {
+                    "/data/data.json": "data_sha256",
+                    "/data/release.json": "release_sha256",
+                    "/archive/index.json": "archive_index_sha256",
+                }.get(path)
+                index = json.loads(
+                    gzip.decompress(
+                        (
+                            self.publication_dir
+                            / "objects"
+                            / f"{manifest['archive_index_sha256']}.json.gz"
+                        ).read_bytes()
+                    )
+                )
+                if archive_date is not None:
+                    row = next(row for row in index["dates"] if row["date"] == archive_date)
+                    field_value = row["object_sha256"]
+                else:
+                    field_value = manifest[field]  # type: ignore[index]
+                target = self.publication_dir / "objects" / f"{field_value}.json.gz"
+                body = gzip.decompress(target.read_bytes())
+                if hashlib.sha256(body).hexdigest() != field_value:
+                    raise ValueError("object digest mismatch")
             except (OSError, KeyError, TypeError, json.JSONDecodeError):
                 self._json(404, {"state": "not_published"})
                 return

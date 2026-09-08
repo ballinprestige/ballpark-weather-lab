@@ -6,6 +6,7 @@ restart, no-slate, and calendar testing without waiting for a future slate.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import os
@@ -102,32 +103,66 @@ def _accept_stage(context: JobContext) -> None:
     accepted = releases / context.token
     if accepted.exists():
         raise RuntimeError("publication token was already accepted")
-    try:
-        prior = json.loads((context.publication_dir / "current.json").read_text(encoding="utf-8"))
-        prior_archive = releases / str(prior["token"]) / "archive"
-        if prior_archive.is_dir():
-            for source in prior_archive.iterdir():
-                destination = staged / "archive" / source.name
-                if not destination.exists():
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(source, destination)
-            prior_index = json.loads((prior_archive / "index.json").read_text(encoding="utf-8"))
-            next_index_path = staged / "archive" / "index.json"
-            next_index = json.loads(next_index_path.read_text(encoding="utf-8"))
-            rows = {
-                row["date"]: row
-                for row in [*prior_index.get("dates", []), *next_index.get("dates", [])]
-                if isinstance(row, dict) and isinstance(row.get("date"), str)
-            }
-            next_index["dates"] = sorted(rows.values(), key=lambda row: row["date"], reverse=True)
-            atomic_write(next_index_path, canonical_json_bytes(next_index))
-    except (OSError, KeyError, TypeError, json.JSONDecodeError):
-        pass
+    objects = context.publication_dir / "objects"
+
+    def store(raw: bytes) -> str:
+        digest = hashlib.sha256(raw).hexdigest()
+        target = objects / f"{digest}.json.gz"
+        if target.exists():
+            if gzip.decompress(target.read_bytes()) != raw:
+                raise RuntimeError("immutable object hash collision or corruption")
+            return digest
+        objects.mkdir(parents=True, exist_ok=True)
+        atomic_write(target, gzip.compress(raw, mtime=0))
+        return digest
+
+    data_raw = (staged / "data" / "data.json").read_bytes()
+    release_raw = (staged / "data" / "release.json").read_bytes()
+    index = json.loads((staged / "archive" / "index.json").read_text(encoding="utf-8"))
+    payload_date = str(json.loads(data_raw)["date"])
+    archive_raw = (staged / "archive" / f"{payload_date}.json").read_bytes()
+    archive_object = store(archive_raw)
+    rows = {
+        row["date"]: row
+        for row in index["dates"]
+        if isinstance(row, dict) and isinstance(row.get("date"), str)
+    }
+    rows[payload_date] = {**rows[payload_date], "object_sha256": archive_object}
+    previous: dict[str, Any] | None = None
+    pointer_path = context.publication_dir / "pointer.json"
+    if pointer_path.exists():
+        previous = json.loads(pointer_path.read_text(encoding="utf-8")).get("current")
+        if not isinstance(previous, dict):
+            raise RuntimeError("accepted pointer is malformed")
+        prior_manifest = json.loads((releases / previous["token"] / "manifest.json").read_text())
+        prior_index = json.loads(
+            gzip.decompress(
+                (objects / f"{prior_manifest['archive_index_sha256']}.json.gz").read_bytes()
+            )
+        )
+        for row in prior_index["dates"]:
+            if row["date"] not in rows:
+                rows[row["date"]] = row
+    merged_index = {
+        "schema_version": 2,
+        "dates": sorted(rows.values(), key=lambda row: row["date"], reverse=True),
+    }
+    manifest = {
+        "schema_version": 2,
+        "token": context.token,
+        "data_sha256": store(data_raw),
+        "release_sha256": store(release_raw),
+        "archive_index_sha256": store(canonical_json_bytes(merged_index)),
+        "accepted_at": _stamp(),
+    }
+    atomic_write(staged / "manifest.json", canonical_json_bytes(manifest))
+    for path in (staged / "data", staged / "archive"):
+        shutil.rmtree(path)
     os.replace(staged, accepted)
     atomic_write(
-        context.publication_dir / "current.json",
+        pointer_path,
         canonical_json_bytes(
-            {"schema_version": 1, "token": context.token, "accepted_at": _stamp()}
+            {"schema_version": 2, "current": {"token": context.token}, "previous": previous}
         ),
     )
 
