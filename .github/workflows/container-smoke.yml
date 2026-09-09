@@ -25,6 +25,26 @@ jobs:
           set -euo pipefail
           docker build --tag ballpark-runtime-smoke:ci .
           docker run --rm --entrypoint ballpark ballpark-runtime-smoke:ci verify-artifacts
+      - name: Prove pinned Skopeo uses only an explicit offline authfile
+        env:
+          SKOPEO_IMAGE: quay.io/skopeo/stable@sha256:db4108427c05acbadd1447316caa9b5f097a9a737d897d2297443baedff37ded
+        run: |
+          set -euo pipefail
+          authfile="${RUNNER_TEMP}/skopeo-ghcr-auth.json"
+          umask 077
+          printf '%s' '{"auths":{"ghcr.io":{"auth":"dGVzdC11c2VyOnRlc3Qtb25seQ=="}}}' > "$authfile"
+          trap 'rm -f "$authfile"' EXIT
+          docker pull "$SKOPEO_IMAGE"
+          observed_actor="$(docker run --rm --network none \
+            -v "$authfile:/tmp/ghcr-auth.json:ro" "$SKOPEO_IMAGE" \
+            login --authfile /tmp/ghcr-auth.json --get-login ghcr.io)"
+          [[ "$observed_actor" == "test-user" ]]
+          if docker run --rm --network none \
+            -v "$authfile:/root/.docker/config.json:ro" "$SKOPEO_IMAGE" \
+            login --get-login ghcr.io >/dev/null 2>&1; then
+            echo "pinned Skopeo unexpectedly used the legacy Docker config fallback" >&2
+            exit 1
+          fi
       - name: Prove fixture worker iteration, child failure, and graceful shutdown
         run: |
           set -euo pipefail
