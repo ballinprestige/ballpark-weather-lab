@@ -153,6 +153,15 @@ jobs:
             > publication-diagnostics/skopeo-runtime-identity.json
           printf '%s\n' "$skopeo_version" > skopeo-version.txt
 
+      - name: Verify the mounted GHCR credential identity before publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          ghcr_auth_actor="$(docker run --rm --network none \
+            -v "$HOME/.docker/config.json:/tmp/ghcr-auth.json:ro" "$SKOPEO_IMAGE" \
+            login --authfile /tmp/ghcr-auth.json --get-login ghcr.io)"
+          [[ "$ghcr_auth_actor" == "$GITHUB_ACTOR" ]]
+
       - name: Convert the verified Docker archive to a local OCI layout
         shell: bash
         run: |
@@ -172,20 +181,20 @@ jobs:
           set -euo pipefail
           mkdir -p publication-diagnostics
           printf '{"push_attempted":true,"image":"%s","digest":"%s"}\n' "$IMAGE" "$OCI_MANIFEST_DIGEST" > publication-diagnostics/push-attempt.json
-          docker run --rm -v "$PWD:/work" -v "$HOME/.docker:/root/.docker:ro" -w /work "$SKOPEO_IMAGE" \
-            copy --preserve-digests --format oci --digestfile /work/pushed-digest.txt \
+          docker run --rm -v "$PWD:/work" -v "$HOME/.docker/config.json:/tmp/ghcr-auth.json:ro" -w /work "$SKOPEO_IMAGE" \
+            copy --authfile /tmp/ghcr-auth.json --preserve-digests --format oci --digestfile /work/pushed-digest.txt \
             oci:/work/reviewed-oci:reviewed "docker://${IMAGE}@${OCI_MANIFEST_DIGEST}"
           [[ "$(cat pushed-digest.txt)" == "$OCI_MANIFEST_DIGEST" ]]
-          docker run --rm -v "$PWD:/work" -v "$HOME/.docker:/root/.docker:ro" -w /work "$SKOPEO_IMAGE" \
-            inspect --raw "docker://${IMAGE}@${OCI_MANIFEST_DIGEST}" > remote-manifest.json
+          docker run --rm -v "$PWD:/work" -v "$HOME/.docker/config.json:/tmp/ghcr-auth.json:ro" -w /work "$SKOPEO_IMAGE" \
+            inspect --authfile /tmp/ghcr-auth.json --raw "docker://${IMAGE}@${OCI_MANIFEST_DIGEST}" > remote-manifest.json
           python scripts/verify_digest_image.py --docker-archive local-image.tar \
             --oci-layout reviewed-oci --oci-ref-name reviewed --expected-reference "${IMAGE}:${REVISION}" --remote-manifest remote-manifest.json \
             --receipt remote-oci-receipt.json
           oci_config_digest="$(jq -er '.oci_config_digest' local-oci-receipt.json)"
           oci_config_hex="${oci_config_digest#sha256:}"
           rm -rf remote-oci
-          docker run --rm -v "$PWD:/work" -v "$HOME/.docker:/root/.docker:ro" -w /work "$SKOPEO_IMAGE" \
-            copy --preserve-digests "docker://${IMAGE}@${OCI_MANIFEST_DIGEST}" oci:/work/remote-oci:reviewed
+          docker run --rm -v "$PWD:/work" -v "$HOME/.docker/config.json:/tmp/ghcr-auth.json:ro" -w /work "$SKOPEO_IMAGE" \
+            copy --authfile /tmp/ghcr-auth.json --preserve-digests "docker://${IMAGE}@${OCI_MANIFEST_DIGEST}" oci:/work/remote-oci:reviewed
           [[ "$(sha256sum "remote-oci/blobs/sha256/${oci_config_hex}" | awk '{print $1}')" == "$oci_config_hex" ]]
           cmp -- "reviewed-oci/blobs/sha256/${oci_config_hex}" "remote-oci/blobs/sha256/${oci_config_hex}"
           docker pull "${IMAGE}@${OCI_MANIFEST_DIGEST}" > docker-pull-by-digest.txt
@@ -198,8 +207,8 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          docker run --rm -v "$HOME/.docker:/root/.docker:ro" "$SKOPEO_IMAGE" \
-            list-tags "docker://${IMAGE}" | python scripts/sanitize_registry_tags.py \
+          docker run --rm -v "$HOME/.docker/config.json:/tmp/ghcr-auth.json:ro" "$SKOPEO_IMAGE" \
+            list-tags --authfile /tmp/ghcr-auth.json "docker://${IMAGE}" | python scripts/sanitize_registry_tags.py \
               --reviewed-revision "$REVISION" > publication-diagnostics/registry-tag-observation.json
           observation_status="$?"
           set -e
